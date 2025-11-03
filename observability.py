@@ -1,37 +1,32 @@
 """
-OpenInference observability integration for Arize Phoenix.
+OpenInference observability integration for Arize AX.
 
-This module sets up tracing for LangChain/CrewAI calls and exports telemetry to Arize.
+This module sets up tracing for CrewAI and LangChain calls and exports telemetry to Arize AX.
 """
 import os
 from typing import Optional
-from opentelemetry import trace as trace_api
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk import trace as trace_sdk
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from arize.otel import register
+from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
 
 def setup_observability(
     project_name: str = "sa-call-analyzer",
     arize_api_key: Optional[str] = None,
-    arize_space_id: Optional[str] = None,
-    phoenix_endpoint: Optional[str] = None
+    arize_space_id: Optional[str] = None
 ) -> None:
     """
-    Set up OpenInference instrumentation and export traces to Arize Phoenix.
+    Set up OpenInference instrumentation and export traces to Arize AX.
 
     Args:
         project_name: Name of the project for trace organization
         arize_api_key: Arize API key (defaults to ARIZE_API_KEY env var)
         arize_space_id: Arize space ID (defaults to ARIZE_SPACE_ID env var)
-        phoenix_endpoint: Phoenix collector endpoint (defaults to PHOENIX_COLLECTOR_ENDPOINT env var)
     """
 
     # Get credentials from environment if not provided
     api_key = arize_api_key or os.getenv("ARIZE_API_KEY")
     space_id = arize_space_id or os.getenv("ARIZE_SPACE_ID")
-    endpoint = phoenix_endpoint or os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "https://app.phoenix.arize.com")
 
     if not api_key or not space_id:
         print("⚠️  WARNING: Arize credentials not found. Observability disabled.")
@@ -39,37 +34,23 @@ def setup_observability(
         return
 
     try:
-        # Configure the OTLP exporter to send to Arize Phoenix
-        headers = {
-            "api_key": api_key,
-            "space_id": space_id,
-        }
-
-        exporter = OTLPSpanExporter(
-            endpoint=f"{endpoint}/v1/traces",
-            headers=headers,
+        # Register with Arize AX
+        tracer_provider = register(
+            space_id=space_id,
+            api_key=api_key,
+            project_name=project_name
         )
 
-        # Set up the tracer provider
-        tracer_provider = trace_sdk.TracerProvider()
-        tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
-        trace_api.set_tracer_provider(tracer_provider)
+        # Instrument CrewAI (captures agent steps, task execution)
+        CrewAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
-        # Instrument LangChain (which CrewAI uses under the hood)
-        LangChainInstrumentor().instrument(
-            tracer_provider=tracer_provider,
-            skip_dep_check=True
-        )
+        # Instrument LangChain (captures underlying LLM calls)
+        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 
         print(f"✅ OpenInference tracing enabled")
-        print(f"   📊 Sending telemetry to Arize Phoenix")
-        print(f"   🔗 View traces at: https://app.phoenix.arize.com")
+        print(f"   📊 Sending telemetry to Arize AX")
+        print(f"   🔗 View traces at: https://app.arize.com/organizations")
 
     except Exception as e:
         print(f"⚠️  WARNING: Failed to initialize observability: {e}")
         print("   Application will continue without tracing.")
-
-
-def get_tracer(name: str = "sa-call-analyzer"):
-    """Get a tracer for manual instrumentation."""
-    return trace_api.get_tracer(name)

@@ -15,7 +15,7 @@ An AI-powered call analysis tool that uses **4 specialized agents** working toge
 - 🔍 Multiple expert perspectives on every call
 - 💰 Flexible pricing: $0.25-2.50 per call depending on model choice
 - 🔌 Supports Anthropic API, LiteLLM proxy, and local models
-- 📈 **OpenInference observability** with Arize Phoenix for monitoring LLM performance
+- 📈 **OpenInference observability** with Arize AX for monitoring LLM performance
 
 ## How It Works
 
@@ -305,11 +305,12 @@ CrewAI runs **4+ LLM calls** per analysis (one per agent). Cost depends on your 
 
 📖 **See [CREWAI_GUIDE.md](CREWAI_GUIDE.md) for detailed cost breakdown**
 
-## Observability with Arize Phoenix
+## Observability with Arize AX
 
 The app includes built-in **OpenInference tracing** that automatically captures:
 
 - 🔍 All LLM calls from each agent
+- 🤖 CrewAI agent steps and task execution
 - ⏱️ Latency and performance metrics
 - 💰 Token usage and costs
 - 📊 Agent interactions and context flow
@@ -317,13 +318,12 @@ The app includes built-in **OpenInference tracing** that automatically captures:
 
 ### Setup (Optional but Recommended)
 
-1. **Sign up for Arize Phoenix** (free tier available): https://phoenix.arize.com/
+1. **Sign up for Arize** (free tier available): https://arize.com/
 
 2. **Add credentials to .env**:
    ```bash
    ARIZE_API_KEY=your_api_key_here
    ARIZE_SPACE_ID=your_space_id_here
-   PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com
    ```
 
 3. **Start the app** - tracing is automatic!
@@ -331,11 +331,19 @@ The app includes built-in **OpenInference tracing** that automatically captures:
    uv run python main.py
    ```
 
-4. **View traces** at https://app.phoenix.arize.com
-   - See all 4 agents' LLM calls
+   You'll see:
+   ```
+   ✅ OpenInference tracing enabled
+   📊 Sending telemetry to Arize AX
+   🔗 View traces at: https://app.arize.com/organizations
+   ```
+
+4. **View traces** at https://app.arize.com/organizations
+   - See all 4 agents' LLM calls and task execution
    - Debug performance issues
    - Track costs per analysis
    - Monitor quality over time
+   - Visualize agent collaboration flow
 
 If credentials aren't provided, the app runs normally without tracing.
 
@@ -343,6 +351,7 @@ If credentials aren't provided, the app runs normally without tracing.
 
 - **Backend**: FastAPI (Python)
 - **AI**: Multiple LLM options (Claude, GPT, Llama, etc.)
+- **Multi-Agent Framework**: CrewAI
 - **Frontend**: HTML/JavaScript (vanilla)
 - **API Gateway**: Direct or via LiteLLM proxy
-- **Observability**: OpenInference + Arize Phoenix
+- **Observability**: OpenInference + Arize AX

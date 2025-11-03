@@ -14,10 +14,9 @@ dependencies = [
     "crewai>=0.11.0",
     "langchain-anthropic>=0.1.0",
     "langchain-openai>=0.0.5",
+    "openinference-instrumentation-crewai>=0.1.0",
     "openinference-instrumentation-langchain>=0.1.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp>=1.20.0",
-    "arize-phoenix>=4.0.0",
+    "arize-otel>=0.1.0",
 ]
 
 [project.optional-dependencies]
