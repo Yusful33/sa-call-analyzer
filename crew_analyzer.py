@@ -33,6 +33,9 @@ class SACallAnalysisCrew:
             # Use OpenAI-compatible endpoint (LiteLLM)
             from langchain_openai import ChatOpenAI
             base_url = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+            # Ensure base_url ends with /v1 for OpenAI compatibility
+            if not base_url.endswith("/v1"):
+                base_url = f"{base_url}/v1"
             self.llm = ChatOpenAI(
                 model=model_name,
                 base_url=base_url,
