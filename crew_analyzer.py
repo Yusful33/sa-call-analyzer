@@ -405,8 +405,8 @@ class SACallAnalysisCrew:
                         "overall_score": result.overall_score,
                         "call_summary": result.call_summary[:200] + "..." if len(result.call_summary) > 200 else result.call_summary,
                         "insights_count": len(result.top_insights),
-                        "command_scores": result.command_scores.dict(),
-                        "sa_metrics": result.sa_metrics.dict(),
+                        "command_scores": result.command_scores.model_dump(),
+                        "sa_metrics": result.sa_metrics.model_dump(),
                     }),
                     "output.mime_type": "application/json",
                 })
