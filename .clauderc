@@ -1,0 +1,34 @@
+# Claude Code Project Configuration
+
+## Dependency Management
+- ✅ Use `uv` for all dependency management (NOT pip)
+- ✅ Create `pyproject.toml` with dependencies
+- ✅ Create `.python-version` file
+- ✅ Use `uv sync` to install dependencies
+- ✅ Use `uv run python <script>` to run scripts
+- ✅ Keep `requirements.txt` for backwards compatibility (optional)
+
+## Standard Python Project Structure
+```
+project/
+├── pyproject.toml      # uv dependencies
+├── .python-version     # Python version
+├── .env.example        # Environment template
+├── .gitignore          # Include .venv/, uv.lock
+├── README.md           # Updated with uv commands
+└── src/                # Source code
+```
+
+## Quick Commands
+- Install: `uv sync`
+- Run: `uv run python main.py`
+- Add package: `uv add <package>`
+- Remove package: `uv remove <package>`
+- Update all: `uv sync --upgrade`
+
+## Future Projects
+Always use uv from the start:
+1. Create pyproject.toml with project metadata
+2. Add .python-version (e.g., "3.11")
+3. Use `uv add` to add dependencies
+4. Update all docs to use uv commands
