@@ -8,6 +8,7 @@ from typing import Optional
 from arize.otel import register
 from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
+from opentelemetry import trace
 
 
 def setup_observability(
@@ -34,18 +35,30 @@ def setup_observability(
         return
 
     try:
-        # Register with Arize AX
+        # Register with Arize AX with enhanced resource attributes
         tracer_provider = register(
             space_id=space_id,
             api_key=api_key,
-            project_name=project_name
+            project_name=project_name,
+            # Add custom resource attributes for better filtering
+            resource_attributes={
+                "service.name": "sa-call-analyzer",
+                "service.version": "0.1.0",
+                "deployment.environment": os.getenv("ENVIRONMENT", "production"),
+            }
         )
 
-        # Instrument CrewAI (captures agent steps, task execution)
-        CrewAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        # Instrument CrewAI with enhanced configuration
+        CrewAIInstrumentor().instrument(
+            tracer_provider=tracer_provider,
+            skip_dep_check=True
+        )
 
-        # Instrument LangChain (captures underlying LLM calls)
-        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+        # Instrument LangChain with enhanced configuration
+        LangChainInstrumentor().instrument(
+            tracer_provider=tracer_provider,
+            skip_dep_check=True
+        )
 
         print(f"✅ OpenInference tracing enabled")
         print(f"   📊 Sending telemetry to Arize AX")
@@ -54,3 +67,8 @@ def setup_observability(
     except Exception as e:
         print(f"⚠️  WARNING: Failed to initialize observability: {e}")
         print("   Application will continue without tracing.")
+
+
+def get_tracer(name: str = "sa-call-analyzer"):
+    """Get a tracer for manual instrumentation."""
+    return trace.get_tracer(name)
