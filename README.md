@@ -15,6 +15,7 @@ An AI-powered call analysis tool that uses **4 specialized agents** working toge
 - 🔍 Multiple expert perspectives on every call
 - 💰 Flexible pricing: $0.25-2.50 per call depending on model choice
 - 🔌 Supports Anthropic API, LiteLLM proxy, and local models
+- 📈 **OpenInference observability** with Arize Phoenix for monitoring LLM performance
 
 ## How It Works
 
@@ -304,9 +305,44 @@ CrewAI runs **4+ LLM calls** per analysis (one per agent). Cost depends on your 
 
 📖 **See [CREWAI_GUIDE.md](CREWAI_GUIDE.md) for detailed cost breakdown**
 
+## Observability with Arize Phoenix
+
+The app includes built-in **OpenInference tracing** that automatically captures:
+
+- 🔍 All LLM calls from each agent
+- ⏱️ Latency and performance metrics
+- 💰 Token usage and costs
+- 📊 Agent interactions and context flow
+- 🐛 Errors and debugging information
+
+### Setup (Optional but Recommended)
+
+1. **Sign up for Arize Phoenix** (free tier available): https://phoenix.arize.com/
+
+2. **Add credentials to .env**:
+   ```bash
+   ARIZE_API_KEY=your_api_key_here
+   ARIZE_SPACE_ID=your_space_id_here
+   PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com
+   ```
+
+3. **Start the app** - tracing is automatic!
+   ```bash
+   uv run python main.py
+   ```
+
+4. **View traces** at https://app.phoenix.arize.com
+   - See all 4 agents' LLM calls
+   - Debug performance issues
+   - Track costs per analysis
+   - Monitor quality over time
+
+If credentials aren't provided, the app runs normally without tracing.
+
 ## Tech Stack
 
 - **Backend**: FastAPI (Python)
 - **AI**: Multiple LLM options (Claude, GPT, Llama, etc.)
 - **Frontend**: HTML/JavaScript (vanilla)
 - **API Gateway**: Direct or via LiteLLM proxy
+- **Observability**: OpenInference + Arize Phoenix

@@ -8,9 +8,13 @@ from dotenv import load_dotenv
 from models import AnalyzeRequest, AnalysisResult
 from transcript_parser import TranscriptParser
 from crew_analyzer import SACallAnalysisCrew
+from observability import setup_observability
 
 # Load environment variables
 load_dotenv()
+
+# Initialize observability (OpenInference + Arize Phoenix)
+setup_observability(project_name="sa-call-analyzer")
 
 # Initialize FastAPI app
 app = FastAPI(
