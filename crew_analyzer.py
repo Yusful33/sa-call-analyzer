@@ -163,6 +163,9 @@ class SACallAnalysisCrew:
                 "call.manual_sa_provided": manual_sa is not None,
                 "analysis.agent_count": 4,
                 "analysis.framework": "Command of the Message",
+                # OpenInference semantic conventions for input
+                "input.value": transcript[:1000] + "..." if len(transcript) > 1000 else transcript,
+                "input.mime_type": "text/plain",
             }
         ) as analysis_span:
             try:
@@ -396,6 +399,16 @@ class SACallAnalysisCrew:
                     "result.required_capabilities_score": result.command_scores.required_capabilities,
                     "result.technical_depth": result.sa_metrics.technical_depth,
                     "result.discovery_quality": result.sa_metrics.discovery_quality,
+                    # OpenInference semantic conventions for output
+                    "output.value": json.dumps({
+                        "sa_identified": sa_name,
+                        "overall_score": result.overall_score,
+                        "call_summary": result.call_summary[:200] + "..." if len(result.call_summary) > 200 else result.call_summary,
+                        "insights_count": len(result.top_insights),
+                        "command_scores": result.command_scores.dict(),
+                        "sa_metrics": result.sa_metrics.dict(),
+                    }),
+                    "output.mime_type": "application/json",
                 })
                 analysis_span.set_status(Status(StatusCode.OK))
 
