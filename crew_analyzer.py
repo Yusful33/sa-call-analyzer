@@ -381,16 +381,18 @@ class SACallAnalysisCrew:
 
                     # OpenInference input - structured and readable format
                     # Extract first few exchanges for preview
-                    transcript_lines = transcript.split('\n')[:10]  # First 10 lines
+                    all_lines = transcript.split('\n')
+                    transcript_lines = all_lines[:10]  # First 10 lines
                     transcript_preview = '\n'.join(transcript_lines)
-                    if len(transcript.split('\n')) > 10:
-                        transcript_preview += f"\n\n... ({len(transcript.split('\n')) - 10} more lines)"
+                    remaining_lines = len(all_lines) - 10
+                    if remaining_lines > 0:
+                        transcript_preview += f"\n\n... ({remaining_lines} more lines)"
 
                     crew_span.set_attribute("input.value", json.dumps({
                         "sa_name": sa_name,
                         "transcript_stats": {
                             "total_length": len(transcript),
-                            "line_count": len(transcript.split('\n')),
+                            "line_count": len(all_lines),
                             "speaker_count": len(speakers)
                         },
                         "transcript_preview": transcript_preview
