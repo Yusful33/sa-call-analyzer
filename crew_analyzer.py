@@ -11,11 +11,9 @@ from models import (
 from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from observability import force_flush_spans
 
 load_dotenv()
-
-# Get tracer for manual instrumentation
-tracer = trace.get_tracer("sa-call-analyzer")
 
 
 class SACallAnalysisCrew:
@@ -96,14 +94,18 @@ class SACallAnalysisCrew:
             goal='Evaluate discovery quality and score Command of the Message framework performance',
             backstory="""You are a world-class sales coach certified in Command of the Message framework.
 
+            IMPORTANT: Recognize that small talk and rapport building at the beginning of calls is NORMAL and VALUABLE.
+            Do not penalize SAs for spending 1-3 minutes on greetings, weather, weekend plans, or casual conversation.
+            This is an essential part of building trust and relationships with customers.
+
             You evaluate TWO key areas:
 
             1. DISCOVERY & ENGAGEMENT:
-               - Quality and depth of discovery questions
+               - Quality and depth of discovery questions (after initial rapport building)
                - Active listening skills and follow-up questions
                - Engagement with customer responses
                - Uncovering pain points and needs
-               - Building rapport and trust
+               - Building rapport and trust (including appropriate small talk)
 
             2. COMMAND OF THE MESSAGE FRAMEWORK (score each 1-10):
                - Problem Identification: Did they uncover real business problems?
@@ -153,57 +155,85 @@ class SACallAnalysisCrew:
             AnalysisResult with structured analysis
         """
 
+        # Get tracer (must be obtained after setup_observability is called)
+        tracer = trace.get_tracer("sa-call-analyzer")
+        print(f"🔍 Tracer obtained: {type(tracer).__name__}")
+
         # Create a custom span for the entire analysis workflow
         with tracer.start_as_current_span(
             "sa_call_analysis",
             attributes={
-                "call.transcript_length": len(transcript),
-                "call.speaker_count": len(speakers),
-                "call.speakers": ", ".join(speakers) if speakers else "unknown",
-                "call.manual_sa_provided": manual_sa is not None,
-                "analysis.agent_count": 4,
-                "analysis.framework": "Command of the Message",
-                # OpenInference semantic conventions for input
-                "input.value": transcript[:1000] + "..." if len(transcript) > 1000 else transcript,
+                # OpenInference semantic conventions for input - full transcript
+                "input.value": transcript,
                 "input.mime_type": "text/plain",
+                # OpenInference span kind - this is an agent workflow
+                "openinference.span.kind": "agent",
             }
         ) as analysis_span:
+            print(f"📊 Created span: {analysis_span.get_span_context().span_id if analysis_span else 'None'}")
+            result = None  # Initialize result
             try:
                 agents = self.create_agents()
 
                 # Task 1: Identify SA
-                if manual_sa:
-                    sa_name = manual_sa
-                    sa_identification_result = f"SA manually specified: {manual_sa}"
-                else:
-                    identify_sa_task = Task(
-                        description=f"""Analyze this call transcript and identify who the Solution Architect (SA) is.
+                with tracer.start_as_current_span("identify_sa") as sa_span:
+                    sa_span.set_attribute("openinference.span.kind", "agent")
+                    sa_span.set_attribute("speakers.available", ", ".join(speakers) if speakers else "none")
+                    sa_span.set_attribute("speakers.count", len(speakers))
+                    # OpenInference input
+                    sa_span.set_attribute("input.value", json.dumps({
+                        "speakers": speakers,
+                        "transcript_preview": transcript[:500] + "..." if len(transcript) > 500 else transcript,
+                        "manual_sa": manual_sa
+                    }))
+                    sa_span.set_attribute("input.mime_type", "application/json")
 
-                        Available speakers: {', '.join(speakers) if speakers else 'Unknown (no speaker labels)'}
+                    if manual_sa:
+                        sa_name = manual_sa
+                        sa_identification_result = f"SA manually specified: {manual_sa}"
+                        sa_span.set_attribute("identification.method", "manual")
+                        sa_span.add_event("manual_sa_provided", {"sa_name": manual_sa})
+                    else:
+                        sa_span.set_attribute("identification.method", "crew_analysis")
+                        identify_sa_task = Task(
+                            description=f"""Analyze this call transcript and identify who the Solution Architect (SA) is.
 
-                        Transcript:
-                        {transcript[:3000]}... (truncated if longer)
+                            Available speakers: {', '.join(speakers) if speakers else 'Unknown (no speaker labels)'}
 
-                        Provide:
-                        1. The SA's name
-                        2. Confidence level (high/medium/low)
-                        3. Brief reasoning
+                            Transcript:
+                            {transcript[:3000]}... (truncated if longer)
 
-                        Format: "SA Name: <name>, Confidence: <level>, Reasoning: <brief explanation>"
-                        """,
-                        agent=agents['sa_identifier'],
-                        expected_output="SA identification with name, confidence, and reasoning"
-                    )
+                            Provide:
+                            1. The SA's name
+                            2. Confidence level (high/medium/low)
+                            3. Brief reasoning
 
-                    # Execute SA identification
-                    sa_crew = Crew(
-                        agents=[agents['sa_identifier']],
-                        tasks=[identify_sa_task],
-                        process=Process.sequential,
-                        verbose=True
-                    )
-                    sa_identification_result = sa_crew.kickoff()
-                    sa_name = self._extract_sa_name(str(sa_identification_result))
+                            Format: "SA Name: <name>, Confidence: <level>, Reasoning: <brief explanation>"
+                            """,
+                            agent=agents['sa_identifier'],
+                            expected_output="SA identification with name, confidence, and reasoning"
+                        )
+
+                        # Execute SA identification
+                        sa_span.add_event("starting_sa_crew")
+                        sa_crew = Crew(
+                            agents=[agents['sa_identifier']],
+                            tasks=[identify_sa_task],
+                            process=Process.sequential,
+                            verbose=True
+                        )
+                        sa_identification_result = sa_crew.kickoff()
+                        sa_name = self._extract_sa_name(str(sa_identification_result))
+                        sa_span.add_event("sa_crew_completed")
+
+                    sa_span.set_attribute("sa.identified_name", sa_name)
+                    # OpenInference output
+                    sa_span.set_attribute("output.value", json.dumps({
+                        "sa_name": sa_name,
+                        "method": "manual" if manual_sa else "crew_analysis"
+                    }))
+                    sa_span.set_attribute("output.mime_type", "application/json")
+                    sa_span.set_status(Status(StatusCode.OK))
 
                 # Add SA identification to span
                 analysis_span.add_event("sa_identified", {"sa_name": sa_name})
@@ -215,12 +245,24 @@ class SACallAnalysisCrew:
                     Transcript:
                     {transcript}
 
-                    Evaluate and score (1-10):
+                    Evaluate:
                     - Technical depth and accuracy
                     - Architecture/integration discussions
                     - Demo quality
 
-                    Provide specific examples with timestamps where possible.
+                    CRITICAL REQUIREMENT - EXACT TIMESTAMPS:
+                    For EVERY finding, you MUST provide the EXACT timestamp from the transcript where this occurred.
+
+                    Steps to extract timestamps:
+                    1. Search the transcript for the exact quote or moment being referenced
+                    2. Find the timestamp marker immediately before that quote (format: [HH:MM:SS], [MM:SS], or "0:16 |")
+                    3. Include that exact timestamp in your analysis (e.g., "[05:23]", "[0:16]", "[15:30]")
+                    4. If the transcript has NO timestamps at all, estimate based on position: "[~2:00]" for early, "[~10:00]" for mid-call, "[~20:00]" for late
+
+                    DO NOT use vague descriptions like "Early in call" or "Mid-call".
+                    ALWAYS provide a specific time reference in [MM:SS] or [HH:MM:SS] format.
+
+                    Provide specific examples with timestamps.
                     Format as JSON with scores and detailed feedback.
                     """,
                     agent=agents['technical_evaluator'],
@@ -233,25 +275,42 @@ class SACallAnalysisCrew:
                     Transcript:
                     {transcript}
 
+                    IMPORTANT CONTEXT: Small talk and rapport building at the start of calls (1-3 minutes) is EXPECTED and VALUABLE.
+                    Do NOT penalize the SA for casual conversation, greetings, or relationship building at the beginning.
+                    Focus your evaluation on the discovery and sales methodology AFTER the initial rapport phase.
+
                     Evaluate TWO areas:
 
-                    1. DISCOVERY & ENGAGEMENT (score 1-10):
-                       - Discovery question quality
+                    1. DISCOVERY & ENGAGEMENT:
+                       - Discovery question quality (after initial small talk)
                        - Active listening
                        - Engagement with customer
+                       - Rapport building (including appropriate small talk)
                        Identify missed opportunities and suggest better questions.
 
-                    2. COMMAND OF THE MESSAGE FRAMEWORK (score each pillar 1-10):
+                    2. COMMAND OF THE MESSAGE FRAMEWORK:
                        - Problem Identification: Uncovering business problems
                        - Differentiation: Unique value vs competitors
                        - Proof/Evidence: Case studies, metrics, demos
                        - Required Capabilities: Features tied to business outcomes
 
-                    Provide scores and specific examples with timestamps for both areas.
-                    Format as JSON with all scores and detailed recommendations.
+                    CRITICAL REQUIREMENT - EXACT TIMESTAMPS:
+                    For EVERY finding, you MUST provide the EXACT timestamp from the transcript where this occurred.
+
+                    Steps to extract timestamps:
+                    1. Search the transcript for the exact quote or moment being referenced
+                    2. Find the timestamp marker immediately before that quote (format: [HH:MM:SS], [MM:SS], or "0:16 |")
+                    3. Include that exact timestamp in your analysis (e.g., "[05:23]", "[0:16]", "[15:30]")
+                    4. If the transcript has NO timestamps at all, estimate based on position: "[~2:00]" for early, "[~10:00]" for mid-call, "[~20:00]" for late
+
+                    DO NOT use vague descriptions like "Early in call" or "Mid-call".
+                    ALWAYS provide a specific time reference in [MM:SS] or [HH:MM:SS] format.
+
+                    Provide specific examples with timestamps for both areas.
+                    Format as JSON with detailed qualitative feedback and recommendations.
                     """,
                     agent=agents['sales_methodology_expert'],
-                    expected_output="Sales methodology and discovery evaluation with Command of Message scores"
+                    expected_output="Sales methodology and discovery evaluation with qualitative Command of Message feedback"
                 )
 
                 # Task 4: Compile report (depends on all previous tasks)
@@ -261,41 +320,51 @@ class SACallAnalysisCrew:
                     Based on all the analysis from technical and sales methodology experts,
                     create a final report with:
 
-                    1. Overall score (1-10)
-                    2. All individual scores from each expert
-                    3. Top 3-5 actionable insights with:
+                    1. Top 3-5 actionable insights with:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
-                       - Timestamp (if available)
+                       - Timestamp (REQUIRED - MUST be included for EVERY insight. Extract from the expert analysis or transcript.)
                        - What happened
                        - Why it matters
                        - Better approach
                        - Example phrasing
-                    4. List of strengths (2-3 items)
-                    5. List of improvement areas (2-3 items)
-                    6. Key moments with timestamps
+                    2. List of strengths (2-3 items)
+                    3. List of improvement areas (2-3 items)
+                    4. Key moments with timestamps
+
+                    CRITICAL TIMESTAMP REQUIREMENT:
+                    EVERY insight in "top_insights" MUST have an EXACT timestamp in [MM:SS] or [HH:MM:SS] format.
+
+                    Extract exact timestamps from the expert analyses (they have already identified specific moments).
+                    Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
+                    Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
+
+                    If an expert provided a vague description, YOU must convert it to a specific time estimate.
+                    DO NOT leave timestamp as null, empty, or use descriptive text.
 
                     Make it specific and actionable. Focus on high-impact improvements.
                     Return as valid JSON that matches this structure:
                     {{
                         "call_summary": "2-3 sentence summary",
-                        "overall_score": 7.5,
-                        "command_scores": {{
-                            "problem_identification": 8,
-                            "differentiation": 6,
-                            "proof_evidence": 7,
-                            "required_capabilities": 5
-                        }},
-                        "sa_metrics": {{
-                            "technical_depth": 8,
-                            "discovery_quality": 7,
-                            "active_listening": 9,
-                            "value_articulation": 5
-                        }},
-                        "top_insights": [...],
+                        "top_insights": [
+                            {{
+                                "category": "Discovery Depth",
+                                "severity": "critical",
+                                "timestamp": "[05:23]",
+                                "what_happened": "Brief description",
+                                "why_it_matters": "Business impact",
+                                "better_approach": "What to do differently",
+                                "example_phrasing": "Exact words to use"
+                            }}
+                        ],
                         "strengths": [...],
                         "improvement_areas": [...],
-                        "key_moments": [...]
+                        "key_moments": [
+                            {{
+                                "timestamp": "[12:45]",
+                                "description": "Key moment description"
+                            }}
+                        ]
                     }}
                     """,
                     agent=agents['report_compiler'],
@@ -304,120 +373,263 @@ class SACallAnalysisCrew:
                 )
 
                 # Create and run the analysis crew
-                analysis_crew = Crew(
-                    agents=[
-                        agents['technical_evaluator'],
-                        agents['sales_methodology_expert'],
-                        agents['report_compiler']
-                    ],
-                    tasks=[
-                        technical_task,
-                        sales_methodology_task,
-                        compile_task
-                    ],
-                    process=Process.sequential,
-                    verbose=True
-                )
+                with tracer.start_as_current_span("crew_analysis_execution") as crew_span:
+                    crew_span.set_attribute("openinference.span.kind", "agent")
+                    crew_span.set_attribute("crew.agent_count", 3)
+                    crew_span.set_attribute("crew.task_count", 3)
+                    crew_span.set_attribute("crew.sa_name", sa_name)
 
-                # Execute the crew
-                final_report = analysis_crew.kickoff()
-                final_report_text = str(final_report)
+                    # OpenInference input - structured and readable format
+                    # Extract first few exchanges for preview
+                    transcript_lines = transcript.split('\n')[:10]  # First 10 lines
+                    transcript_preview = '\n'.join(transcript_lines)
+                    if len(transcript.split('\n')) > 10:
+                        transcript_preview += f"\n\n... ({len(transcript.split('\n')) - 10} more lines)"
+
+                    crew_span.set_attribute("input.value", json.dumps({
+                        "sa_name": sa_name,
+                        "transcript_stats": {
+                            "total_length": len(transcript),
+                            "line_count": len(transcript.split('\n')),
+                            "speaker_count": len(speakers)
+                        },
+                        "transcript_preview": transcript_preview
+                    }, indent=2))
+                    crew_span.set_attribute("input.mime_type", "application/json")
+
+                    # Add detailed task information as events
+                    crew_span.add_event("task_1_technical_evaluation", {
+                        "agent": "Senior Technical Architect & Evaluator",
+                        "objective": "Assess technical depth and accuracy"
+                    })
+                    crew_span.add_event("task_2_sales_methodology", {
+                        "agent": "Sales Methodology & Discovery Expert",
+                        "objective": "Evaluate discovery and Command of Message"
+                    })
+                    crew_span.add_event("task_3_report_compilation", {
+                        "agent": "Executive Performance Coach & Report Writer",
+                        "objective": "Synthesize feedback into actionable report"
+                    })
+
+                    crew_span.add_event("creating_analysis_crew")
+
+                    analysis_crew = Crew(
+                        agents=[
+                            agents['technical_evaluator'],
+                            agents['sales_methodology_expert'],
+                            agents['report_compiler']
+                        ],
+                        tasks=[
+                            technical_task,
+                            sales_methodology_task,
+                            compile_task
+                        ],
+                        process=Process.sequential,
+                        verbose=True
+                    )
+
+                    # Execute the crew with detailed progress tracking
+                    crew_span.add_event("starting_crew_kickoff")
+                    crew_span.set_attribute("execution.status", "in_progress")
+
+                    final_report = analysis_crew.kickoff()
+                    final_report_text = str(final_report)
+
+                    crew_span.add_event("crew_kickoff_completed", {
+                        "report.length": len(final_report_text),
+                        "tasks_completed": 3
+                    })
+                    crew_span.set_attribute("execution.status", "completed")
+
+                    # OpenInference output - formatted structured report
+                    # Create a summary-first format for better readability
+                    try:
+                        # Try to parse the report as JSON for structured output
+                        json_start = final_report_text.find('{')
+                        json_end = final_report_text.rfind('}') + 1
+                        if json_start >= 0 and json_end > json_start:
+                            parsed_report = json.loads(final_report_text[json_start:json_end])
+
+                            # Create a readable summary format
+                            formatted_output = {
+                                "summary": {
+                                    "call_summary": parsed_report.get("call_summary", "N/A"),
+                                    "sa_identified": sa_name,
+                                    "insight_count": len(parsed_report.get("top_insights", [])),
+                                    "strength_count": len(parsed_report.get("strengths", [])),
+                                    "improvement_count": len(parsed_report.get("improvement_areas", []))
+                                },
+                                "top_insights": [
+                                    {
+                                        "category": insight.get("category"),
+                                        "severity": insight.get("severity"),
+                                        "timestamp": insight.get("timestamp"),
+                                        "what_happened": insight.get("what_happened", "")[:200] + "..." if len(insight.get("what_happened", "")) > 200 else insight.get("what_happened", ""),
+                                        "why_it_matters": insight.get("why_it_matters", "")[:200] + "..." if len(insight.get("why_it_matters", "")) > 200 else insight.get("why_it_matters", ""),
+                                        "better_approach": insight.get("better_approach", "")[:200] + "..." if len(insight.get("better_approach", "")) > 200 else insight.get("better_approach", ""),
+                                    }
+                                    for insight in parsed_report.get("top_insights", [])
+                                ],
+                                "strengths": parsed_report.get("strengths", []),
+                                "improvement_areas": parsed_report.get("improvement_areas", []),
+                                "key_moments_count": len(parsed_report.get("key_moments", []))
+                            }
+
+                            crew_span.set_attribute("output.value", json.dumps(formatted_output, indent=2))
+                        else:
+                            # Fallback to raw text if JSON parsing fails
+                            crew_span.set_attribute("output.value", final_report_text[:5000] + "..." if len(final_report_text) > 5000 else final_report_text)
+                    except (json.JSONDecodeError, Exception):
+                        # If parsing fails, use truncated raw text
+                        crew_span.set_attribute("output.value", final_report_text[:5000] + "..." if len(final_report_text) > 5000 else final_report_text)
+
+                    crew_span.set_attribute("output.mime_type", "application/json")
+                    crew_span.set_status(Status(StatusCode.OK))
 
                 # Parse JSON from the final report
-                try:
-                    # Extract JSON from the report (might have markdown code blocks)
-                    json_start = final_report_text.find('{')
-                    json_end = final_report_text.rfind('}') + 1
+                with tracer.start_as_current_span("parse_crew_report") as parse_span:
+                    parse_span.set_attribute("openinference.span.kind", "chain")
+                    parse_span.set_attribute("report.raw_length", len(final_report_text))
+                    # OpenInference input - raw crew report text
+                    parse_span.set_attribute("input.value", final_report_text)
+                    parse_span.set_attribute("input.mime_type", "text/plain")
 
-                    if json_start >= 0 and json_end > json_start:
-                        json_str = final_report_text[json_start:json_end]
-                        analysis_data = json.loads(json_str)
-                    else:
-                        raise ValueError("No JSON found in report")
+                    try:
+                        # Extract JSON from the report (might have markdown code blocks)
+                        json_start = final_report_text.find('{')
+                        json_end = final_report_text.rfind('}') + 1
 
-                except (json.JSONDecodeError, ValueError) as e:
-                    print(f"Warning: Could not parse JSON from crew report: {e}")
-                    # Fallback to default structure
-                    analysis_data = {
-                        "call_summary": f"Analysis completed by CrewAI for {sa_name}. See raw output for details.",
-                        "overall_score": 7.0,
-                        "command_scores": {
-                            "problem_identification": 7.0,
-                            "differentiation": 7.0,
-                            "proof_evidence": 7.0,
-                            "required_capabilities": 7.0
-                        },
-                        "sa_metrics": {
-                            "technical_depth": 7.0,
-                            "discovery_quality": 7.0,
-                            "active_listening": 7.0,
-                            "value_articulation": 7.0
-                        },
-                        "top_insights": [{
-                            "category": "General",
-                            "severity": "important",
-                            "timestamp": None,
-                            "what_happened": "Multi-agent analysis completed",
-                            "why_it_matters": "Comprehensive evaluation from multiple expert perspectives",
-                            "better_approach": "Review the detailed crew output for specific recommendations",
-                            "example_phrasing": None
-                        }],
-                        "strengths": ["Multi-agent analysis completed successfully"],
-                        "improvement_areas": ["See detailed crew output for specific areas"],
-                        "key_moments": []
-                    }
+                        if json_start >= 0 and json_end > json_start:
+                            json_str = final_report_text[json_start:json_end]
+                            analysis_data = json.loads(json_str)
+                            parse_span.add_event("json_parsed_successfully")
+                            parse_span.set_attribute("parsing.success", True)
+                        else:
+                            raise ValueError("No JSON found in report")
 
-                # Convert to Pydantic models
-                result = AnalysisResult(
-                    sa_identified=sa_name,
-                    sa_confidence="high",  # Crew consensus
-                    call_summary=analysis_data.get("call_summary", ""),
-                    overall_score=float(analysis_data.get("overall_score", 7.0)),
-                    command_scores=CommandOfMessageScore(
-                        **{k: float(v) for k, v in analysis_data.get("command_scores", {}).items()}
-                    ),
-                    sa_metrics=SAPerformanceMetrics(
-                        **{k: float(v) for k, v in analysis_data.get("sa_metrics", {}).items()}
-                    ),
-                    top_insights=[
-                        ActionableInsight(**insight)
-                        for insight in analysis_data.get("top_insights", [])
-                    ],
-                    strengths=analysis_data.get("strengths", []),
-                    improvement_areas=analysis_data.get("improvement_areas", []),
-                    key_moments=analysis_data.get("key_moments", [])
-                )
+                    except (json.JSONDecodeError, ValueError) as e:
+                        print(f"Warning: Could not parse JSON from crew report: {e}")
+                        parse_span.add_event("json_parse_failed", {"error": str(e)})
+                        parse_span.set_attribute("parsing.success", False)
+                        parse_span.set_attribute("parsing.fallback", True)
 
-                # Add result metadata to span
+                        # Fallback to default structure
+                        analysis_data = {
+                            "call_summary": f"Analysis completed by CrewAI for {sa_name}. See raw output for details.",
+                            "overall_score": 7.0,
+                            "command_scores": {
+                                "problem_identification": 7.0,
+                                "differentiation": 7.0,
+                                "proof_evidence": 7.0,
+                                "required_capabilities": 7.0
+                            },
+                            "sa_metrics": {
+                                "technical_depth": 7.0,
+                                "discovery_quality": 7.0,
+                                "active_listening": 7.0,
+                                "value_articulation": 7.0
+                            },
+                            "top_insights": [{
+                                "category": "General",
+                                "severity": "important",
+                                "timestamp": "[~0:00]",
+                                "what_happened": "Multi-agent analysis completed",
+                                "why_it_matters": "Comprehensive evaluation from multiple expert perspectives",
+                                "better_approach": "Review the detailed crew output for specific recommendations",
+                                "example_phrasing": None
+                            }],
+                            "strengths": ["Multi-agent analysis completed successfully"],
+                            "improvement_areas": ["See detailed crew output for specific areas"],
+                            "key_moments": []
+                        }
+
+                    # Helper function to safely convert to float
+                    def safe_float(value, default=7.0):
+                        """Convert value to float, return default if None or invalid."""
+                        if value is None:
+                            return default
+                        try:
+                            return float(value)
+                        except (ValueError, TypeError):
+                            return default
+
+                    # Convert to Pydantic models
+                    parse_span.add_event("constructing_pydantic_models")
+                    result = AnalysisResult(
+                        sa_identified=sa_name,
+                        sa_confidence="high",  # Crew consensus
+                        call_summary=analysis_data.get("call_summary", ""),
+                        overall_score=safe_float(analysis_data.get("overall_score")),
+                        command_scores=CommandOfMessageScore(
+                            **{k: safe_float(v) for k, v in analysis_data.get("command_scores", {}).items()}
+                        ),
+                        sa_metrics=SAPerformanceMetrics(
+                            **{k: safe_float(v) for k, v in analysis_data.get("sa_metrics", {}).items()}
+                        ),
+                        top_insights=[
+                            ActionableInsight(**insight)
+                            for insight in analysis_data.get("top_insights", [])
+                        ],
+                        strengths=analysis_data.get("strengths", []),
+                        improvement_areas=analysis_data.get("improvement_areas", []),
+                        key_moments=analysis_data.get("key_moments", [])
+                    )
+
+                    # Add metadata about the parsed results
+                    parse_span.set_attribute("analysis.insight_count", len(result.top_insights))
+                    parse_span.set_attribute("analysis.strength_count", len(result.strengths))
+                    parse_span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
+                    parse_span.set_attribute("analysis.key_moment_count", len(result.key_moments))
+                    # OpenInference output - parsed and structured analysis result
+                    parse_span.set_attribute("output.value", json.dumps({
+                        "sa_identified": result.sa_identified,
+                        "sa_confidence": result.sa_confidence,
+                        "call_summary": result.call_summary,
+                        "insight_count": len(result.top_insights),
+                        "strength_count": len(result.strengths),
+                        "improvement_count": len(result.improvement_areas)
+                    }))
+                    parse_span.set_attribute("output.mime_type", "application/json")
+                    parse_span.set_status(Status(StatusCode.OK))
+
+                # Add result metadata to span - full detailed analysis output
                 analysis_span.set_attributes({
-                    "result.sa_identified": sa_name,
-                    "result.overall_score": result.overall_score,
-                    "result.insights_count": len(result.top_insights),
-                    "result.problem_identification_score": result.command_scores.problem_identification,
-                    "result.differentiation_score": result.command_scores.differentiation,
-                    "result.proof_evidence_score": result.command_scores.proof_evidence,
-                    "result.required_capabilities_score": result.command_scores.required_capabilities,
-                    "result.technical_depth": result.sa_metrics.technical_depth,
-                    "result.discovery_quality": result.sa_metrics.discovery_quality,
-                    # OpenInference semantic conventions for output
+                    # OpenInference semantic conventions for output - complete analysis
                     "output.value": json.dumps({
                         "sa_identified": sa_name,
+                        "call_summary": result.call_summary,
                         "overall_score": result.overall_score,
-                        "call_summary": result.call_summary[:200] + "..." if len(result.call_summary) > 200 else result.call_summary,
-                        "insights_count": len(result.top_insights),
                         "command_scores": result.command_scores.model_dump(),
                         "sa_metrics": result.sa_metrics.model_dump(),
-                    }),
+                        "top_insights": [
+                            {
+                                "category": insight.category,
+                                "severity": insight.severity,
+                                "timestamp": insight.timestamp,
+                                "what_happened": insight.what_happened,
+                                "why_it_matters": insight.why_it_matters,
+                                "better_approach": insight.better_approach,
+                                "example_phrasing": insight.example_phrasing,
+                            }
+                            for insight in result.top_insights
+                        ],
+                        "strengths": result.strengths,
+                        "improvement_areas": result.improvement_areas,
+                        "key_moments": result.key_moments,
+                    }, indent=2),
                     "output.mime_type": "application/json",
                 })
                 analysis_span.set_status(Status(StatusCode.OK))
-
-                return result
 
             except Exception as e:
                 analysis_span.set_status(Status(StatusCode.ERROR, str(e)))
                 analysis_span.record_exception(e)
                 raise
+
+        # Force flush spans to ensure they're sent to Arize immediately
+        force_flush_spans()
+
+        return result
 
     def _extract_sa_name(self, identification_result: str) -> str:
         """Extract SA name from identification result"""

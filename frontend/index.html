@@ -291,6 +291,41 @@
             font-size: 0.9em;
             margin-top: 5px;
         }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: #666;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -301,11 +336,31 @@
         </div>
 
         <div class="card">
-            <div class="input-section">
-                <label for="transcript">Call Transcript</label>
-                <textarea
-                    id="transcript"
-                    placeholder="Paste your call transcript here...
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('gong')">🔗 Gong URL</button>
+                <button class="tab" onclick="switchTab('manual')">📝 Manual Transcript</button>
+            </div>
+
+            <div id="gong-tab" class="tab-content active">
+                <div class="input-section">
+                    <label for="gongUrl">Gong Call URL</label>
+                    <input
+                        type="text"
+                        id="gongUrl"
+                        placeholder="https://app.gong.io/call?id=YOUR_CALL_ID"
+                    >
+                    <p class="help-text">
+                        🚀 Paste a Gong call URL and we'll automatically fetch and analyze the transcript.
+                    </p>
+                </div>
+            </div>
+
+            <div id="manual-tab" class="tab-content">
+                <div class="input-section">
+                    <label for="transcript">Call Transcript</label>
+                    <textarea
+                        id="transcript"
+                        placeholder="Paste your call transcript here...
 
 Example format with labels:
 0:16 | Hakan
@@ -319,10 +374,11 @@ Yeah, they're so wealthy.
 Yeah.
 
 The tool will auto-detect the format and identify the SA."
-                ></textarea>
-                <p class="help-text">
-                    Paste your transcript with or without speaker labels. The AI will analyze it automatically.
-                </p>
+                    ></textarea>
+                    <p class="help-text">
+                        Paste your transcript with or without speaker labels. The AI will analyze it automatically.
+                    </p>
+                </div>
             </div>
 
             <div class="input-section">
@@ -359,14 +415,35 @@ The tool will auto-detect the format and identify the SA."
     </div>
 
     <script>
+        let currentTab = 'gong';
+
+        function switchTab(tab) {
+            currentTab = tab;
+
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update tab content
+            document.getElementById('gong-tab').classList.toggle('active', tab === 'gong');
+            document.getElementById('manual-tab').classList.toggle('active', tab === 'manual');
+        }
+
         async function analyzeTranscript() {
+            const gongUrl = document.getElementById('gongUrl').value;
             const transcript = document.getElementById('transcript').value;
             const saName = document.getElementById('saName').value;
             const analyzeBtn = document.getElementById('analyzeBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
 
-            if (!transcript.trim()) {
+            // Validate input based on current tab
+            if (currentTab === 'gong' && !gongUrl.trim()) {
+                alert('Please paste a Gong URL first');
+                return;
+            }
+
+            if (currentTab === 'manual' && !transcript.trim()) {
                 alert('Please paste a transcript first');
                 return;
             }
@@ -376,16 +453,24 @@ The tool will auto-detect the format and identify the SA."
             loading.style.display = 'block';
             results.classList.remove('show');
 
+            // Build request body based on current tab
+            const requestBody = {
+                sa_name: saName || null
+            };
+
+            if (currentTab === 'gong') {
+                requestBody.gong_url = gongUrl;
+            } else {
+                requestBody.transcript = transcript;
+            }
+
             try {
                 const response = await fetch('/api/analyze', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        transcript: transcript,
-                        sa_name: saName || null
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!response.ok) {
@@ -446,29 +531,6 @@ The tool will auto-detect the format and identify the SA."
                 </div>
 
                 <h2>${data.call_summary}</h2>
-
-                <div class="score-grid">
-                    <div class="score-card">
-                        <div class="score-label">Overall Score</div>
-                        <div class="score-value">${data.overall_score}/10</div>
-                    </div>
-                    <div class="score-card">
-                        <div class="score-label">Problem ID</div>
-                        <div class="score-value">${data.command_scores.problem_identification}/10</div>
-                    </div>
-                    <div class="score-card">
-                        <div class="score-label">Differentiation</div>
-                        <div class="score-value">${data.command_scores.differentiation}/10</div>
-                    </div>
-                    <div class="score-card">
-                        <div class="score-label">Proof/Evidence</div>
-                        <div class="score-value">${data.command_scores.proof_evidence}/10</div>
-                    </div>
-                    <div class="score-card">
-                        <div class="score-label">Required Capabilities</div>
-                        <div class="score-value">${data.command_scores.required_capabilities}/10</div>
-                    </div>
-                </div>
 
                 <h3 class="section-title">Top Actionable Insights</h3>
                 ${insightsHtml}

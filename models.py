@@ -11,8 +11,16 @@ class TranscriptLine(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     """Request to analyze a transcript"""
-    transcript: str
+    transcript: Optional[str] = None  # Manual transcript text
+    gong_url: Optional[str] = None  # Gong call URL (alternative to transcript)
     sa_name: Optional[str] = None  # Manual override for SA identification
+
+    def model_post_init(self, __context):
+        """Validate that either transcript or gong_url is provided."""
+        if not self.transcript and not self.gong_url:
+            raise ValueError("Either 'transcript' or 'gong_url' must be provided")
+        if self.transcript and self.gong_url:
+            raise ValueError("Provide either 'transcript' or 'gong_url', not both")
 
 
 class ActionableInsight(BaseModel):
@@ -27,19 +35,19 @@ class ActionableInsight(BaseModel):
 
 
 class CommandOfMessageScore(BaseModel):
-    """Scoring for Command of the Message framework"""
-    problem_identification: float  # 1-10 (can be decimal like 6.5)
-    differentiation: float  # 1-10 (can be decimal like 6.5)
-    proof_evidence: float  # 1-10 (can be decimal like 6.5)
-    required_capabilities: float  # 1-10 (can be decimal like 6.5)
+    """Scoring for Command of the Message framework (optional fields)"""
+    problem_identification: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    differentiation: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    proof_evidence: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    required_capabilities: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
 
 
 class SAPerformanceMetrics(BaseModel):
-    """Additional SA-specific metrics"""
-    technical_depth: float  # 1-10 (can be decimal like 6.5)
-    discovery_quality: float  # 1-10 (can be decimal like 6.5)
-    active_listening: float  # 1-10 (can be decimal like 6.5)
-    value_articulation: float  # 1-10 (can be decimal like 6.5)
+    """Additional SA-specific metrics (optional fields)"""
+    technical_depth: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    discovery_quality: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    active_listening: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
+    value_articulation: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
 
 
 class AnalysisResult(BaseModel):
@@ -47,7 +55,7 @@ class AnalysisResult(BaseModel):
     sa_identified: str  # Who we identified as the SA
     sa_confidence: str  # "high", "medium", "low"
     call_summary: str
-    overall_score: float  # 1-10
+    overall_score: Optional[float] = 7.0  # 1-10 (optional, defaults to 7.0)
     command_scores: CommandOfMessageScore
     sa_metrics: SAPerformanceMetrics
     top_insights: List[ActionableInsight]
