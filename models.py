@@ -28,6 +28,7 @@ class ActionableInsight(BaseModel):
     category: str  # e.g., "Problem Identification", "Differentiation", etc.
     severity: str  # "critical", "important", "minor"
     timestamp: Optional[str] = None
+    conversation_snippet: Optional[str] = None  # Brief excerpt from the actual conversation
     what_happened: str  # What the SA did/said
     why_it_matters: str  # Business impact
     better_approach: str  # Specific alternative

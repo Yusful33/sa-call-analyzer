@@ -3,12 +3,13 @@ import json
 from dotenv import load_dotenv
 
 # Load environment variables FIRST
-load_dotenv()
+# override=True ensures .env file takes precedence over system env vars
+load_dotenv(override=True)
 
 # Initialize observability BEFORE importing CrewAI
 # This ensures our Arize TracerProvider is set up before CrewAI tries to set up its own
 from observability import setup_observability
-setup_observability(project_name="sa-call-analyzer")
+tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
 # Now import everything else (including CrewAI)
 from fastapi import FastAPI, HTTPException
@@ -39,6 +40,15 @@ app.add_middleware(
 
 # Initialize tracer for main API
 tracer = trace.get_tracer("sa-call-analyzer-api")
+
+# Verify tracer provider is still ours after CrewAI import
+current_provider = trace.get_tracer_provider()
+print(f"🔍 Tracer provider after imports: {type(current_provider).__name__}")
+if tracer_provider:
+    if current_provider == tracer_provider:
+        print("   ✅ Arize tracer provider is still active")
+    else:
+        print(f"   ⚠️  WARNING: Tracer provider was overridden! Expected {type(tracer_provider).__name__}, got {type(current_provider).__name__}")
 
 # Initialize the CrewAI analyzer
 analyzer = SACallAnalysisCrew()
@@ -203,6 +213,7 @@ async def analyze_transcript(request: AnalyzeRequest):
                         "category": insight.category,
                         "severity": insight.severity,
                         "timestamp": insight.timestamp,
+                        "conversation_snippet": insight.conversation_snippet,
                         "what_happened": insight.what_happened,
                         "why_it_matters": insight.why_it_matters,
                         "better_approach": insight.better_approach

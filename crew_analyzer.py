@@ -195,13 +195,34 @@ class SACallAnalysisCrew:
                         sa_span.add_event("manual_sa_provided", {"sa_name": manual_sa})
                     else:
                         sa_span.set_attribute("identification.method", "crew_analysis")
+                        # Give SA identifier a better sample: first 2000 chars + middle 2000 chars + last 1000 chars
+                        transcript_len = len(transcript)
+                        if transcript_len <= 5000:
+                            transcript_sample = transcript
+                        else:
+                            # Sample from beginning, middle, and end
+                            beginning = transcript[:2000]
+                            middle_start = transcript_len // 2 - 1000
+                            middle = transcript[middle_start:middle_start + 2000]
+                            end = transcript[-1000:]
+                            transcript_sample = f"{beginning}\n\n... [middle section] ...\n\n{middle}\n\n... [later section] ...\n\n{end}"
+
                         identify_sa_task = Task(
                             description=f"""Analyze this call transcript and identify who the Solution Architect (SA) is.
 
                             Available speakers: {', '.join(speakers) if speakers else 'Unknown (no speaker labels)'}
 
-                            Transcript:
-                            {transcript[:3000]}... (truncated if longer)
+                            Transcript sample (includes beginning, middle, and end of call):
+                            {transcript_sample}
+
+                            The Solution Architect is typically the person who:
+                            - Discusses technical architecture and implementation
+                            - Explains product features and capabilities
+                            - Answers technical questions
+                            - Conducts demos or technical walkthroughs
+                            - Discusses integration and data architecture
+
+                            NOTE: Initial small talk and pleasantries are normal - look beyond that for technical content.
 
                             Provide:
                             1. The SA's name
@@ -224,7 +245,12 @@ class SACallAnalysisCrew:
                         )
                         sa_identification_result = sa_crew.kickoff()
                         sa_name = self._extract_sa_name(str(sa_identification_result))
-                        sa_span.add_event("sa_crew_completed")
+                        print(f"🔍 SA Identification Result: {sa_identification_result}")
+                        print(f"✅ Extracted SA Name: {sa_name}")
+                        sa_span.add_event("sa_crew_completed", {
+                            "raw_result": str(sa_identification_result)[:200],
+                            "extracted_name": sa_name
+                        })
 
                     sa_span.set_attribute("sa.identified_name", sa_name)
                     # OpenInference output
@@ -324,10 +350,14 @@ class SACallAnalysisCrew:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
                        - Timestamp (REQUIRED - MUST be included for EVERY insight. Extract from the expert analysis or transcript.)
+                       - Conversation snippet (REQUIRED - Include a brief 2-3 line excerpt from the actual transcript showing the moment this occurred. Use the exact words from the transcript.)
                        - What happened
                        - Why it matters
                        - Better approach
                        - Example phrasing
+
+                    CRITICAL: Sort all insights in CHRONOLOGICAL ORDER by timestamp (earliest first).
+                    This allows readers to follow the call from beginning to end.
                     2. List of strengths (2-3 items)
                     3. List of improvement areas (2-3 items)
                     4. Key moments with timestamps
@@ -351,6 +381,7 @@ class SACallAnalysisCrew:
                                 "category": "Discovery Depth",
                                 "severity": "critical",
                                 "timestamp": "[05:23]",
+                                "conversation_snippet": "Customer: 'We have data quality issues.'\nSA: 'Okay, let me show you our validation features.'\nCustomer: 'Actually, the bigger problem is...'",
                                 "what_happened": "Brief description",
                                 "why_it_matters": "Business impact",
                                 "better_approach": "What to do differently",
@@ -366,6 +397,10 @@ class SACallAnalysisCrew:
                             }}
                         ]
                     }}
+
+                    REMEMBER:
+                    - Sort insights chronologically (earliest timestamp first)
+                    - Include actual conversation snippets from the transcript for each insight
                     """,
                     agent=agents['report_compiler'],
                     expected_output="Complete JSON analysis report",
@@ -510,10 +545,16 @@ class SACallAnalysisCrew:
                             raise ValueError("No JSON found in report")
 
                     except (json.JSONDecodeError, ValueError) as e:
-                        print(f"Warning: Could not parse JSON from crew report: {e}")
-                        parse_span.add_event("json_parse_failed", {"error": str(e)})
+                        print(f"⚠️  WARNING: Could not parse JSON from crew report: {e}")
+                        print(f"📄 Raw report (first 1000 chars):\n{final_report_text[:1000]}")
+                        print(f"📄 Raw report (last 500 chars):\n{final_report_text[-500:]}")
+                        parse_span.add_event("json_parse_failed", {
+                            "error": str(e),
+                            "report_preview": final_report_text[:500]
+                        })
                         parse_span.set_attribute("parsing.success", False)
                         parse_span.set_attribute("parsing.fallback", True)
+                        parse_span.set_attribute("error.message", str(e))
 
                         # Fallback to default structure
                         analysis_data = {
@@ -535,6 +576,7 @@ class SACallAnalysisCrew:
                                 "category": "General",
                                 "severity": "important",
                                 "timestamp": "[~0:00]",
+                                "conversation_snippet": None,
                                 "what_happened": "Multi-agent analysis completed",
                                 "why_it_matters": "Comprehensive evaluation from multiple expert perspectives",
                                 "better_approach": "Review the detailed crew output for specific recommendations",
@@ -557,6 +599,37 @@ class SACallAnalysisCrew:
 
                     # Convert to Pydantic models
                     parse_span.add_event("constructing_pydantic_models")
+
+                    # Parse insights and sort chronologically
+                    insights = []
+                    for insight in analysis_data.get("top_insights", []):
+                        insights.append(ActionableInsight(**insight))
+
+                    # Sort insights by timestamp (chronological order)
+                    def extract_timestamp_value(timestamp_str):
+                        """Extract numeric value from timestamp for sorting."""
+                        if not timestamp_str:
+                            return 999999  # Put items without timestamps at the end
+
+                        # Remove brackets and handle different formats: [5:23], [0:16], [~10:00]
+                        clean_ts = timestamp_str.strip('[]~')
+
+                        try:
+                            # Split by : to get minutes and seconds
+                            parts = clean_ts.split(':')
+                            if len(parts) == 2:
+                                minutes, seconds = parts
+                                return int(minutes) * 60 + int(seconds)
+                            elif len(parts) == 3:  # HH:MM:SS format
+                                hours, minutes, seconds = parts
+                                return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+                        except (ValueError, AttributeError):
+                            return 999999  # If parsing fails, put at end
+
+                        return 999999
+
+                    insights.sort(key=lambda x: extract_timestamp_value(x.timestamp))
+
                     result = AnalysisResult(
                         sa_identified=sa_name,
                         sa_confidence="high",  # Crew consensus
@@ -568,10 +641,7 @@ class SACallAnalysisCrew:
                         sa_metrics=SAPerformanceMetrics(
                             **{k: safe_float(v) for k, v in analysis_data.get("sa_metrics", {}).items()}
                         ),
-                        top_insights=[
-                            ActionableInsight(**insight)
-                            for insight in analysis_data.get("top_insights", [])
-                        ],
+                        top_insights=insights,  # Now sorted chronologically
                         strengths=analysis_data.get("strengths", []),
                         improvement_areas=analysis_data.get("improvement_areas", []),
                         key_moments=analysis_data.get("key_moments", [])
@@ -635,9 +705,27 @@ class SACallAnalysisCrew:
 
     def _extract_sa_name(self, identification_result: str) -> str:
         """Extract SA name from identification result"""
-        # Simple extraction - look for "SA Name:" pattern
-        if "SA Name:" in identification_result:
-            parts = identification_result.split("SA Name:")[1].split(",")[0]
-            return parts.strip()
-        # Fallback
+        print(f"🔍 Extracting SA name from: {identification_result[:200]}...")
+
+        # Try multiple patterns
+        patterns = [
+            "SA Name:",
+            "Solution Architect:",
+            "SA is",
+            "identified as",
+            "The SA is",
+            "The Solution Architect is"
+        ]
+
+        for pattern in patterns:
+            if pattern in identification_result:
+                # Extract text after pattern
+                parts = identification_result.split(pattern)[1].split(",")[0].split("\n")[0]
+                extracted = parts.strip().strip('"').strip("'")
+                if extracted and extracted != "Unknown" and len(extracted) > 0:
+                    print(f"✅ Extracted SA name using pattern '{pattern}': {extracted}")
+                    return extracted
+
+        # Fallback - log warning
+        print(f"⚠️  Could not extract SA name from identification result. Using 'Unknown SA'")
         return "Unknown SA"

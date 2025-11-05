@@ -245,6 +245,33 @@
             margin-top: 10px;
         }
 
+        .conversation-snippet {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 3px solid #667eea;
+        }
+
+        .conversation-snippet strong {
+            color: #667eea;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .conversation-snippet pre {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #2c3e50;
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
         .list {
             list-style: none;
             padding: 0;
@@ -504,6 +531,12 @@ The tool will auto-detect the format and identify the SA."
                         <span class="insight-category">${insight.category}</span>
                         ${insight.timestamp ? `<span class="insight-timestamp">${insight.timestamp}</span>` : ''}
                     </div>
+                    ${insight.conversation_snippet ? `
+                        <div class="conversation-snippet">
+                            <strong>📝 Conversation:</strong>
+                            <pre>${insight.conversation_snippet}</pre>
+                        </div>
+                    ` : ''}
                     <div class="insight-section">
                         <strong>What Happened:</strong>
                         ${insight.what_happened}
