@@ -136,7 +136,10 @@ async def analyze_transcript(request: AnalyzeRequest):
 
                 try:
                     print(f"📞 Fetching transcript from Gong URL: {request.gong_url}")
-                    raw_transcript = gong_client.get_formatted_transcript_from_url(request.gong_url)
+                    # Extract call ID and fetch raw transcript data
+                    call_id = gong_client.extract_call_id_from_url(request.gong_url)
+                    transcript_data = gong_client.get_transcript(call_id)
+                    raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
                     print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
                     span.set_attribute("transcript.source", "gong")
                     span.set_attribute("transcript.raw_length", len(raw_transcript))
@@ -152,6 +155,7 @@ async def analyze_transcript(request: AnalyzeRequest):
                     )
             else:
                 raw_transcript = request.transcript
+                transcript_data = None  # No raw data for manual transcripts
                 span.set_attribute("transcript.source", "manual")
                 span.set_attribute("transcript.raw_length", len(raw_transcript))
                 span.add_event("using_manual_transcript")
@@ -194,7 +198,8 @@ async def analyze_transcript(request: AnalyzeRequest):
             result = analyzer.analyze_call(
                 transcript=formatted_transcript,
                 speakers=speakers,
-                manual_sa=request.sa_name
+                manual_sa=request.sa_name,
+                transcript_data=transcript_data  # Pass raw data for hybrid sampling if available
             )
 
             span.set_attribute("analysis.sa_identified", result.sa_identified)

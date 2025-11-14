@@ -23,7 +23,7 @@ from arize.otel import register
 from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import trace
-# from span_processor_minimal import MinimalCleaningProcessor  # Temporarily disabled
+from span_processor_fixed import CleaningSpanProcessor
 
 # Enable debug logging for OpenTelemetry
 logging.basicConfig(level=logging.INFO)
@@ -75,12 +75,8 @@ def setup_observability(
         # The processor modifies span._attributes directly in on_end().
         # =====================================================================
 
-        # Check configuration (currently unused while span processor is disabled)
-        # enable_cleaning = os.getenv("ARIZE_ENABLE_OUTPUT_CLEANING", "true").lower() == "true"
-        # max_output = int(os.getenv("ARIZE_MAX_OUTPUT_LENGTH", "10000"))
-        # max_input = int(os.getenv("ARIZE_MAX_INPUT_LENGTH", "5000"))
-        # environment = os.getenv("ENVIRONMENT", "development")
-        # app_version = os.getenv("APP_VERSION", "1.0.0")
+        # Check configuration
+        enable_cleaning = os.getenv("ARIZE_ENABLE_OUTPUT_CLEANING", "true").lower() == "true"
 
         # Register with Arize and get tracer provider
         tracer_provider = register(
@@ -90,15 +86,25 @@ def setup_observability(
             set_global_tracer_provider=True,
         )
 
-        # TEMPORARILY DISABLED: Span processor removed to ensure spans reach Arize
-        # # Add minimal cleaning processor
-        # if enable_cleaning:
-        #     cleaning_processor = MinimalCleaningProcessor(enabled=True)
-        #     tracer_provider.add_span_processor(cleaning_processor)
-        #     print("   ✅ Minimal cleaning processor registered (extracts JSON, truncates large payloads)")
-        # else:
-        #     print("   ℹ️  Cleaning disabled (set ARIZE_ENABLE_OUTPUT_CLEANING=true to enable)")
-        print("   ℹ️  Span processor disabled - sending raw spans to Arize")
+        # Add cleaning processor to the chain (FIXED VERSION)
+        # We insert it at the front of the processor chain so it runs BEFORE export
+        if enable_cleaning:
+            cleaning_processor = CleaningSpanProcessor(enabled=True)
+
+            # Access the internal processor chain and add our processor
+            if hasattr(tracer_provider, '_active_span_processor'):
+                multi_processor = tracer_provider._active_span_processor
+                if hasattr(multi_processor, '_span_processors'):
+                    # Insert at position 0 (runs first, before BatchSpanProcessor exports)
+                    existing_processors = multi_processor._span_processors
+                    multi_processor._span_processors = (cleaning_processor,) + existing_processors
+                    print("   ✅ Cleaning processor added to chain (extracts JSON, truncates large payloads)")
+                else:
+                    print("   ⚠️  Could not add cleaning processor: no processor chain found")
+            else:
+                print("   ⚠️  Could not add cleaning processor: no active span processor")
+        else:
+            print("   ℹ️  Cleaning disabled (set ARIZE_ENABLE_OUTPUT_CLEANING=true to enable)")
 
         # Instrument CrewAI (AFTER processor registered)
         CrewAIInstrumentor().instrument(
