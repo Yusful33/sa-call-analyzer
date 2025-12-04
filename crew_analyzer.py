@@ -6,7 +6,20 @@ from models import (
     AnalysisResult,
     ActionableInsight,
     CommandOfMessageScore,
-    SAPerformanceMetrics
+    SAPerformanceMetrics,
+    CallClassification,
+    CallType,
+    DiscoveryCriteria,
+    PocScopingCriteria,
+    PainCurrentState,
+    StakeholderMap,
+    RequiredCapabilities,
+    CompetitiveLandscape,
+    UseCaseScoped,
+    ImplementationRequirements,
+    MetricsSuccessCriteria,
+    TimelineMilestones,
+    ResourcesCommitted
 )
 from dotenv import load_dotenv
 from opentelemetry import trace
@@ -135,11 +148,37 @@ class SACallAnalysisCrew:
             allow_delegation=False
         )
 
+        call_classifier = Agent(
+            role='Sales Call Type Classifier & Criteria Assessor',
+            goal='Classify calls as Discovery or PoC Scoping and assess completion of required criteria',
+            backstory="""You are an expert sales operations analyst who specializes in classifying 
+            sales calls and assessing deal progression. You understand the critical difference between:
+            
+            DISCOVERY CALLS - Focus on:
+            1. Pain & Current State: Understanding how they debug LLM/agent issues, quantifying MTTD/MTTR
+            2. Stakeholder Map: Identifying technical champion, economic buyer, decision maker
+            3. Required Capabilities: Prioritizing RCs (tracing, evals, monitoring, datasets, compliance)
+            4. Competitive Landscape: Understanding current tools (LangSmith, W&B, Braintrust, Datadog)
+            
+            POC SCOPING CALLS - Focus on:
+            1. Use Case Scoped: Specific LLM apps selected, environment, trace volume, integration complexity
+            2. Implementation Requirements: Data residency, deployment model, blockers identified
+            3. Metrics & Success Criteria: Specific metrics defined, baselines captured
+            4. Timeline & Milestones: PoC duration, key dates, decision date committed
+            5. Resources Committed: Engineering resources allocated, check-in cadence, Slack channel
+            
+            You provide structured assessments with specific evidence from the transcript.""",
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
+
         return {
             'sa_identifier': sa_identifier,
             'technical_evaluator': technical_evaluator,
             'sales_methodology_expert': sales_methodology_expert,
-            'report_compiler': report_compiler
+            'report_compiler': report_compiler,
+            'call_classifier': call_classifier
         }
 
     def analyze_call(
@@ -296,7 +335,205 @@ class SACallAnalysisCrew:
                 # Add SA identification to span
                 analysis_span.add_event("sa_identified", {"sa_name": sa_name})
 
-                # Task 2-4: Parallel analysis by different experts
+                # ============================================================
+                # STEP 1: Run Call Classification (separate crew for clean output)
+                # ============================================================
+                with tracer.start_as_current_span("call_classification") as class_span:
+                    class_span.set_attribute("openinference.span.kind", "agent")
+                    class_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                    class_span.set_attribute("input.mime_type", "text/plain")
+
+                    classification_task = Task(
+                        description=f"""Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
+
+                    Transcript:
+                    {transcript}
+
+                    DISCOVERY CALL CRITERIA - Look for evidence of:
+
+                    1. PAIN & CURRENT STATE VALIDATED:
+                       - How they debug LLM/agent issues today (documented?)
+                       - What is the situation? (understood?)
+                       - What have they done to resolve? (documented?)
+                       - What outcomes from those actions? (documented?)
+                       - Frequency quantified (how often?)
+                       - Duration quantified (how long?)
+                       - Impact quantified (how much?)
+                       - People/Process/Technology impact understood?
+                       - MTTD/MTTR for LLM failures quantified?
+
+                    2. STAKEHOLDER MAP COMPLETE:
+                       - Technical Champion identified and engaged?
+                       - Economic Buyer identified?
+                       - Decision Maker confirmed?
+
+                    3. REQUIRED CAPABILITIES (RCs) PRIORITIZED:
+                       - Top 2-3 RCs ranked by prospect?
+                       - Core capabilities discussed: LLM Tracing, Evaluations, Monitoring, Datasets, Compliance?
+                       - "Must have" vs "nice to have" distinguished?
+                       - Deal-breakers identified?
+
+                    4. COMPETITIVE LANDSCAPE UNDERSTOOD:
+                       - Current/prior tools mentioned (LangSmith, W&B, Braintrust, Datadog LLM)?
+                       - Why looking vs. staying with current solution?
+                       - Key differentiators that matter to prospect?
+
+                    POC SCOPING CALL CRITERIA - Look for evidence of:
+
+                    1. USE CASE SCOPED:
+                       - Specific LLM application(s) selected for PoC?
+                       - Production vs. staging environment decided?
+                       - Expected trace volume estimated?
+                       - Integration complexity assessed (# services, frameworks)?
+
+                    2. IMPLEMENTATION REQUIREMENTS VALIDATED:
+                       - Data residency / deployment model confirmed (Cloud, VPC, On-prem)?
+                       - Blockers identified (firewall, procurement, security review)?
+
+                    3. METRICS & SUCCESS CRITERIA DEFINED:
+                       - Specific metrics defined (e.g., "reduce debugging from 4hr to 30min")?
+                       - Baseline measurements captured?
+                       - Agreement on how success will be measured?
+
+                    4. TIMELINE & MILESTONES AGREED:
+                       - PoC duration defined (typically 2-4 weeks)?
+                       - Key milestones with dates (kickoff, integration, eval, decision)?
+                       - Decision date committed?
+                       - Next steps after successful PoC discussed?
+
+                    5. RESOURCES COMMITTED:
+                       - Prospect engineering resources allocated (names, % time)?
+                       - Weekly check-in cadence established?
+                       - Slack/communication channel created?
+
+                    Return your analysis as JSON with this EXACT structure:
+                    {{
+                        "call_type": "discovery" | "poc_scoping" | "mixed" | "unclear",
+                        "confidence": "high" | "medium" | "low",
+                        "reasoning": "Brief explanation of classification",
+                        "discovery_criteria": {{
+                            "pain_current_state": {{
+                                "debugging_process_documented": true/false,
+                                "situation_understood": true/false,
+                                "resolution_attempts_documented": true/false,
+                                "outcomes_documented": true/false,
+                                "frequency_quantified": true/false,
+                                "duration_quantified": true/false,
+                                "impact_quantified": true/false,
+                                "people_impact_understood": true/false,
+                                "process_impact_understood": true/false,
+                                "technology_impact_understood": true/false,
+                                "mttd_mttr_quantified": true/false,
+                                "notes": "specific evidence from transcript"
+                            }},
+                            "stakeholder_map": {{
+                                "technical_champion_identified": true/false,
+                                "technical_champion_engaged": true/false,
+                                "economic_buyer_identified": true/false,
+                                "decision_maker_confirmed": true/false,
+                                "notes": "specific evidence"
+                            }},
+                            "required_capabilities": {{
+                                "top_rcs_ranked": true/false,
+                                "llm_agent_tracing_important": true/false/null,
+                                "llm_evaluations_important": true/false/null,
+                                "production_monitoring_important": true/false/null,
+                                "dataset_management_important": true/false/null,
+                                "compliance_monitoring_important": true/false/null,
+                                "must_have_vs_nice_to_have_distinguished": true/false,
+                                "deal_breakers_identified": true/false,
+                                "notes": "specific evidence"
+                            }},
+                            "competitive_landscape": {{
+                                "current_tools_evaluated": true/false,
+                                "tools_mentioned": ["list", "of", "tools"],
+                                "why_looking_vs_staying": true/false,
+                                "key_differentiators_identified": true/false,
+                                "notes": "specific evidence"
+                            }}
+                        }},
+                        "poc_scoping_criteria": {{
+                            "use_case_scoped": {{
+                                "llm_applications_selected": true/false,
+                                "applications_list": ["list", "of", "apps"],
+                                "environment_decided": true/false,
+                                "environment_type": "production" | "staging" | "both" | null,
+                                "trace_volume_estimated": true/false,
+                                "estimated_volume": "e.g., 10K traces/day" | null,
+                                "integration_complexity_assessed": true/false,
+                                "notes": "specific evidence"
+                            }},
+                            "implementation_requirements": {{
+                                "data_residency_confirmed": true/false,
+                                "deployment_model": "cloud" | "vpc" | "on-prem" | null,
+                                "blockers_identified": true/false,
+                                "blockers_list": ["list", "of", "blockers"],
+                                "notes": "specific evidence"
+                            }},
+                            "metrics_success_criteria": {{
+                                "specific_metrics_defined": true/false,
+                                "example_metrics": ["list", "of", "metrics"],
+                                "baseline_captured": true/false,
+                                "success_measurement_agreed": true/false,
+                                "notes": "specific evidence"
+                            }},
+                            "timeline_milestones": {{
+                                "poc_duration_defined": true/false,
+                                "duration_weeks": 2-4 | null,
+                                "key_milestones_with_dates": true/false,
+                                "milestones": ["list", "of", "milestones"],
+                                "decision_date_committed": true/false,
+                                "decision_date": "date string" | null,
+                                "next_steps_discussed": true/false,
+                                "notes": "specific evidence"
+                            }},
+                            "resources_committed": {{
+                                "engineering_resources_allocated": true/false,
+                                "resource_names": ["names"],
+                                "checkin_cadence_established": true/false,
+                                "cadence": "weekly" | "bi-weekly" | null,
+                                "communication_channel_created": true/false,
+                                "notes": "specific evidence"
+                            }}
+                        }},
+                        "missing_elements": ["List of key missing criteria"],
+                        "recommendations": ["Specific actions for next call"]
+                    }}
+                    """,
+                        agent=agents['call_classifier'],
+                        expected_output="JSON classification with detailed criteria assessment"
+                    )
+
+                    # Run classification crew
+                    class_span.add_event("starting_classification_crew")
+                    classification_crew = Crew(
+                        agents=[agents['call_classifier']],
+                        tasks=[classification_task],
+                        process=Process.sequential,
+                        verbose=True
+                    )
+                    classification_result = classification_crew.kickoff()
+                    classification_text = str(classification_result)
+                    class_span.set_attribute("output.value", classification_text[:3000])
+                    class_span.set_attribute("output.mime_type", "application/json")
+                    class_span.add_event("classification_complete", {
+                        "result_length": len(classification_text)
+                    })
+
+                    # Parse classification result
+                    call_classification = self._parse_classification(classification_text)
+                    if call_classification:
+                        class_span.set_attribute("classification.call_type", call_classification.call_type.value)
+                        class_span.set_attribute("classification.confidence", call_classification.confidence)
+                        class_span.set_attribute("classification.discovery_score", call_classification.discovery_completion_score)
+                        class_span.set_attribute("classification.poc_score", call_classification.poc_scoping_completion_score)
+                    class_span.set_status(Status(StatusCode.OK))
+
+                # ============================================================
+                # STEP 2: Run Main Analysis (technical, sales methodology, report)
+                # ============================================================
+
+                # Task 3-5: Parallel analysis by different experts
                 technical_task = Task(
                     description=f"""Analyze the technical performance of {sa_name} in this call.
 
@@ -675,7 +912,8 @@ class SACallAnalysisCrew:
                             top_insights=insights,  # Now sorted chronologically
                             strengths=analysis_data.get("strengths", []),
                             improvement_areas=analysis_data.get("improvement_areas", []),
-                            key_moments=analysis_data.get("key_moments", [])
+                            key_moments=analysis_data.get("key_moments", []),
+                            call_classification=call_classification  # Add classification result
                         )
 
                     # Add metadata about the parsed results
@@ -781,3 +1019,191 @@ class SACallAnalysisCrew:
         # Fallback - log warning
         print(f"⚠️  Could not extract SA name from identification result. Using 'Unknown SA'")
         return "Unknown SA"
+
+    def _parse_classification(self, classification_text: str) -> Optional[CallClassification]:
+        """Parse classification result from the Call Classifier agent"""
+        print(f"📊 Parsing classification result ({len(classification_text)} chars)...")
+
+        try:
+            # Extract JSON from the result
+            json_start = classification_text.find('{')
+            json_end = classification_text.rfind('}') + 1
+
+            if json_start >= 0 and json_end > json_start:
+                json_str = classification_text[json_start:json_end]
+                data = json.loads(json_str)
+            else:
+                print("⚠️  No JSON found in classification result")
+                return None
+
+            # Parse call type
+            call_type_str = data.get("call_type", "unclear").lower()
+            call_type_map = {
+                "discovery": CallType.DISCOVERY,
+                "poc_scoping": CallType.POC_SCOPING,
+                "mixed": CallType.MIXED,
+                "unclear": CallType.UNCLEAR
+            }
+            call_type = call_type_map.get(call_type_str, CallType.UNCLEAR)
+
+            # Parse discovery criteria
+            discovery_data = data.get("discovery_criteria", {})
+            discovery_criteria = None
+            discovery_score = 0.0
+
+            if discovery_data:
+                try:
+                    pain_data = discovery_data.get("pain_current_state", {})
+                    pain = PainCurrentState(
+                        debugging_process_documented=pain_data.get("debugging_process_documented", False),
+                        situation_understood=pain_data.get("situation_understood", False),
+                        resolution_attempts_documented=pain_data.get("resolution_attempts_documented", False),
+                        outcomes_documented=pain_data.get("outcomes_documented", False),
+                        frequency_quantified=pain_data.get("frequency_quantified", False),
+                        duration_quantified=pain_data.get("duration_quantified", False),
+                        impact_quantified=pain_data.get("impact_quantified", False),
+                        people_impact_understood=pain_data.get("people_impact_understood", False),
+                        process_impact_understood=pain_data.get("process_impact_understood", False),
+                        technology_impact_understood=pain_data.get("technology_impact_understood", False),
+                        mttd_mttr_quantified=pain_data.get("mttd_mttr_quantified", False),
+                        notes=pain_data.get("notes")
+                    )
+
+                    stakeholder_data = discovery_data.get("stakeholder_map", {})
+                    stakeholder = StakeholderMap(
+                        technical_champion_identified=stakeholder_data.get("technical_champion_identified", False),
+                        technical_champion_engaged=stakeholder_data.get("technical_champion_engaged", False),
+                        economic_buyer_identified=stakeholder_data.get("economic_buyer_identified", False),
+                        decision_maker_confirmed=stakeholder_data.get("decision_maker_confirmed", False),
+                        notes=stakeholder_data.get("notes")
+                    )
+
+                    rc_data = discovery_data.get("required_capabilities", {})
+                    required_caps = RequiredCapabilities(
+                        top_rcs_ranked=rc_data.get("top_rcs_ranked", False),
+                        llm_agent_tracing_important=rc_data.get("llm_agent_tracing_important"),
+                        llm_evaluations_important=rc_data.get("llm_evaluations_important"),
+                        production_monitoring_important=rc_data.get("production_monitoring_important"),
+                        dataset_management_important=rc_data.get("dataset_management_important"),
+                        compliance_monitoring_important=rc_data.get("compliance_monitoring_important"),
+                        must_have_vs_nice_to_have_distinguished=rc_data.get("must_have_vs_nice_to_have_distinguished", False),
+                        deal_breakers_identified=rc_data.get("deal_breakers_identified", False),
+                        notes=rc_data.get("notes")
+                    )
+
+                    comp_data = discovery_data.get("competitive_landscape", {})
+                    competitive = CompetitiveLandscape(
+                        current_tools_evaluated=comp_data.get("current_tools_evaluated", False),
+                        tools_mentioned=comp_data.get("tools_mentioned", []),
+                        why_looking_vs_staying=comp_data.get("why_looking_vs_staying", False),
+                        key_differentiators_identified=comp_data.get("key_differentiators_identified", False),
+                        notes=comp_data.get("notes")
+                    )
+
+                    discovery_criteria = DiscoveryCriteria(
+                        pain_current_state=pain,
+                        stakeholder_map=stakeholder,
+                        required_capabilities=required_caps,
+                        competitive_landscape=competitive
+                    )
+                    discovery_score = discovery_criteria.overall_completion_score
+                except Exception as e:
+                    print(f"⚠️  Error parsing discovery criteria: {e}")
+
+            # Parse PoC scoping criteria
+            poc_data = data.get("poc_scoping_criteria", {})
+            poc_criteria = None
+            poc_score = 0.0
+
+            if poc_data:
+                try:
+                    use_case_data = poc_data.get("use_case_scoped", {})
+                    use_case = UseCaseScoped(
+                        llm_applications_selected=use_case_data.get("llm_applications_selected", False),
+                        applications_list=use_case_data.get("applications_list", []),
+                        environment_decided=use_case_data.get("environment_decided", False),
+                        environment_type=use_case_data.get("environment_type"),
+                        trace_volume_estimated=use_case_data.get("trace_volume_estimated", False),
+                        estimated_volume=use_case_data.get("estimated_volume"),
+                        integration_complexity_assessed=use_case_data.get("integration_complexity_assessed", False),
+                        notes=use_case_data.get("notes")
+                    )
+
+                    impl_data = poc_data.get("implementation_requirements", {})
+                    impl_req = ImplementationRequirements(
+                        data_residency_confirmed=impl_data.get("data_residency_confirmed", False),
+                        deployment_model=impl_data.get("deployment_model"),
+                        blockers_identified=impl_data.get("blockers_identified", False),
+                        blockers_list=impl_data.get("blockers_list", []),
+                        notes=impl_data.get("notes")
+                    )
+
+                    metrics_data = poc_data.get("metrics_success_criteria", {})
+                    metrics = MetricsSuccessCriteria(
+                        specific_metrics_defined=metrics_data.get("specific_metrics_defined", False),
+                        example_metrics=metrics_data.get("example_metrics", []),
+                        baseline_captured=metrics_data.get("baseline_captured", False),
+                        success_measurement_agreed=metrics_data.get("success_measurement_agreed", False),
+                        notes=metrics_data.get("notes")
+                    )
+
+                    timeline_data = poc_data.get("timeline_milestones", {})
+                    timeline = TimelineMilestones(
+                        poc_duration_defined=timeline_data.get("poc_duration_defined", False),
+                        duration_weeks=timeline_data.get("duration_weeks"),
+                        key_milestones_with_dates=timeline_data.get("key_milestones_with_dates", False),
+                        milestones=timeline_data.get("milestones", []),
+                        decision_date_committed=timeline_data.get("decision_date_committed", False),
+                        decision_date=timeline_data.get("decision_date"),
+                        next_steps_discussed=timeline_data.get("next_steps_discussed", False),
+                        notes=timeline_data.get("notes")
+                    )
+
+                    resources_data = poc_data.get("resources_committed", {})
+                    resources = ResourcesCommitted(
+                        engineering_resources_allocated=resources_data.get("engineering_resources_allocated", False),
+                        resource_names=resources_data.get("resource_names", []),
+                        checkin_cadence_established=resources_data.get("checkin_cadence_established", False),
+                        cadence=resources_data.get("cadence"),
+                        communication_channel_created=resources_data.get("communication_channel_created", False),
+                        notes=resources_data.get("notes")
+                    )
+
+                    poc_criteria = PocScopingCriteria(
+                        use_case_scoped=use_case,
+                        implementation_requirements=impl_req,
+                        metrics_success_criteria=metrics,
+                        timeline_milestones=timeline,
+                        resources_committed=resources
+                    )
+                    poc_score = poc_criteria.overall_completion_score
+                except Exception as e:
+                    print(f"⚠️  Error parsing PoC criteria: {e}")
+
+            # Create the classification result
+            classification = CallClassification(
+                call_type=call_type,
+                confidence=data.get("confidence", "medium"),
+                reasoning=data.get("reasoning", ""),
+                discovery_criteria=discovery_criteria,
+                discovery_completion_score=discovery_score,
+                poc_scoping_criteria=poc_criteria,
+                poc_scoping_completion_score=poc_score,
+                missing_elements=data.get("missing_elements", []),
+                recommendations=data.get("recommendations", [])
+            )
+
+            print(f"✅ Classification: {call_type.value} (confidence: {classification.confidence})")
+            print(f"   Discovery score: {discovery_score:.1f}%")
+            print(f"   PoC Scoping score: {poc_score:.1f}%")
+
+            return classification
+
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Failed to parse classification JSON: {e}")
+            return None
+        except Exception as e:
+            print(f"⚠️  Error parsing classification: {e}")
+            import traceback
+            traceback.print_exc()
+            return None

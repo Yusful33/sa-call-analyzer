@@ -298,6 +298,182 @@
             color: #e74c3c;
         }
 
+        /* Call Classification Styles */
+        .classification-section {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            color: white;
+        }
+
+        .classification-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .call-type-badge {
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 1.1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .call-type-badge.discovery {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+
+        .call-type-badge.poc_scoping {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .call-type-badge.mixed {
+            background: linear-gradient(135deg, #f39c12 0%, #e74c3c 100%);
+        }
+
+        .call-type-badge.unclear {
+            background: #666;
+        }
+
+        .confidence-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            background: rgba(255,255,255,0.2);
+        }
+
+        .classification-reasoning {
+            font-style: italic;
+            opacity: 0.9;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+
+        .criteria-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .criteria-card {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .criteria-card h4 {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .progress-bar {
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            height: 10px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .progress-fill.low { background: #e74c3c; }
+        .progress-fill.medium { background: #f39c12; }
+        .progress-fill.high { background: #27ae60; }
+
+        .criteria-checklist {
+            list-style: none;
+            padding: 0;
+            font-size: 0.9em;
+        }
+
+        .criteria-checklist li {
+            padding: 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .criteria-checklist li:last-child {
+            border-bottom: none;
+        }
+
+        .check-icon { color: #27ae60; }
+        .x-icon { color: #e74c3c; opacity: 0.7; }
+
+        .missing-elements {
+            background: rgba(231, 76, 60, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .missing-elements h4 {
+            color: #e74c3c;
+            margin-bottom: 10px;
+        }
+
+        .missing-elements ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .missing-elements li {
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .missing-elements li:before {
+            content: "⚠";
+            position: absolute;
+            left: 0;
+        }
+
+        .recommendations-section {
+            background: rgba(39, 174, 96, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .recommendations-section h4 {
+            color: #27ae60;
+            margin-bottom: 10px;
+        }
+
+        .recommendations-section ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .recommendations-section li {
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .recommendations-section li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #27ae60;
+        }
+
         .sa-info {
             background: #e8f4f8;
             padding: 15px;
@@ -557,11 +733,16 @@ The tool will auto-detect the format and identify the SA."
                 </div>
             `).join('');
 
+            // Build classification HTML
+            const classificationHtml = buildClassificationHtml(data.call_classification);
+
             results.innerHTML = `
                 <div class="sa-info">
                     <strong>Solution Architect Identified:</strong> ${data.sa_identified}
                     <span style="color: #666; margin-left: 10px;">(Confidence: ${data.sa_confidence})</span>
                 </div>
+
+                ${classificationHtml}
 
                 <h2>${data.call_summary}</h2>
 
@@ -586,6 +767,221 @@ The tool will auto-detect the format and identify the SA."
 
             results.classList.add('show');
             results.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function buildClassificationHtml(classification) {
+            if (!classification) {
+                return '';
+            }
+
+            const callTypeLabels = {
+                'discovery': '🔍 Discovery Call',
+                'poc_scoping': '🚀 PoC Scoping Call',
+                'mixed': '🔀 Mixed Call',
+                'unclear': '❓ Unclear'
+            };
+
+            const callTypeLabel = callTypeLabels[classification.call_type] || classification.call_type;
+            
+            const getProgressClass = (score) => {
+                if (score >= 70) return 'high';
+                if (score >= 40) return 'medium';
+                return 'low';
+            };
+
+            // Build discovery criteria checklist
+            let discoveryCriteriaHtml = '';
+            if (classification.discovery_criteria) {
+                const dc = classification.discovery_criteria;
+                discoveryCriteriaHtml = `
+                    <div class="criteria-card">
+                        <h4>🔍 Discovery Criteria</h4>
+                        <div class="progress-bar">
+                            <div class="progress-fill ${getProgressClass(classification.discovery_completion_score)}" 
+                                 style="width: ${classification.discovery_completion_score}%"></div>
+                        </div>
+                        <div style="text-align: center; margin-bottom: 15px; font-size: 1.2em;">
+                            ${classification.discovery_completion_score.toFixed(0)}% Complete
+                        </div>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Pain & Current State
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${dc.pain_current_state.debugging_process_documented ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Debugging process documented</li>
+                                <li>${dc.pain_current_state.situation_understood ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Situation understood</li>
+                                <li>${dc.pain_current_state.frequency_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Frequency quantified</li>
+                                <li>${dc.pain_current_state.duration_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Duration quantified</li>
+                                <li>${dc.pain_current_state.impact_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Impact quantified</li>
+                                <li>${dc.pain_current_state.mttd_mttr_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} MTTD/MTTR quantified</li>
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Stakeholder Map
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${dc.stakeholder_map.technical_champion_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion identified</li>
+                                <li>${dc.stakeholder_map.technical_champion_engaged ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion engaged</li>
+                                <li>${dc.stakeholder_map.economic_buyer_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Economic buyer identified</li>
+                                <li>${dc.stakeholder_map.decision_maker_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision maker confirmed</li>
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Required Capabilities
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${dc.required_capabilities.top_rcs_ranked ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Top RCs ranked</li>
+                                <li>${dc.required_capabilities.must_have_vs_nice_to_have_distinguished ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Must-have vs nice-to-have distinguished</li>
+                                <li>${dc.required_capabilities.deal_breakers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Deal-breakers identified</li>
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Competitive Landscape
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${dc.competitive_landscape.current_tools_evaluated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Current tools evaluated</li>
+                                <li>${dc.competitive_landscape.why_looking_vs_staying ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Why looking vs staying</li>
+                                <li>${dc.competitive_landscape.key_differentiators_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key differentiators identified</li>
+                                ${dc.competitive_landscape.tools_mentioned && dc.competitive_landscape.tools_mentioned.length > 0 ? 
+                                    `<li style="margin-top: 8px; opacity: 0.8;">Tools mentioned: ${dc.competitive_landscape.tools_mentioned.join(', ')}</li>` : ''}
+                            </ul>
+                        </details>
+                    </div>
+                `;
+            }
+
+            // Build PoC scoping criteria checklist
+            let pocCriteriaHtml = '';
+            if (classification.poc_scoping_criteria) {
+                const pc = classification.poc_scoping_criteria;
+                pocCriteriaHtml = `
+                    <div class="criteria-card">
+                        <h4>🚀 PoC Scoping Criteria</h4>
+                        <div class="progress-bar">
+                            <div class="progress-fill ${getProgressClass(classification.poc_scoping_completion_score)}" 
+                                 style="width: ${classification.poc_scoping_completion_score}%"></div>
+                        </div>
+                        <div style="text-align: center; margin-bottom: 15px; font-size: 1.2em;">
+                            ${classification.poc_scoping_completion_score.toFixed(0)}% Complete
+                        </div>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Use Case Scoped
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${pc.use_case_scoped.llm_applications_selected ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} LLM applications selected</li>
+                                <li>${pc.use_case_scoped.environment_decided ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Environment decided ${pc.use_case_scoped.environment_type ? `(${pc.use_case_scoped.environment_type})` : ''}</li>
+                                <li>${pc.use_case_scoped.trace_volume_estimated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Trace volume estimated ${pc.use_case_scoped.estimated_volume ? `(${pc.use_case_scoped.estimated_volume})` : ''}</li>
+                                <li>${pc.use_case_scoped.integration_complexity_assessed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Integration complexity assessed</li>
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Implementation Requirements
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${pc.implementation_requirements.data_residency_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Data residency confirmed ${pc.implementation_requirements.deployment_model ? `(${pc.implementation_requirements.deployment_model})` : ''}</li>
+                                <li>${pc.implementation_requirements.blockers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Blockers identified</li>
+                                ${pc.implementation_requirements.blockers_list && pc.implementation_requirements.blockers_list.length > 0 ? 
+                                    `<li style="margin-top: 8px; opacity: 0.8;">Blockers: ${pc.implementation_requirements.blockers_list.join(', ')}</li>` : ''}
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Metrics & Success Criteria
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${pc.metrics_success_criteria.specific_metrics_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Specific metrics defined</li>
+                                <li>${pc.metrics_success_criteria.baseline_captured ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Baseline captured</li>
+                                <li>${pc.metrics_success_criteria.success_measurement_agreed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Success measurement agreed</li>
+                                ${pc.metrics_success_criteria.example_metrics && pc.metrics_success_criteria.example_metrics.length > 0 ? 
+                                    `<li style="margin-top: 8px; opacity: 0.8;">Metrics: ${pc.metrics_success_criteria.example_metrics.join(', ')}</li>` : ''}
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Timeline & Milestones
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${pc.timeline_milestones.poc_duration_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} PoC duration defined ${pc.timeline_milestones.duration_weeks ? `(${pc.timeline_milestones.duration_weeks} weeks)` : ''}</li>
+                                <li>${pc.timeline_milestones.key_milestones_with_dates ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key milestones with dates</li>
+                                <li>${pc.timeline_milestones.decision_date_committed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision date committed ${pc.timeline_milestones.decision_date ? `(${pc.timeline_milestones.decision_date})` : ''}</li>
+                                <li>${pc.timeline_milestones.next_steps_discussed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Next steps discussed</li>
+                            </ul>
+                        </details>
+                        
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                                Resources Committed
+                            </summary>
+                            <ul class="criteria-checklist">
+                                <li>${pc.resources_committed.engineering_resources_allocated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Engineering resources allocated</li>
+                                <li>${pc.resources_committed.checkin_cadence_established ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Check-in cadence established ${pc.resources_committed.cadence ? `(${pc.resources_committed.cadence})` : ''}</li>
+                                <li>${pc.resources_committed.communication_channel_created ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Communication channel created</li>
+                                ${pc.resources_committed.resource_names && pc.resources_committed.resource_names.length > 0 ? 
+                                    `<li style="margin-top: 8px; opacity: 0.8;">Resources: ${pc.resources_committed.resource_names.join(', ')}</li>` : ''}
+                            </ul>
+                        </details>
+                    </div>
+                `;
+            }
+
+            // Build missing elements and recommendations
+            let missingHtml = '';
+            if (classification.missing_elements && classification.missing_elements.length > 0) {
+                missingHtml = `
+                    <div class="missing-elements">
+                        <h4>⚠️ Missing Elements</h4>
+                        <ul>
+                            ${classification.missing_elements.map(e => `<li>${e}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            let recommendationsHtml = '';
+            if (classification.recommendations && classification.recommendations.length > 0) {
+                recommendationsHtml = `
+                    <div class="recommendations-section">
+                        <h4>💡 Recommendations for Next Call</h4>
+                        <ul>
+                            ${classification.recommendations.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="classification-section">
+                    <div class="classification-header">
+                        <span class="call-type-badge ${classification.call_type}">${callTypeLabel}</span>
+                        <span class="confidence-badge">Confidence: ${classification.confidence}</span>
+                    </div>
+                    
+                    <div class="classification-reasoning">
+                        ${classification.reasoning}
+                    </div>
+                    
+                    <div class="criteria-grid">
+                        ${discoveryCriteriaHtml}
+                        ${pocCriteriaHtml}
+                    </div>
+                    
+                    ${missingHtml}
+                    ${recommendationsHtml}
+                </div>
+            `;
         }
 
         async function loadExample() {
