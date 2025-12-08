@@ -474,6 +474,102 @@
             color: #27ae60;
         }
 
+        /* Evidence and Missed Opportunity Styles */
+        .evidence-item {
+            background: rgba(39, 174, 96, 0.15);
+            border-left: 3px solid #27ae60;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 0 6px 6px 0;
+            font-size: 0.9em;
+        }
+
+        .evidence-item .timestamp-badge {
+            background: #27ae60;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            margin-right: 8px;
+        }
+
+        .evidence-item .snippet {
+            background: rgba(255,255,255,0.2);
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+        }
+
+        .missed-opportunity-item {
+            background: rgba(231, 76, 60, 0.15);
+            border-left: 3px solid #e74c3c;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 0 6px 6px 0;
+            font-size: 0.9em;
+        }
+
+        .missed-opportunity-item .timestamp-badge {
+            background: #e74c3c;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            margin-right: 8px;
+        }
+
+        .missed-opportunity-item .suggested-question {
+            background: rgba(255,255,255,0.2);
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 4px;
+            font-style: italic;
+            border-left: 2px solid #f39c12;
+        }
+
+        .missed-opportunity-item .why-important {
+            margin-top: 6px;
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+
+        .criteria-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 6px;
+        }
+
+        .criteria-section-header:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .evidence-count {
+            background: #27ae60;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            margin-left: 8px;
+        }
+
+        .opportunity-count {
+            background: #e74c3c;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            margin-left: 8px;
+        }
+
         .sa-info {
             background: #e8f4f8;
             padding: 15px;
@@ -769,6 +865,89 @@ The tool will auto-detect the format and identify the SA."
             results.scrollIntoView({ behavior: 'smooth' });
         }
 
+        function buildEvidenceHtml(evidence) {
+            if (!evidence || evidence.length === 0) return '';
+            
+            return evidence.map(e => `
+                <div class="evidence-item">
+                    ${e.timestamp ? `<span class="timestamp-badge">${e.timestamp}</span>` : ''}
+                    <strong>${e.criteria_name.replace(/_/g, ' ')}</strong>
+                    ${e.speaker ? ` - ${e.speaker}` : ''}
+                    ${e.conversation_snippet ? `<div class="snippet">${e.conversation_snippet}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function buildMissedOpportunitiesHtml(opportunities) {
+            if (!opportunities || opportunities.length === 0) return '';
+            
+            return opportunities.map(o => `
+                <div class="missed-opportunity-item">
+                    ${o.timestamp ? `<span class="timestamp-badge">${o.timestamp}</span>` : ''}
+                    <strong>Missed: ${o.criteria_name.replace(/_/g, ' ')}</strong>
+                    <div style="margin-top: 6px;">${o.context}</div>
+                    <div class="suggested-question">
+                        💬 "${o.suggested_question}"
+                    </div>
+                    <div class="why-important">
+                        <strong>Why:</strong> ${o.why_important}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function countCriteriaStatus(criteriaObj) {
+            // Count boolean fields that are true (captured) vs false (not captured)
+            let captured = 0;
+            let notCaptured = 0;
+            
+            for (const [key, value] of Object.entries(criteriaObj)) {
+                // Skip non-boolean fields and metadata fields
+                if (typeof value === 'boolean') {
+                    if (value === true) {
+                        captured++;
+                    } else {
+                        notCaptured++;
+                    }
+                }
+            }
+            
+            return { captured, notCaptured };
+        }
+
+        function buildCriteriaSectionHtml(title, criteriaObj, checklistHtml) {
+            const { captured, notCaptured } = countCriteriaStatus(criteriaObj);
+            const evidenceItems = criteriaObj.evidence ? criteriaObj.evidence.length : 0;
+            const missedOpportunityItems = criteriaObj.missed_opportunities ? criteriaObj.missed_opportunities.length : 0;
+            
+            return `
+                <details>
+                    <summary class="criteria-section-header">
+                        <span>
+                            ${title}
+                            ${captured > 0 ? `<span class="evidence-count">${captured} captured</span>` : ''}
+                            ${notCaptured > 0 ? `<span class="opportunity-count">${notCaptured} gaps</span>` : ''}
+                        </span>
+                    </summary>
+                    <ul class="criteria-checklist">
+                        ${checklistHtml}
+                    </ul>
+                    ${evidenceItems > 0 ? `
+                        <div style="margin-top: 12px;">
+                            <strong style="color: #27ae60;">📋 Evidence Captured:</strong>
+                            ${buildEvidenceHtml(criteriaObj.evidence)}
+                        </div>
+                    ` : ''}
+                    ${missedOpportunityItems > 0 ? `
+                        <div style="margin-top: 12px;">
+                            <strong style="color: #e74c3c;">⚠️ Missed Opportunities:</strong>
+                            ${buildMissedOpportunitiesHtml(criteriaObj.missed_opportunities)}
+                        </div>
+                    ` : ''}
+                </details>
+            `;
+        }
+
         function buildClassificationHtml(classification) {
             if (!classification) {
                 return '';
@@ -793,6 +972,50 @@ The tool will auto-detect the format and identify the SA."
             let discoveryCriteriaHtml = '';
             if (classification.discovery_criteria) {
                 const dc = classification.discovery_criteria;
+                
+                const painChecklist = `
+                    ${dc.pain_current_state.primary_use_case ? `<li style="margin-bottom: 8px; opacity: 0.9;"><strong>Focus:</strong> ${dc.pain_current_state.primary_use_case}</li>` : ''}
+                    <li>${dc.pain_current_state.prompt_model_iteration_understood ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Prompt/model iteration understood (Dev)</li>
+                    <li>${dc.pain_current_state.debugging_process_documented ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Debugging process documented (Prod)</li>
+                    <li>${dc.pain_current_state.situation_understood ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Situation understood</li>
+                    <li>${dc.pain_current_state.resolution_attempts_documented ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Resolution attempts documented</li>
+                    <li>${dc.pain_current_state.outcomes_documented ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Outcomes documented</li>
+                    <li>${dc.pain_current_state.frequency_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Frequency quantified</li>
+                    <li>${dc.pain_current_state.duration_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Duration quantified</li>
+                    <li>${dc.pain_current_state.impact_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Impact quantified (People/Process/Tech)</li>
+                    <li>${dc.pain_current_state.mttd_mttr_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} MTTD/MTTR quantified</li>
+                    <li>${dc.pain_current_state.experiment_time_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Experiment time quantified</li>
+                `;
+                
+                const stakeholderChecklist = `
+                    <li>${dc.stakeholder_map.technical_champion_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion identified</li>
+                    <li>${dc.stakeholder_map.technical_champion_engaged ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion engaged</li>
+                    <li>${dc.stakeholder_map.economic_buyer_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Economic buyer identified</li>
+                    <li>${dc.stakeholder_map.decision_maker_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision maker confirmed</li>
+                `;
+                
+                const rcChecklist = `
+                    <li>${dc.required_capabilities.top_rcs_ranked ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Top RCs ranked</li>
+                    <li>${dc.required_capabilities.must_have_vs_nice_to_have_distinguished ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Must-have vs nice-to-have distinguished</li>
+                    <li>${dc.required_capabilities.deal_breakers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Deal-breakers identified</li>
+                    <li style="margin-top: 10px; font-weight: 600; opacity: 0.8;">Core Capabilities:</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.llm_agent_tracing_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.llm_agent_tracing_important === false ? '<span class="x-icon">✗</span>' : '○'} LLM/Agent Tracing</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.llm_evaluations_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.llm_evaluations_important === false ? '<span class="x-icon">✗</span>' : '○'} LLM Evaluations</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.production_monitoring_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.production_monitoring_important === false ? '<span class="x-icon">✗</span>' : '○'} Production Monitoring</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.prompt_management_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.prompt_management_important === false ? '<span class="x-icon">✗</span>' : '○'} Prompt Management</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.prompt_experimentation_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.prompt_experimentation_important === false ? '<span class="x-icon">✗</span>' : '○'} Prompt Experimentation</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.monitoring_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.monitoring_important === false ? '<span class="x-icon">✗</span>' : '○'} Monitoring</li>
+                    <li style="padding-left: 12px;">${dc.required_capabilities.compliance_important === true ? '<span class="check-icon">✓</span>' : dc.required_capabilities.compliance_important === false ? '<span class="x-icon">✗</span>' : '○'} Compliance (SOC2, SSO, GDPR)</li>
+                `;
+                
+                const compChecklist = `
+                    <li>${dc.competitive_landscape.current_tools_evaluated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Current tools evaluated</li>
+                    <li>${dc.competitive_landscape.why_looking_vs_staying ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Why looking vs staying</li>
+                    <li>${dc.competitive_landscape.key_differentiators_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key differentiators identified</li>
+                    ${dc.competitive_landscape.tools_mentioned && dc.competitive_landscape.tools_mentioned.length > 0 ? 
+                        `<li style="margin-top: 8px; opacity: 0.8;">Tools mentioned: ${dc.competitive_landscape.tools_mentioned.join(', ')}</li>` : ''}
+                `;
+                
                 discoveryCriteriaHtml = `
                     <div class="criteria-card">
                         <h4>🔍 Discovery Criteria</h4>
@@ -804,55 +1027,10 @@ The tool will auto-detect the format and identify the SA."
                             ${classification.discovery_completion_score.toFixed(0)}% Complete
                         </div>
                         
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Pain & Current State
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${dc.pain_current_state.debugging_process_documented ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Debugging process documented</li>
-                                <li>${dc.pain_current_state.situation_understood ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Situation understood</li>
-                                <li>${dc.pain_current_state.frequency_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Frequency quantified</li>
-                                <li>${dc.pain_current_state.duration_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Duration quantified</li>
-                                <li>${dc.pain_current_state.impact_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Impact quantified</li>
-                                <li>${dc.pain_current_state.mttd_mttr_quantified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} MTTD/MTTR quantified</li>
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Stakeholder Map
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${dc.stakeholder_map.technical_champion_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion identified</li>
-                                <li>${dc.stakeholder_map.technical_champion_engaged ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Technical champion engaged</li>
-                                <li>${dc.stakeholder_map.economic_buyer_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Economic buyer identified</li>
-                                <li>${dc.stakeholder_map.decision_maker_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision maker confirmed</li>
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Required Capabilities
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${dc.required_capabilities.top_rcs_ranked ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Top RCs ranked</li>
-                                <li>${dc.required_capabilities.must_have_vs_nice_to_have_distinguished ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Must-have vs nice-to-have distinguished</li>
-                                <li>${dc.required_capabilities.deal_breakers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Deal-breakers identified</li>
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Competitive Landscape
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${dc.competitive_landscape.current_tools_evaluated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Current tools evaluated</li>
-                                <li>${dc.competitive_landscape.why_looking_vs_staying ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Why looking vs staying</li>
-                                <li>${dc.competitive_landscape.key_differentiators_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key differentiators identified</li>
-                                ${dc.competitive_landscape.tools_mentioned && dc.competitive_landscape.tools_mentioned.length > 0 ? 
-                                    `<li style="margin-top: 8px; opacity: 0.8;">Tools mentioned: ${dc.competitive_landscape.tools_mentioned.join(', ')}</li>` : ''}
-                            </ul>
-                        </details>
+                        ${buildCriteriaSectionHtml('Pain & Current State', dc.pain_current_state, painChecklist)}
+                        ${buildCriteriaSectionHtml('Stakeholder Map', dc.stakeholder_map, stakeholderChecklist)}
+                        ${buildCriteriaSectionHtml('Required Capabilities', dc.required_capabilities, rcChecklist)}
+                        ${buildCriteriaSectionHtml('Competitive Landscape', dc.competitive_landscape, compChecklist)}
                     </div>
                 `;
             }
@@ -861,6 +1039,48 @@ The tool will auto-detect the format and identify the SA."
             let pocCriteriaHtml = '';
             if (classification.poc_scoping_criteria) {
                 const pc = classification.poc_scoping_criteria;
+                
+                const useCaseChecklist = `
+                    <li>${pc.use_case_scoped.llm_applications_selected ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} LLM application selected (max 1 use case)</li>
+                    <li>${pc.use_case_scoped.environment_decided ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Environment decided ${pc.use_case_scoped.environment_type ? `(${pc.use_case_scoped.environment_type})` : ''}</li>
+                    <li>${pc.use_case_scoped.trace_volume_estimated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Trace volume estimated ${pc.use_case_scoped.estimated_volume ? `(${pc.use_case_scoped.estimated_volume})` : ''}</li>
+                    <li>${pc.use_case_scoped.llm_provider_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} LLM Provider identified ${pc.use_case_scoped.llm_provider ? `(${pc.use_case_scoped.llm_provider})` : ''}</li>
+                    <li>${pc.use_case_scoped.integration_complexity_assessed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Integration complexity assessed</li>
+                    ${pc.use_case_scoped.applications_list && pc.use_case_scoped.applications_list.length > 0 ? 
+                        `<li style="margin-top: 8px; opacity: 0.8;">Apps: ${pc.use_case_scoped.applications_list.join(', ')}</li>` : ''}
+                `;
+                
+                const implChecklist = `
+                    <li>${pc.implementation_requirements.data_residency_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Data residency confirmed ${pc.implementation_requirements.deployment_model ? `(${pc.implementation_requirements.deployment_model})` : ''}</li>
+                    <li>${pc.implementation_requirements.blockers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Blockers identified</li>
+                    ${pc.implementation_requirements.blockers_list && pc.implementation_requirements.blockers_list.length > 0 ? 
+                        `<li style="margin-top: 8px; opacity: 0.8;">Blockers: ${pc.implementation_requirements.blockers_list.join(', ')}</li>` : ''}
+                `;
+                
+                const metricsChecklist = `
+                    <li>${pc.metrics_success_criteria.specific_metrics_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Specific metrics defined</li>
+                    <li>${pc.metrics_success_criteria.baseline_captured ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Baseline captured</li>
+                    <li>${pc.metrics_success_criteria.success_measurement_agreed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Success measurement agreed</li>
+                    <li>${pc.metrics_success_criteria.competitive_favorable_criteria ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Criteria favorable vs competitors</li>
+                    ${pc.metrics_success_criteria.example_metrics && pc.metrics_success_criteria.example_metrics.length > 0 ? 
+                        `<li style="margin-top: 8px; opacity: 0.8;">Metrics: ${pc.metrics_success_criteria.example_metrics.join(', ')}</li>` : ''}
+                `;
+                
+                const timelineChecklist = `
+                    <li>${pc.timeline_milestones.poc_duration_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} PoC duration defined ${pc.timeline_milestones.duration_weeks ? `(${pc.timeline_milestones.duration_weeks} weeks)` : ''}</li>
+                    <li>${pc.timeline_milestones.key_milestones_with_dates ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key milestones with dates</li>
+                    <li>${pc.timeline_milestones.decision_date_committed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision date committed ${pc.timeline_milestones.decision_date ? `(${pc.timeline_milestones.decision_date})` : ''}</li>
+                    <li>${pc.timeline_milestones.next_steps_discussed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Next steps discussed</li>
+                `;
+                
+                const resourcesChecklist = `
+                    <li>${pc.resources_committed.engineering_resources_allocated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Engineering resources allocated</li>
+                    <li>${pc.resources_committed.checkin_cadence_established ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Check-in cadence established ${pc.resources_committed.cadence ? `(${pc.resources_committed.cadence})` : ''}</li>
+                    <li>${pc.resources_committed.communication_channel_created ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Communication channel created</li>
+                    ${pc.resources_committed.resource_names && pc.resources_committed.resource_names.length > 0 ? 
+                        `<li style="margin-top: 8px; opacity: 0.8;">Resources: ${pc.resources_committed.resource_names.join(', ')}</li>` : ''}
+                `;
+                
                 pocCriteriaHtml = `
                     <div class="criteria-card">
                         <h4>🚀 PoC Scoping Criteria</h4>
@@ -872,67 +1092,11 @@ The tool will auto-detect the format and identify the SA."
                             ${classification.poc_scoping_completion_score.toFixed(0)}% Complete
                         </div>
                         
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Use Case Scoped
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${pc.use_case_scoped.llm_applications_selected ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} LLM applications selected</li>
-                                <li>${pc.use_case_scoped.environment_decided ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Environment decided ${pc.use_case_scoped.environment_type ? `(${pc.use_case_scoped.environment_type})` : ''}</li>
-                                <li>${pc.use_case_scoped.trace_volume_estimated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Trace volume estimated ${pc.use_case_scoped.estimated_volume ? `(${pc.use_case_scoped.estimated_volume})` : ''}</li>
-                                <li>${pc.use_case_scoped.integration_complexity_assessed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Integration complexity assessed</li>
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Implementation Requirements
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${pc.implementation_requirements.data_residency_confirmed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Data residency confirmed ${pc.implementation_requirements.deployment_model ? `(${pc.implementation_requirements.deployment_model})` : ''}</li>
-                                <li>${pc.implementation_requirements.blockers_identified ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Blockers identified</li>
-                                ${pc.implementation_requirements.blockers_list && pc.implementation_requirements.blockers_list.length > 0 ? 
-                                    `<li style="margin-top: 8px; opacity: 0.8;">Blockers: ${pc.implementation_requirements.blockers_list.join(', ')}</li>` : ''}
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Metrics & Success Criteria
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${pc.metrics_success_criteria.specific_metrics_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Specific metrics defined</li>
-                                <li>${pc.metrics_success_criteria.baseline_captured ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Baseline captured</li>
-                                <li>${pc.metrics_success_criteria.success_measurement_agreed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Success measurement agreed</li>
-                                ${pc.metrics_success_criteria.example_metrics && pc.metrics_success_criteria.example_metrics.length > 0 ? 
-                                    `<li style="margin-top: 8px; opacity: 0.8;">Metrics: ${pc.metrics_success_criteria.example_metrics.join(', ')}</li>` : ''}
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Timeline & Milestones
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${pc.timeline_milestones.poc_duration_defined ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} PoC duration defined ${pc.timeline_milestones.duration_weeks ? `(${pc.timeline_milestones.duration_weeks} weeks)` : ''}</li>
-                                <li>${pc.timeline_milestones.key_milestones_with_dates ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Key milestones with dates</li>
-                                <li>${pc.timeline_milestones.decision_date_committed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Decision date committed ${pc.timeline_milestones.decision_date ? `(${pc.timeline_milestones.decision_date})` : ''}</li>
-                                <li>${pc.timeline_milestones.next_steps_discussed ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Next steps discussed</li>
-                            </ul>
-                        </details>
-                        
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
-                                Resources Committed
-                            </summary>
-                            <ul class="criteria-checklist">
-                                <li>${pc.resources_committed.engineering_resources_allocated ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Engineering resources allocated</li>
-                                <li>${pc.resources_committed.checkin_cadence_established ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Check-in cadence established ${pc.resources_committed.cadence ? `(${pc.resources_committed.cadence})` : ''}</li>
-                                <li>${pc.resources_committed.communication_channel_created ? '<span class="check-icon">✓</span>' : '<span class="x-icon">✗</span>'} Communication channel created</li>
-                                ${pc.resources_committed.resource_names && pc.resources_committed.resource_names.length > 0 ? 
-                                    `<li style="margin-top: 8px; opacity: 0.8;">Resources: ${pc.resources_committed.resource_names.join(', ')}</li>` : ''}
-                            </ul>
-                        </details>
+                        ${buildCriteriaSectionHtml('Use Case Scoped', pc.use_case_scoped, useCaseChecklist)}
+                        ${buildCriteriaSectionHtml('Implementation Requirements', pc.implementation_requirements, implChecklist)}
+                        ${buildCriteriaSectionHtml('Metrics & Success Criteria', pc.metrics_success_criteria, metricsChecklist)}
+                        ${buildCriteriaSectionHtml('Timeline & Milestones', pc.timeline_milestones, timelineChecklist)}
+                        ${buildCriteriaSectionHtml('Resources Committed', pc.resources_committed, resourcesChecklist)}
                     </div>
                 `;
             }

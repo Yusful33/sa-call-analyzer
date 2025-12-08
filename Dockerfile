@@ -7,18 +7,15 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
-COPY pyproject.toml uv.lock* ./
-
-# Install uv for faster installs, then install dependencies
-RUN pip install uv && uv pip install --system -e .
-
-# Copy application code
+# Copy all application code first (needed for pyproject.toml build)
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# Install uv for faster installs, then install dependencies
+RUN pip install uv && uv pip install --system .
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Expose port (Railway will set PORT env var, default to 8080)
+EXPOSE 8080
+
+# Run the application with configurable port
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
 

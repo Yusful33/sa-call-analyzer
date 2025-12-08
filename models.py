@@ -33,12 +33,43 @@ class AnalyzeRequest(BaseModel):
 
 
 # ============================================================================
+# EVIDENCE & OPPORTUNITY TRACKING
+# ============================================================================
+
+class CriteriaEvidence(BaseModel):
+    """Evidence captured for a specific criteria item"""
+    criteria_name: str  # e.g., "debugging_process_documented"
+    captured: bool = False  # Whether this criteria was captured
+    timestamp: Optional[str] = None  # When in the call this was discussed
+    conversation_snippet: Optional[str] = None  # Brief excerpt showing evidence
+    speaker: Optional[str] = None  # Who provided this information
+
+
+class MissedOpportunity(BaseModel):
+    """A missed opportunity to gather information"""
+    criteria_name: str  # Which criteria this relates to
+    timestamp: Optional[str] = None  # When the opportunity occurred
+    context: str  # What was happening when the opportunity arose
+    suggested_question: str  # What question could have been asked
+    why_important: str  # Why this information matters
+
+
+# ============================================================================
 # DISCOVERY CALL CRITERIA
 # ============================================================================
 
 class PainCurrentState(BaseModel):
     """1. Pain & Current State Validated"""
+    # Primary Use Case Focus
+    primary_use_case: Optional[str] = None  # "development", "production", or "both"
+    
+    # Development Focus
+    prompt_model_iteration_understood: bool = False  # How they iterate on prompts/models today
+    
+    # Production Focus
     debugging_process_documented: bool = False  # How they debug LLM/agent issues today
+    
+    # Common criteria for both
     situation_understood: bool = False  # What is the situation?
     resolution_attempts_documented: bool = False  # What have you done to resolve?
     outcomes_documented: bool = False  # What outcome did those actions have?
@@ -48,19 +79,25 @@ class PainCurrentState(BaseModel):
     people_impact_understood: bool = False  # People affected
     process_impact_understood: bool = False  # Process affected
     technology_impact_understood: bool = False  # Technology affected
+    
+    # Metrics
     mttd_mttr_quantified: bool = False  # Mean Time to Detection/Remediation for LLM failures
+    experiment_time_quantified: bool = False  # Average time to experiment with new prompts/models
+    
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
         """Calculate completion percentage (0-100)"""
         fields = [
-            self.debugging_process_documented, self.situation_understood,
-            self.resolution_attempts_documented, self.outcomes_documented,
-            self.frequency_quantified, self.duration_quantified,
+            self.prompt_model_iteration_understood, self.debugging_process_documented,
+            self.situation_understood, self.resolution_attempts_documented,
+            self.outcomes_documented, self.frequency_quantified, self.duration_quantified,
             self.impact_quantified, self.people_impact_understood,
             self.process_impact_understood, self.technology_impact_understood,
-            self.mttd_mttr_quantified
+            self.mttd_mttr_quantified, self.experiment_time_quantified
         ]
         return (sum(fields) / len(fields)) * 100
 
@@ -72,6 +109,8 @@ class StakeholderMap(BaseModel):
     economic_buyer_identified: bool = False
     decision_maker_confirmed: bool = False
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
@@ -85,14 +124,21 @@ class StakeholderMap(BaseModel):
 class RequiredCapabilities(BaseModel):
     """3. Required Capabilities (RCs) Prioritized"""
     top_rcs_ranked: bool = False  # Top 2-3 RCs ranked by prospect
-    llm_agent_tracing_important: Optional[bool] = None  # Core Capability
-    llm_evaluations_important: Optional[bool] = None  # Core Capability
-    production_monitoring_important: Optional[bool] = None  # Core Capability
-    dataset_management_important: Optional[bool] = None  # Core Capability
-    compliance_monitoring_important: Optional[bool] = None  # Core Capability
+    
+    # Core Capabilities - which are important to the prospect?
+    llm_agent_tracing_important: Optional[bool] = None
+    llm_evaluations_important: Optional[bool] = None
+    production_monitoring_important: Optional[bool] = None
+    prompt_management_important: Optional[bool] = None  # NEW
+    prompt_experimentation_important: Optional[bool] = None  # NEW
+    monitoring_important: Optional[bool] = None
+    compliance_important: Optional[bool] = None  # SOC2, SSO, GDPR, etc.
+    
     must_have_vs_nice_to_have_distinguished: bool = False
     deal_breakers_identified: bool = False
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
@@ -110,6 +156,8 @@ class CompetitiveLandscape(BaseModel):
     why_looking_vs_staying: bool = False  # Why they're looking vs. staying
     key_differentiators_identified: bool = False  # Differentiators that matter to prospect
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
@@ -143,20 +191,25 @@ class DiscoveryCriteria(BaseModel):
 
 class UseCaseScoped(BaseModel):
     """1. Use Case Scoped"""
-    llm_applications_selected: bool = False  # Specific LLM application(s) for PoC
+    llm_applications_selected: bool = False  # Specific LLM application(s) for PoC (not to exceed one)
     applications_list: List[str] = Field(default_factory=list)
     environment_decided: bool = False  # Production vs. staging
     environment_type: Optional[str] = None  # "production", "staging", "both"
     trace_volume_estimated: bool = False  # Expected trace volume
     estimated_volume: Optional[str] = None  # e.g., "10K traces/day"
+    llm_provider_identified: bool = False  # LLM Provider for gateway implementation
+    llm_provider: Optional[str] = None  # e.g., "OpenAI", "Anthropic", "Azure OpenAI"
     integration_complexity_assessed: bool = False  # # of services, frameworks
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
         fields = [
             self.llm_applications_selected, self.environment_decided,
-            self.trace_volume_estimated, self.integration_complexity_assessed
+            self.trace_volume_estimated, self.llm_provider_identified,
+            self.integration_complexity_assessed
         ]
         return (sum(fields) / len(fields)) * 100
 
@@ -168,6 +221,8 @@ class ImplementationRequirements(BaseModel):
     blockers_identified: bool = False  # Firewall, procurement, security review
     blockers_list: List[str] = Field(default_factory=list)
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
@@ -181,13 +236,16 @@ class MetricsSuccessCriteria(BaseModel):
     example_metrics: List[str] = Field(default_factory=list)  # e.g., "reduce debugging from 4hr to 30min"
     baseline_captured: bool = False  # Before/after comparison baseline
     success_measurement_agreed: bool = False  # Agreement on how to measure success
+    competitive_favorable_criteria: bool = False  # Success criteria favorable vs competitors (Galileo, Braintrust, LangSmith)
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
         fields = [
             self.specific_metrics_defined, self.baseline_captured,
-            self.success_measurement_agreed
+            self.success_measurement_agreed, self.competitive_favorable_criteria
         ]
         return (sum(fields) / len(fields)) * 100
 
@@ -202,6 +260,8 @@ class TimelineMilestones(BaseModel):
     decision_date: Optional[str] = None
     next_steps_discussed: bool = False  # What happens after successful PoC
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:
@@ -220,6 +280,8 @@ class ResourcesCommitted(BaseModel):
     cadence: Optional[str] = None  # e.g., "weekly", "bi-weekly"
     communication_channel_created: bool = False  # Slack channel created
     notes: Optional[str] = None
+    evidence: List[CriteriaEvidence] = Field(default_factory=list)
+    missed_opportunities: List[MissedOpportunity] = Field(default_factory=list)
 
     @property
     def completion_score(self) -> float:

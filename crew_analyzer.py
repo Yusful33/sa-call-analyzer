@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import List, Optional
 from crewai import Agent, Task, Crew, Process
 from models import (
@@ -19,7 +20,9 @@ from models import (
     ImplementationRequirements,
     MetricsSuccessCriteria,
     TimelineMilestones,
-    ResourcesCommitted
+    ResourcesCommitted,
+    CriteriaEvidence,
+    MissedOpportunity
 )
 from dotenv import load_dotenv
 from opentelemetry import trace
@@ -352,15 +355,15 @@ class SACallAnalysisCrew:
                     DISCOVERY CALL CRITERIA - Look for evidence of:
 
                     1. PAIN & CURRENT STATE VALIDATED:
-                       - How they debug LLM/agent issues today (documented?)
-                       - What is the situation? (understood?)
-                       - What have they done to resolve? (documented?)
-                       - What outcomes from those actions? (documented?)
+                       - What is the primary Use Case? (Development or Production focus?)
+                       - DEVELOPMENT: How do they iterate on prompts/models today?
+                       - PRODUCTION: How do they debug LLM/agent issues today?
+                       - For either: What is the situation? What have they done to resolve? What outcomes?
                        - Frequency quantified (how often?)
                        - Duration quantified (how long?)
-                       - Impact quantified (how much?)
-                       - People/Process/Technology impact understood?
-                       - MTTD/MTTR for LLM failures quantified?
+                       - Impact quantified (how much?) - People, Process, Technology
+                       - METRICS: MTTD/MTTR for LLM failures quantified?
+                       - METRICS: Average time to experiment with new prompts/models?
 
                     2. STAKEHOLDER MAP COMPLETE:
                        - Technical Champion identified and engaged?
@@ -369,35 +372,44 @@ class SACallAnalysisCrew:
 
                     3. REQUIRED CAPABILITIES (RCs) PRIORITIZED:
                        - Top 2-3 RCs ranked by prospect?
-                       - Core capabilities discussed: LLM Tracing, Evaluations, Monitoring, Datasets, Compliance?
+                       - Core capabilities discussed:
+                         * LLM/Agent Tracing
+                         * LLM Evaluations
+                         * Production Monitoring
+                         * Prompt Management
+                         * Prompt Experimentation
+                         * Monitoring
+                         * Compliance (SOC2, SSO, GDPR, etc.)
                        - "Must have" vs "nice to have" distinguished?
                        - Deal-breakers identified?
 
                     4. COMPETITIVE LANDSCAPE UNDERSTOOD:
-                       - Current/prior tools mentioned (LangSmith, W&B, Braintrust, Datadog LLM)?
-                       - Why looking vs. staying with current solution?
-                       - Key differentiators that matter to prospect?
+                       - Current/prior tools evaluated (LangSmith, W&B, Braintrust, Datadog LLM)?
+                       - Why they're looking vs. staying with current solution?
+                       - Key differentiators that matter to this prospect?
 
                     POC SCOPING CALL CRITERIA - Look for evidence of:
 
                     1. USE CASE SCOPED:
-                       - Specific LLM application(s) selected for PoC?
-                       - Production vs. staging environment decided?
+                       - Specific LLM application(s) selected for PoC (not to exceed one use case)?
+                       - Production vs. staging environment decision made?
                        - Expected trace volume estimated?
+                       - LLM Provider identified (for gateway implementation)?
                        - Integration complexity assessed (# services, frameworks)?
 
                     2. IMPLEMENTATION REQUIREMENTS VALIDATED:
                        - Data residency / deployment model confirmed (Cloud, VPC, On-prem)?
-                       - Blockers identified (firewall, procurement, security review)?
+                       - Any blockers identified (firewall, procurement, security review)?
 
                     3. METRICS & SUCCESS CRITERIA DEFINED:
-                       - Specific metrics defined (e.g., "reduce debugging from 4hr to 30min")?
-                       - Baseline measurements captured?
+                       - Prospect-specific metrics defined (e.g., "reduce debugging from 4hr to 30min")?
+                       - Baseline measurements captured for before/after comparison?
                        - Agreement on how success will be measured?
+                       - Success criteria favorable for Arize AX vs competitors (Galileo, Braintrust, LangSmith)?
 
                     4. TIMELINE & MILESTONES AGREED:
                        - PoC duration defined (typically 2-4 weeks)?
-                       - Key milestones with dates (kickoff, integration, eval, decision)?
+                       - Key milestones with dates (kickoff, integration complete, eval review, decision)?
                        - Decision date committed?
                        - Next steps after successful PoC discussed?
 
@@ -406,6 +418,10 @@ class SACallAnalysisCrew:
                        - Weekly check-in cadence established?
                        - Slack/communication channel created?
 
+                    IMPORTANT: For each criteria section, you MUST provide:
+                    1. "evidence" - Array of evidence items showing WHERE and WHAT was captured
+                    2. "missed_opportunities" - Array of moments where we COULD have gathered more info
+
                     Return your analysis as JSON with this EXACT structure:
                     {{
                         "call_type": "discovery" | "poc_scoping" | "mixed" | "unclear",
@@ -413,6 +429,8 @@ class SACallAnalysisCrew:
                         "reasoning": "Brief explanation of classification",
                         "discovery_criteria": {{
                             "pain_current_state": {{
+                                "primary_use_case": "development" | "production" | "both" | null,
+                                "prompt_model_iteration_understood": true/false,
                                 "debugging_process_documented": true/false,
                                 "situation_understood": true/false,
                                 "resolution_attempts_documented": true/false,
@@ -424,32 +442,59 @@ class SACallAnalysisCrew:
                                 "process_impact_understood": true/false,
                                 "technology_impact_understood": true/false,
                                 "mttd_mttr_quantified": true/false,
-                                "notes": "specific evidence from transcript"
+                                "experiment_time_quantified": true/false,
+                                "notes": "summary of pain/current state understanding",
+                                "evidence": [
+                                    {{
+                                        "criteria_name": "situation_understood",
+                                        "captured": true,
+                                        "timestamp": "[MM:SS]",
+                                        "conversation_snippet": "Customer: 'We're struggling with...'",
+                                        "speaker": "Customer Name"
+                                    }}
+                                ],
+                                "missed_opportunities": [
+                                    {{
+                                        "criteria_name": "mttd_mttr_quantified",
+                                        "timestamp": "[MM:SS]",
+                                        "context": "Customer mentioned debugging issues but SA moved on",
+                                        "suggested_question": "How long does it typically take your team to detect when an LLM response is incorrect?",
+                                        "why_important": "Quantifying MTTD establishes baseline for ROI calculation"
+                                    }}
+                                ]
                             }},
                             "stakeholder_map": {{
                                 "technical_champion_identified": true/false,
                                 "technical_champion_engaged": true/false,
                                 "economic_buyer_identified": true/false,
                                 "decision_maker_confirmed": true/false,
-                                "notes": "specific evidence"
+                                "notes": "stakeholder summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "required_capabilities": {{
                                 "top_rcs_ranked": true/false,
                                 "llm_agent_tracing_important": true/false/null,
                                 "llm_evaluations_important": true/false/null,
                                 "production_monitoring_important": true/false/null,
-                                "dataset_management_important": true/false/null,
-                                "compliance_monitoring_important": true/false/null,
+                                "prompt_management_important": true/false/null,
+                                "prompt_experimentation_important": true/false/null,
+                                "monitoring_important": true/false/null,
+                                "compliance_important": true/false/null,
                                 "must_have_vs_nice_to_have_distinguished": true/false,
                                 "deal_breakers_identified": true/false,
-                                "notes": "specific evidence"
+                                "notes": "RC summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "competitive_landscape": {{
                                 "current_tools_evaluated": true/false,
                                 "tools_mentioned": ["list", "of", "tools"],
                                 "why_looking_vs_staying": true/false,
                                 "key_differentiators_identified": true/false,
-                                "notes": "specific evidence"
+                                "notes": "competitive summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }}
                         }},
                         "poc_scoping_criteria": {{
@@ -460,22 +505,31 @@ class SACallAnalysisCrew:
                                 "environment_type": "production" | "staging" | "both" | null,
                                 "trace_volume_estimated": true/false,
                                 "estimated_volume": "e.g., 10K traces/day" | null,
+                                "llm_provider_identified": true/false,
+                                "llm_provider": "e.g., OpenAI, Anthropic, Azure OpenAI" | null,
                                 "integration_complexity_assessed": true/false,
-                                "notes": "specific evidence"
+                                "notes": "use case summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "implementation_requirements": {{
                                 "data_residency_confirmed": true/false,
                                 "deployment_model": "cloud" | "vpc" | "on-prem" | null,
                                 "blockers_identified": true/false,
                                 "blockers_list": ["list", "of", "blockers"],
-                                "notes": "specific evidence"
+                                "notes": "implementation summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "metrics_success_criteria": {{
                                 "specific_metrics_defined": true/false,
                                 "example_metrics": ["list", "of", "metrics"],
                                 "baseline_captured": true/false,
                                 "success_measurement_agreed": true/false,
-                                "notes": "specific evidence"
+                                "competitive_favorable_criteria": true/false,
+                                "notes": "metrics summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "timeline_milestones": {{
                                 "poc_duration_defined": true/false,
@@ -485,7 +539,9 @@ class SACallAnalysisCrew:
                                 "decision_date_committed": true/false,
                                 "decision_date": "date string" | null,
                                 "next_steps_discussed": true/false,
-                                "notes": "specific evidence"
+                                "notes": "timeline summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }},
                             "resources_committed": {{
                                 "engineering_resources_allocated": true/false,
@@ -493,11 +549,13 @@ class SACallAnalysisCrew:
                                 "checkin_cadence_established": true/false,
                                 "cadence": "weekly" | "bi-weekly" | null,
                                 "communication_channel_created": true/false,
-                                "notes": "specific evidence"
+                                "notes": "resources summary",
+                                "evidence": [],
+                                "missed_opportunities": []
                             }}
                         }},
-                        "missing_elements": ["List of key missing criteria"],
-                        "recommendations": ["Specific actions for next call"]
+                        "missing_elements": ["List of key missing criteria with specific gaps"],
+                        "recommendations": ["Specific actions with example questions for next call"]
                     }}
                     """,
                         agent=agents['call_classifier'],
@@ -739,7 +797,17 @@ class SACallAnalysisCrew:
                     crew_span.set_attribute("execution.status", "in_progress")
 
                     final_report = analysis_crew.kickoff()
-                    final_report_text = str(final_report)
+                    
+                    # Use .raw to get clean output without terminal formatting
+                    # str(final_report) includes box-drawing characters that break JSON parsing
+                    final_report_text = final_report.raw if hasattr(final_report, 'raw') else str(final_report)
+                    
+                    # Check if CrewAI already parsed the JSON for us
+                    if hasattr(final_report, 'json_dict') and final_report.json_dict:
+                        print(f"✅ Using pre-parsed json_dict from CrewOutput")
+                        analysis_data_from_crew = final_report.json_dict
+                    else:
+                        analysis_data_from_crew = None
 
                     crew_span.add_event("crew_kickoff_completed", {
                         "report.length": len(final_report_text),
@@ -800,60 +868,91 @@ class SACallAnalysisCrew:
                         parse_span.set_attribute("input.mime_type", "text/plain")
 
                         try:
-                        # Extract JSON from the report (might have markdown code blocks)
-                            json_start = final_report_text.find('{')
-                            json_end = final_report_text.rfind('}') + 1
+                            analysis_data = None
+                            
+                            # First, check if CrewAI already parsed the JSON for us
+                            if analysis_data_from_crew:
+                                analysis_data = analysis_data_from_crew
+                                parse_span.add_event("using_crew_json_dict")
+                                parse_span.set_attribute("parsing.method", "crew_json_dict")
+                            
+                            # If not, try to extract JSON from the report
+                            if analysis_data is None:
+                                # Try markdown code blocks first
+                                code_block_pattern = r'```(?:json)?\s*([\s\S]*?)```'
+                                code_blocks = re.findall(code_block_pattern, final_report_text)
+                                
+                                for block in code_blocks:
+                                    block = block.strip()
+                                    if block.startswith('{'):
+                                        try:
+                                            analysis_data = json.loads(block)
+                                            parse_span.add_event("json_parsed_from_code_block")
+                                            parse_span.set_attribute("parsing.method", "code_block")
+                                            break
+                                        except json.JSONDecodeError:
+                                            continue
+                            
+                            # If still no data, try finding raw JSON
+                            if analysis_data is None:
+                                json_start = final_report_text.find('{')
+                                json_end = final_report_text.rfind('}') + 1
 
-                            if json_start >= 0 and json_end > json_start:
-                                json_str = final_report_text[json_start:json_end]
-                                analysis_data = json.loads(json_str)
-                                parse_span.add_event("json_parsed_successfully")
-                                parse_span.set_attribute("parsing.success", True)
-                            else:
-                                raise ValueError("No JSON found in report")
+                                if json_start >= 0 and json_end > json_start:
+                                    json_str = final_report_text[json_start:json_end]
+                                    # Clean up common issues
+                                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                                    json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+                                    analysis_data = json.loads(json_str)
+                                    parse_span.add_event("json_parsed_from_raw")
+                                    parse_span.set_attribute("parsing.method", "raw_extraction")
+                                else:
+                                    raise ValueError("No JSON found in report")
+                            
+                            parse_span.set_attribute("parsing.success", True)
 
                         except (json.JSONDecodeError, ValueError) as e:
                             print(f"⚠️  WARNING: Could not parse JSON from crew report: {e}")
+                            print(f"📄 Raw report length: {len(final_report_text)} chars")
                             print(f"📄 Raw report (first 1000 chars):\n{final_report_text[:1000]}")
                             print(f"📄 Raw report (last 500 chars):\n{final_report_text[-500:]}")
-                            parse_span.add_event("json_parse_failed", {
-                                "error": str(e),
-                                "report_preview": final_report_text[:500]
-                            })
-                            parse_span.set_attribute("parsing.success", False)
-                            parse_span.set_attribute("parsing.fallback", True)
-                            parse_span.set_attribute("error.message", str(e))
+                            
+                            # Try one more time with aggressive cleaning
+                            try:
+                                # Remove any control characters and clean the text
+                                cleaned_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', final_report_text)
+                                # Remove ANSI escape codes
+                                cleaned_text = re.sub(r'\x1b\[[0-9;]*m', '', cleaned_text)
+                                # Remove any box-drawing characters
+                                cleaned_text = re.sub(r'[│╭╮╯╰─]', '', cleaned_text)
+                                
+                                json_start = cleaned_text.find('{')
+                                json_end = cleaned_text.rfind('}') + 1
+                                
+                                if json_start >= 0 and json_end > json_start:
+                                    json_str = cleaned_text[json_start:json_end]
+                                    json_str = re.sub(r',\s*}', '}', json_str)
+                                    json_str = re.sub(r',\s*]', ']', json_str)
+                                    analysis_data = json.loads(json_str)
+                                    parse_span.add_event("json_parsed_after_cleaning")
+                                    parse_span.set_attribute("parsing.success", True)
+                                    parse_span.set_attribute("parsing.method", "cleaned")
+                                    print(f"✅ JSON parsed successfully after cleaning!")
+                                else:
+                                    raise ValueError("No JSON found after cleaning")
+                            except (json.JSONDecodeError, ValueError) as e2:
+                                print(f"⚠️  Cleaning also failed: {e2}")
+                                parse_span.add_event("json_parse_failed", {
+                                    "error": str(e),
+                                    "cleaning_error": str(e2),
+                                    "report_preview": final_report_text[:500]
+                                })
+                                parse_span.set_attribute("parsing.success", False)
+                                parse_span.set_attribute("parsing.fallback", True)
+                                parse_span.set_attribute("error.message", str(e))
 
-                        # Fallback to default structure
-                            analysis_data = {
-                                "call_summary": f"Analysis completed by CrewAI for {sa_name}. See raw output for details.",
-                                "overall_score": 7.0,
-                                "command_scores": {
-                                    "problem_identification": 7.0,
-                                    "differentiation": 7.0,
-                                    "proof_evidence": 7.0,
-                                    "required_capabilities": 7.0
-                                },
-                                "sa_metrics": {
-                                    "technical_depth": 7.0,
-                                    "discovery_quality": 7.0,
-                                    "active_listening": 7.0,
-                                    "value_articulation": 7.0
-                                },
-                                "top_insights": [{
-                                    "category": "General",
-                                    "severity": "important",
-                                    "timestamp": "[~0:00]",
-                                    "conversation_snippet": None,
-                                    "what_happened": "Multi-agent analysis completed",
-                                    "why_it_matters": "Comprehensive evaluation from multiple expert perspectives",
-                                    "better_approach": "Review the detailed crew output for specific recommendations",
-                                    "example_phrasing": None
-                                }],
-                                "strengths": ["Multi-agent analysis completed successfully"],
-                                "improvement_areas": ["See detailed crew output for specific areas"],
-                                "key_moments": []
-                            }
+                                # Smart fallback: Extract meaningful content from raw text
+                                analysis_data = self._extract_insights_from_raw_text(final_report_text, sa_name)
 
                     # Helper function to safely convert to float
                         def safe_float(value, default=7.0):
@@ -933,25 +1032,7 @@ class SACallAnalysisCrew:
                         parse_span.set_attribute("output.mime_type", "application/json")
                         parse_span.set_status(Status(StatusCode.OK))
 
-                # Add result metadata to span - summary without full insights
-                # (Insights are stored as separate child spans below)
-                analysis_span.set_attributes({
-                    # OpenInference semantic conventions for output - summary only
-                        "output.value": json.dumps({
-                            "sa_identified": sa_name,
-                            "call_summary": result.call_summary,
-                            "overall_score": result.overall_score,
-                            "command_scores": result.command_scores.model_dump(),
-                            "sa_metrics": result.sa_metrics.model_dump(),
-                            "insight_count": len(result.top_insights),
-                            "strengths": result.strengths,
-                            "improvement_areas": result.improvement_areas,
-                            "key_moments": result.key_moments,
-                        }, indent=2),
-                        "output.mime_type": "application/json",
-                })
-
-                # Create separate child spans for each insight (prevents truncation)
+                    # Create separate child spans for each insight (inside crew_span)
                 for idx, insight in enumerate(result.top_insights):
                     with tracer.start_as_current_span(
                         f"insight_{idx+1}_{insight.category.lower().replace(' ', '_')}",
@@ -980,8 +1061,24 @@ class SACallAnalysisCrew:
                             "timestamp": insight.timestamp or "unknown"
                         })
 
-                    # Mark crew_analysis_execution as complete (after all child spans)
+                    # Mark crew_analysis_execution as complete
                     crew_span.set_status(Status(StatusCode.OK))
+
+                # Add result metadata to analysis_span (parent span)
+                analysis_span.set_attributes({
+                    "output.value": json.dumps({
+                        "sa_identified": sa_name,
+                        "call_summary": result.call_summary,
+                        "overall_score": result.overall_score,
+                        "command_scores": result.command_scores.model_dump(),
+                        "sa_metrics": result.sa_metrics.model_dump(),
+                        "insight_count": len(result.top_insights),
+                        "strengths": result.strengths,
+                        "improvement_areas": result.improvement_areas,
+                        "key_moments": result.key_moments,
+                    }, indent=2),
+                    "output.mime_type": "application/json",
+                })
 
             except Exception as e:
                 analysis_span.set_status(Status(StatusCode.ERROR, str(e)))
@@ -1020,6 +1117,38 @@ class SACallAnalysisCrew:
         print(f"⚠️  Could not extract SA name from identification result. Using 'Unknown SA'")
         return "Unknown SA"
 
+    def _parse_evidence(self, evidence_list: List[dict]) -> List[CriteriaEvidence]:
+        """Parse evidence items from JSON data"""
+        evidence = []
+        for item in evidence_list:
+            try:
+                evidence.append(CriteriaEvidence(
+                    criteria_name=item.get("criteria_name", ""),
+                    captured=item.get("captured", False),
+                    timestamp=item.get("timestamp"),
+                    conversation_snippet=item.get("conversation_snippet"),
+                    speaker=item.get("speaker")
+                ))
+            except Exception:
+                pass  # Skip malformed evidence items
+        return evidence
+
+    def _parse_missed_opportunities(self, opportunities_list: List[dict]) -> List[MissedOpportunity]:
+        """Parse missed opportunity items from JSON data"""
+        opportunities = []
+        for item in opportunities_list:
+            try:
+                opportunities.append(MissedOpportunity(
+                    criteria_name=item.get("criteria_name", ""),
+                    timestamp=item.get("timestamp"),
+                    context=item.get("context", ""),
+                    suggested_question=item.get("suggested_question", ""),
+                    why_important=item.get("why_important", "")
+                ))
+            except Exception:
+                pass  # Skip malformed items
+        return opportunities
+
     def _parse_classification(self, classification_text: str) -> Optional[CallClassification]:
         """Parse classification result from the Call Classifier agent"""
         print(f"📊 Parsing classification result ({len(classification_text)} chars)...")
@@ -1055,6 +1184,8 @@ class SACallAnalysisCrew:
                 try:
                     pain_data = discovery_data.get("pain_current_state", {})
                     pain = PainCurrentState(
+                        primary_use_case=pain_data.get("primary_use_case"),
+                        prompt_model_iteration_understood=pain_data.get("prompt_model_iteration_understood", False),
                         debugging_process_documented=pain_data.get("debugging_process_documented", False),
                         situation_understood=pain_data.get("situation_understood", False),
                         resolution_attempts_documented=pain_data.get("resolution_attempts_documented", False),
@@ -1066,7 +1197,10 @@ class SACallAnalysisCrew:
                         process_impact_understood=pain_data.get("process_impact_understood", False),
                         technology_impact_understood=pain_data.get("technology_impact_understood", False),
                         mttd_mttr_quantified=pain_data.get("mttd_mttr_quantified", False),
-                        notes=pain_data.get("notes")
+                        experiment_time_quantified=pain_data.get("experiment_time_quantified", False),
+                        notes=pain_data.get("notes"),
+                        evidence=self._parse_evidence(pain_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(pain_data.get("missed_opportunities", []))
                     )
 
                     stakeholder_data = discovery_data.get("stakeholder_map", {})
@@ -1075,7 +1209,9 @@ class SACallAnalysisCrew:
                         technical_champion_engaged=stakeholder_data.get("technical_champion_engaged", False),
                         economic_buyer_identified=stakeholder_data.get("economic_buyer_identified", False),
                         decision_maker_confirmed=stakeholder_data.get("decision_maker_confirmed", False),
-                        notes=stakeholder_data.get("notes")
+                        notes=stakeholder_data.get("notes"),
+                        evidence=self._parse_evidence(stakeholder_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(stakeholder_data.get("missed_opportunities", []))
                     )
 
                     rc_data = discovery_data.get("required_capabilities", {})
@@ -1084,11 +1220,15 @@ class SACallAnalysisCrew:
                         llm_agent_tracing_important=rc_data.get("llm_agent_tracing_important"),
                         llm_evaluations_important=rc_data.get("llm_evaluations_important"),
                         production_monitoring_important=rc_data.get("production_monitoring_important"),
-                        dataset_management_important=rc_data.get("dataset_management_important"),
-                        compliance_monitoring_important=rc_data.get("compliance_monitoring_important"),
+                        prompt_management_important=rc_data.get("prompt_management_important"),
+                        prompt_experimentation_important=rc_data.get("prompt_experimentation_important"),
+                        monitoring_important=rc_data.get("monitoring_important"),
+                        compliance_important=rc_data.get("compliance_important"),
                         must_have_vs_nice_to_have_distinguished=rc_data.get("must_have_vs_nice_to_have_distinguished", False),
                         deal_breakers_identified=rc_data.get("deal_breakers_identified", False),
-                        notes=rc_data.get("notes")
+                        notes=rc_data.get("notes"),
+                        evidence=self._parse_evidence(rc_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(rc_data.get("missed_opportunities", []))
                     )
 
                     comp_data = discovery_data.get("competitive_landscape", {})
@@ -1097,7 +1237,9 @@ class SACallAnalysisCrew:
                         tools_mentioned=comp_data.get("tools_mentioned", []),
                         why_looking_vs_staying=comp_data.get("why_looking_vs_staying", False),
                         key_differentiators_identified=comp_data.get("key_differentiators_identified", False),
-                        notes=comp_data.get("notes")
+                        notes=comp_data.get("notes"),
+                        evidence=self._parse_evidence(comp_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(comp_data.get("missed_opportunities", []))
                     )
 
                     discovery_criteria = DiscoveryCriteria(
@@ -1125,8 +1267,12 @@ class SACallAnalysisCrew:
                         environment_type=use_case_data.get("environment_type"),
                         trace_volume_estimated=use_case_data.get("trace_volume_estimated", False),
                         estimated_volume=use_case_data.get("estimated_volume"),
+                        llm_provider_identified=use_case_data.get("llm_provider_identified", False),
+                        llm_provider=use_case_data.get("llm_provider"),
                         integration_complexity_assessed=use_case_data.get("integration_complexity_assessed", False),
-                        notes=use_case_data.get("notes")
+                        notes=use_case_data.get("notes"),
+                        evidence=self._parse_evidence(use_case_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(use_case_data.get("missed_opportunities", []))
                     )
 
                     impl_data = poc_data.get("implementation_requirements", {})
@@ -1135,7 +1281,9 @@ class SACallAnalysisCrew:
                         deployment_model=impl_data.get("deployment_model"),
                         blockers_identified=impl_data.get("blockers_identified", False),
                         blockers_list=impl_data.get("blockers_list", []),
-                        notes=impl_data.get("notes")
+                        notes=impl_data.get("notes"),
+                        evidence=self._parse_evidence(impl_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(impl_data.get("missed_opportunities", []))
                     )
 
                     metrics_data = poc_data.get("metrics_success_criteria", {})
@@ -1144,7 +1292,10 @@ class SACallAnalysisCrew:
                         example_metrics=metrics_data.get("example_metrics", []),
                         baseline_captured=metrics_data.get("baseline_captured", False),
                         success_measurement_agreed=metrics_data.get("success_measurement_agreed", False),
-                        notes=metrics_data.get("notes")
+                        competitive_favorable_criteria=metrics_data.get("competitive_favorable_criteria", False),
+                        notes=metrics_data.get("notes"),
+                        evidence=self._parse_evidence(metrics_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(metrics_data.get("missed_opportunities", []))
                     )
 
                     timeline_data = poc_data.get("timeline_milestones", {})
@@ -1156,7 +1307,9 @@ class SACallAnalysisCrew:
                         decision_date_committed=timeline_data.get("decision_date_committed", False),
                         decision_date=timeline_data.get("decision_date"),
                         next_steps_discussed=timeline_data.get("next_steps_discussed", False),
-                        notes=timeline_data.get("notes")
+                        notes=timeline_data.get("notes"),
+                        evidence=self._parse_evidence(timeline_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(timeline_data.get("missed_opportunities", []))
                     )
 
                     resources_data = poc_data.get("resources_committed", {})
@@ -1166,7 +1319,9 @@ class SACallAnalysisCrew:
                         checkin_cadence_established=resources_data.get("checkin_cadence_established", False),
                         cadence=resources_data.get("cadence"),
                         communication_channel_created=resources_data.get("communication_channel_created", False),
-                        notes=resources_data.get("notes")
+                        notes=resources_data.get("notes"),
+                        evidence=self._parse_evidence(resources_data.get("evidence", [])),
+                        missed_opportunities=self._parse_missed_opportunities(resources_data.get("missed_opportunities", []))
                     )
 
                     poc_criteria = PocScopingCriteria(
@@ -1207,3 +1362,159 @@ class SACallAnalysisCrew:
             import traceback
             traceback.print_exc()
             return None
+
+    def _extract_insights_from_raw_text(self, raw_text: str, sa_name: str) -> dict:
+        """
+        Extract meaningful insights from raw crew output when JSON parsing fails.
+        Uses regex patterns and heuristics to find strengths, improvements, and key moments.
+        """
+        insights = []
+        strengths = []
+        improvements = []
+        key_moments = []
+        call_summary = ""
+        
+        # Try to extract call summary
+        summary_patterns = [
+            r'(?:call[_\s]*summary|summary)[:\s]*["\']?([^"\'\n]+)["\']?',
+            r'(?:overview|assessment)[:\s]*["\']?([^"\'\n]+)["\']?',
+        ]
+        for pattern in summary_patterns:
+            match = re.search(pattern, raw_text, re.IGNORECASE)
+            if match:
+                call_summary = match.group(1).strip()
+                break
+        
+        if not call_summary:
+            # Look for first substantive sentence
+            sentences = re.split(r'[.!?]\s+', raw_text[:500])
+            for sentence in sentences:
+                if len(sentence) > 30 and not sentence.startswith('{'):
+                    call_summary = sentence.strip() + "."
+                    break
+        
+        # Extract strengths - look for positive indicators
+        strength_patterns = [
+            r'(?:strength|positive|well|good|excellent|effective)[s]?[:\s]*[-•*]?\s*([^\n•*]+)',
+            r'✓\s*([^\n]+)',
+            r'(?:did well|succeeded|strong)[:\s]*([^\n]+)',
+        ]
+        for pattern in strength_patterns:
+            matches = re.findall(pattern, raw_text, re.IGNORECASE)
+            for match in matches:
+                clean_match = match.strip().strip('",').strip()
+                if clean_match and len(clean_match) > 10 and clean_match not in strengths:
+                    strengths.append(clean_match[:200])
+        
+        # Extract improvements - look for negative indicators or suggestions
+        improvement_patterns = [
+            r'(?:improvement|could\s*improve|area[s]?\s*for\s*improvement|missed|opportunity|should)[:\s]*[-•*]?\s*([^\n•*]+)',
+            r'(?:→|➤|>)\s*([^\n]+)',
+            r'(?:consider|recommend|suggest)[:\s]*([^\n]+)',
+            r'(?:instead of|rather than|better approach)[:\s]*([^\n]+)',
+        ]
+        for pattern in improvement_patterns:
+            matches = re.findall(pattern, raw_text, re.IGNORECASE)
+            for match in matches:
+                clean_match = match.strip().strip('",').strip()
+                if clean_match and len(clean_match) > 10 and clean_match not in improvements:
+                    improvements.append(clean_match[:200])
+        
+        # Extract timestamps and key moments
+        timestamp_pattern = r'\[(\d{1,2}:\d{2}(?::\d{2})?)\][:\s]*([^\n\[]+)'
+        timestamp_matches = re.findall(timestamp_pattern, raw_text)
+        for ts, description in timestamp_matches[:10]:  # Limit to 10 moments
+            key_moments.append({
+                "timestamp": f"[{ts}]",
+                "description": description.strip()[:150]
+            })
+        
+        # Extract structured insights - look for what_happened/better_approach patterns
+        insight_patterns = [
+            r'(?:what\s*happened|issue|problem)[:\s]*([^\n]+)(?:.*?(?:why\s*it\s*matters|impact)[:\s]*([^\n]+))?(?:.*?(?:better\s*approach|recommendation)[:\s]*([^\n]+))?',
+        ]
+        for pattern in insight_patterns:
+            matches = re.findall(pattern, raw_text, re.IGNORECASE | re.DOTALL)
+            for match in matches[:5]:  # Limit to 5 insights
+                what_happened = match[0].strip() if len(match) > 0 and match[0] else ""
+                why_matters = match[1].strip() if len(match) > 1 and match[1] else ""
+                better_approach = match[2].strip() if len(match) > 2 and match[2] else ""
+                
+                if what_happened and len(what_happened) > 15:
+                    insights.append({
+                        "category": "Call Feedback",
+                        "severity": "important",
+                        "timestamp": None,
+                        "conversation_snippet": None,
+                        "what_happened": what_happened[:300],
+                        "why_it_matters": why_matters[:300] if why_matters else "This affects call effectiveness and customer engagement.",
+                        "better_approach": better_approach[:300] if better_approach else "Review specific recommendations in the analysis.",
+                        "example_phrasing": None
+                    })
+        
+        # If we didn't find structured insights, create them from improvements
+        if not insights and improvements:
+            for i, imp in enumerate(improvements[:5]):
+                insights.append({
+                    "category": "Improvement Opportunity",
+                    "severity": "important",
+                    "timestamp": None,
+                    "conversation_snippet": None,
+                    "what_happened": imp,
+                    "why_it_matters": "Addressing this will improve call effectiveness.",
+                    "better_approach": "See the detailed analysis for specific recommendations.",
+                    "example_phrasing": None
+                })
+        
+        # Ensure we have at least some content
+        if not strengths:
+            # Try to find any positive statements
+            positive_words = re.findall(r'(?:effectively|successfully|clearly|well)[^.]*\.', raw_text, re.IGNORECASE)
+            strengths = [pw.strip() for pw in positive_words[:3] if len(pw) > 20]
+        
+        if not improvements:
+            # Try to find any suggestion statements  
+            suggestion_words = re.findall(r'(?:could have|should have|next time|in future)[^.]*\.', raw_text, re.IGNORECASE)
+            improvements = [sw.strip() for sw in suggestion_words[:3] if len(sw) > 20]
+        
+        # Final fallback - provide the raw text as context
+        if not strengths:
+            strengths = ["Analysis completed - see detailed output for specific strengths identified during the call."]
+        if not improvements:
+            improvements = ["Analysis completed - see detailed output for specific improvement opportunities."]
+        if not insights:
+            # Create a meaningful fallback insight with context
+            insights = [{
+                "category": "Analysis Summary",
+                "severity": "important",
+                "timestamp": None,
+                "conversation_snippet": None,
+                "what_happened": f"Comprehensive analysis performed for {sa_name}'s call performance.",
+                "why_it_matters": "Multi-agent review provides thorough evaluation of technical depth, discovery quality, and sales methodology.",
+                "better_approach": "Review the strengths and improvement areas sections below for actionable feedback.",
+                "example_phrasing": None
+            }]
+        
+        if not call_summary:
+            call_summary = f"Call analysis for {sa_name}. Review insights below for specific feedback."
+        
+        return {
+            "call_summary": call_summary,
+            "overall_score": 7.0,
+            "command_scores": {
+                "problem_identification": 7.0,
+                "differentiation": 7.0,
+                "proof_evidence": 7.0,
+                "required_capabilities": 7.0
+            },
+            "sa_metrics": {
+                "technical_depth": 7.0,
+                "discovery_quality": 7.0,
+                "active_listening": 7.0,
+                "value_articulation": 7.0
+            },
+            "top_insights": insights,
+            "strengths": strengths[:5],  # Limit to 5
+            "improvement_areas": improvements[:5],  # Limit to 5
+            "key_moments": key_moments[:10]  # Limit to 10
+        }
