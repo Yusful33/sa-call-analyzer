@@ -1,8 +1,7 @@
 import os
 import json
 import re
-from typing import List, Optional, Tuple
-from difflib import SequenceMatcher
+from typing import List, Optional
 from crewai import Agent, Task, Crew, Process
 from models import (
     AnalysisResult,
@@ -112,20 +111,18 @@ class SACallAnalysisCrew:
             goal='Evaluate discovery quality and score Command of the Message framework performance',
             backstory="""You are a world-class sales coach certified in Command of the Message framework.
 
-            CRITICAL EXCLUSION - DO NOT PROVIDE FEEDBACK ON:
-            - Rapport building, small talk, or greetings at the beginning of calls
-            - Ice breakers, casual conversation, or relationship building moments
-            - The first 1-3 minutes of any call (this is normal rapport building time)
-            These are EXPECTED and VALUABLE - never generate insights, feedback, or recommendations about them.
-            Skip over these sections entirely when providing your analysis.
+            IMPORTANT: Recognize that small talk and rapport building at the beginning of calls is NORMAL and VALUABLE.
+            Do not penalize SAs for spending 1-3 minutes on greetings, weather, weekend plans, or casual conversation.
+            This is an essential part of building trust and relationships with customers.
 
-            You evaluate TWO key areas (AFTER the initial rapport phase):
+            You evaluate TWO key areas:
 
             1. DISCOVERY & ENGAGEMENT:
-               - Quality and depth of discovery questions
+               - Quality and depth of discovery questions (after initial rapport building)
                - Active listening skills and follow-up questions
                - Engagement with customer responses
                - Uncovering pain points and needs
+               - Building rapport and trust (including appropriate small talk)
 
             2. COMMAND OF THE MESSAGE FRAMEWORK (score each 1-10):
                - Problem Identification: Did they uncover real business problems?
@@ -133,8 +130,7 @@ class SACallAnalysisCrew:
                - Proof/Evidence: Did they provide case studies, metrics, demos?
                - Required Capabilities: Did they tie technical features to business outcomes?
 
-            You provide specific examples with timestamps and actionable recommendations.
-            NEVER create insights categorized as "Rapport Building", "Small Talk", "Greeting", or similar.""",
+            You provide specific examples with timestamps and actionable recommendations.""",
             llm=self.llm,
             verbose=True,
             allow_delegation=False
@@ -150,11 +146,7 @@ class SACallAnalysisCrew:
             - Specific alternative phrases and approaches
             - Strengths to reinforce
             - Key moments from the call
-            Your reports are concise, specific, and immediately actionable.
-            
-            CRITICAL EXCLUSION: NEVER include insights about rapport building, small talk, greetings, 
-            or ice breakers. These are expected behaviors at the start of calls and should not be 
-            called out as areas for improvement or even mentioned in the report.""",
+            Your reports are concise, specific, and immediately actionable.""",
             llm=self.llm,
             verbose=True,
             allow_delegation=False
@@ -686,20 +678,11 @@ class SACallAnalysisCrew:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
                        - Timestamp (REQUIRED - MUST be included for EVERY insight. Extract from the expert analysis or transcript.)
-                       - Conversation snippet: A brief summary followed by ONE key quote from the transcript.
-                         Format: "Summary of what was discussed. Key quote from [Speaker Name]: 'exact words from transcript'"
-                         The quote MUST be actual words spoken in the transcript - do not paraphrase.
-                         Use the speaker's actual name (e.g., "Hanchen", "Yusuf"), not generic labels like "Customer" or "SA".
+                       - Conversation snippet (REQUIRED - Include a brief 2-3 line excerpt from the actual transcript showing the moment this occurred. Use the exact words from the transcript.)
                        - What happened
                        - Why it matters
                        - Better approach
                        - Example phrasing
-
-                    CRITICAL EXCLUSIONS - DO NOT include insights about:
-                    - Rapport building, small talk, greetings, or ice breakers
-                    - Casual conversation at the beginning of the call
-                    - Any category named "Rapport Building", "Small Talk", "Greeting", or similar
-                    These are expected behaviors and should NOT be called out.
 
                     CRITICAL: Sort all insights in CHRONOLOGICAL ORDER by timestamp (earliest first).
                     This allows readers to follow the call from beginning to end.
@@ -709,7 +692,6 @@ class SACallAnalysisCrew:
 
                     CRITICAL TIMESTAMP REQUIREMENT:
                     EVERY insight in "top_insights" MUST have an EXACT timestamp in [MM:SS] or [HH:MM:SS] format.
-                    The timestamp helps readers locate the moment in the recording.
 
                     Extract exact timestamps from the expert analyses (they have already identified specific moments).
                     Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
@@ -727,7 +709,7 @@ class SACallAnalysisCrew:
                                 "category": "Discovery Depth",
                                 "severity": "critical",
                                 "timestamp": "[05:23]",
-                                "conversation_snippet": "Discussed data quality challenges and debugging approaches. Key quote from Hanchen: 'We spend about four hours every time something breaks in production'",
+                                "conversation_snippet": "Customer: 'We have data quality issues.'\nSA: 'Okay, let me show you our validation features.'\nCustomer: 'Actually, the bigger problem is...'",
                                 "what_happened": "Brief description",
                                 "why_it_matters": "Business impact",
                                 "better_approach": "What to do differently",
@@ -746,9 +728,7 @@ class SACallAnalysisCrew:
 
                     REMEMBER:
                     - Sort insights chronologically (earliest timestamp first)
-                    - conversation_snippet: Brief summary + key quote with speaker's actual name
-                    - The key quote MUST be exact words from the transcript
-                    - EXCLUDE any rapport building or small talk insights
+                    - Include actual conversation snippets from the transcript for each insight
                     """,
                     agent=agents['report_compiler'],
                     expected_output="Complete JSON analysis report",
@@ -993,16 +973,6 @@ class SACallAnalysisCrew:
                         for insight in analysis_data.get("top_insights", []):
                             insights.append(ActionableInsight(**insight))
 
-                    # STEP 1: Filter out rapport-related insights
-                        parse_span.add_event("filtering_rapport_insights")
-                        original_count = len(insights)
-                        insights = self._filter_rapport_insights(insights)
-                        parse_span.set_attribute("insights.filtered_rapport_count", original_count - len(insights))
-
-                    # STEP 2: Verify and fix conversation snippet quotes
-                        parse_span.add_event("verifying_snippet_quotes")
-                        insights = self._populate_snippets_from_transcript(insights, transcript)
-
                     # Sort insights by timestamp (chronological order)
                         def extract_timestamp_value(timestamp_str):
                             """Extract numeric value from timestamp for sorting."""
@@ -1147,327 +1117,6 @@ class SACallAnalysisCrew:
         # Fallback - log warning
         print(f"⚠️  Could not extract SA name from identification result. Using 'Unknown SA'")
         return "Unknown SA"
-
-    def _filter_rapport_insights(self, insights: List[ActionableInsight]) -> List[ActionableInsight]:
-        """
-        Filter out insights related to rapport building, small talk, or greetings.
-        These are expected behaviors and should not be called out.
-        """
-        excluded_keywords = [
-            "rapport",
-            "small talk",
-            "greeting",
-            "ice breaker",
-            "icebreaker",
-            "warm up",
-            "warmup",
-            "pleasantries",
-            "chitchat",
-            "chit-chat",
-            "casual conversation",
-        ]
-        
-        filtered = []
-        for insight in insights:
-            category_lower = insight.category.lower()
-            # Check if category contains any excluded keywords
-            should_exclude = any(keyword in category_lower for keyword in excluded_keywords)
-            
-            if should_exclude:
-                print(f"🚫 Filtering out rapport-related insight: '{insight.category}'")
-            else:
-                filtered.append(insight)
-        
-        if len(filtered) < len(insights):
-            print(f"📊 Filtered {len(insights) - len(filtered)} rapport-related insight(s)")
-        
-        return filtered
-
-    def _parse_timestamp_to_seconds(self, timestamp_str: str) -> Optional[int]:
-        """
-        Parse a timestamp string like '[14:40]', '[5:23]', '[1:05:30]', or '[~10:00]' to seconds.
-        Returns None if parsing fails.
-        """
-        if not timestamp_str:
-            return None
-        
-        # Clean the timestamp - remove brackets, tildes, and whitespace
-        clean_ts = timestamp_str.strip().strip('[]~').strip()
-        
-        # Handle range format like "14:40-15:08" - take the start time
-        if '-' in clean_ts:
-            clean_ts = clean_ts.split('-')[0].strip()
-        
-        try:
-            parts = clean_ts.split(':')
-            if len(parts) == 2:
-                # MM:SS format
-                minutes, seconds = int(parts[0]), int(parts[1])
-                return minutes * 60 + seconds
-            elif len(parts) == 3:
-                # HH:MM:SS format
-                hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
-                return hours * 3600 + minutes * 60 + seconds
-        except (ValueError, AttributeError):
-            pass
-        
-        return None
-
-    def _extract_snippet_from_transcript(self, timestamp: str, transcript: str, num_turns: int = 3) -> Optional[str]:
-        """
-        Extract actual conversation text from the transcript based on the given timestamp.
-        
-        Args:
-            timestamp: Timestamp string like "[14:40]" or "[14:40-15:08]"
-            transcript: The full transcript text
-            num_turns: Number of speaker turns to extract (default 3)
-        
-        Returns:
-            Actual transcript text around the timestamp, or None if not found
-        """
-        target_seconds = self._parse_timestamp_to_seconds(timestamp)
-        if target_seconds is None:
-            print(f"⚠️  Could not parse timestamp: {timestamp}")
-            return None
-        
-        # Parse transcript lines with timestamps
-        # Format: [MM:SS] Speaker: text or [H:MM:SS] Speaker: text
-        timestamp_pattern = r'\[(\d+:\d+(?::\d+)?)\]\s*([^:]+):\s*(.+)'
-        
-        lines_with_timestamps = []
-        for line in transcript.split('\n'):
-            line = line.strip()
-            match = re.match(timestamp_pattern, line)
-            if match:
-                ts = match.group(1)
-                speaker = match.group(2).strip()
-                text = match.group(3).strip()
-                ts_seconds = self._parse_timestamp_to_seconds(ts)
-                if ts_seconds is not None:
-                    lines_with_timestamps.append({
-                        'seconds': ts_seconds,
-                        'timestamp': ts,
-                        'speaker': speaker,
-                        'text': text,
-                        'line': line
-                    })
-        
-        if not lines_with_timestamps:
-            print(f"⚠️  No timestamped lines found in transcript")
-            return None
-        
-        # Find the line closest to our target timestamp
-        closest_idx = None
-        min_diff = float('inf')
-        
-        for idx, line_data in enumerate(lines_with_timestamps):
-            diff = abs(line_data['seconds'] - target_seconds)
-            if diff < min_diff:
-                min_diff = diff
-                closest_idx = idx
-        
-        if closest_idx is None:
-            return None
-        
-        # If the closest match is more than 60 seconds away, it's probably wrong
-        if min_diff > 60:
-            print(f"⚠️  Closest timestamp is {min_diff}s away from target - may be inaccurate")
-        
-        # Extract num_turns lines starting from the closest match
-        start_idx = closest_idx
-        end_idx = min(closest_idx + num_turns, len(lines_with_timestamps))
-        
-        # Build the snippet
-        snippet_lines = []
-        for i in range(start_idx, end_idx):
-            line_data = lines_with_timestamps[i]
-            snippet_lines.append(f"{line_data['speaker']}: '{line_data['text']}'")
-        
-        if snippet_lines:
-            return '\n'.join(snippet_lines)
-        
-        return None
-
-    def _extract_quote_from_snippet(self, snippet: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """
-        Parse LLM-generated snippet to extract summary and quoted portion.
-        Expected format: "Summary text. Key quote from Speaker: 'quoted text'"
-        
-        Returns: (summary, speaker_name, quoted_text) or (None, None, None) if parsing fails
-        """
-        if not snippet:
-            return None, None, None
-        
-        # Pattern to match: Key quote from [Name]: 'quote' or "quote"
-        quote_pattern = r"Key quote from ([^:]+):\s*['\"](.+?)['\"]"
-        match = re.search(quote_pattern, snippet, re.IGNORECASE)
-        
-        if match:
-            speaker = match.group(1).strip()
-            quote = match.group(2).strip()
-            # Extract summary (everything before "Key quote")
-            summary_match = re.search(r"^(.+?)(?:\s*Key quote)", snippet, re.IGNORECASE)
-            summary = summary_match.group(1).strip() if summary_match else ""
-            return summary, speaker, quote
-        
-        return snippet, None, None  # Return full snippet as summary if no quote found
-
-    def _fuzzy_match_quote(self, quote: str, transcript_text: str, threshold: float = 0.7) -> Tuple[bool, Optional[str], float]:
-        """
-        Check if quote exists in transcript using fuzzy matching.
-        
-        Returns: (is_match, best_matching_text, match_ratio)
-        """
-        if not quote or not transcript_text:
-            return False, None, 0.0
-        
-        quote_lower = quote.lower()
-        
-        # First try exact substring match
-        if quote_lower in transcript_text.lower():
-            return True, quote, 1.0
-        
-        # Split transcript into sentences for comparison
-        sentences = re.split(r'[.!?]+', transcript_text)
-        
-        best_ratio = 0.0
-        best_match = None
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) < 10:  # Skip very short fragments
-                continue
-            
-            ratio = SequenceMatcher(None, quote_lower, sentence.lower()).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = sentence
-        
-        return best_ratio >= threshold, best_match, best_ratio
-
-    def _find_best_quote_from_transcript(self, transcript_lines: List[dict], target_speaker: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Find the most substantial quote from the extracted transcript lines.
-        Prefers quotes from the target speaker if specified.
-        
-        Returns: (speaker_name, quote_text)
-        """
-        best_quote = None
-        best_speaker = None
-        best_length = 0
-        
-        for line in transcript_lines:
-            text = line.get('text', '')
-            speaker = line.get('speaker', '')
-            
-            # Prefer target speaker if specified
-            speaker_match = target_speaker is None or target_speaker.lower() in speaker.lower()
-            
-            # Look for substantial quotes (not too short, not too long)
-            if 20 <= len(text) <= 200 and speaker_match:
-                if len(text) > best_length:
-                    best_length = len(text)
-                    best_quote = text
-                    best_speaker = speaker
-        
-        # If no match for target speaker, fall back to any speaker
-        if best_quote is None:
-            for line in transcript_lines:
-                text = line.get('text', '')
-                speaker = line.get('speaker', '')
-                if 20 <= len(text) <= 200 and len(text) > best_length:
-                    best_length = len(text)
-                    best_quote = text
-                    best_speaker = speaker
-        
-        return best_speaker, best_quote
-
-    def _populate_snippets_from_transcript(self, insights: List[ActionableInsight], transcript: str) -> List[ActionableInsight]:
-        """
-        For each insight, verify and fix the conversation snippet:
-        1. Parse the LLM-generated snippet to find the quoted portion
-        2. Verify the quote exists in the transcript (fuzzy match)
-        3. If fabricated, replace with a real quote from around the timestamp
-        4. Keep the summary portion intact
-        """
-        for insight in insights:
-            if not insight.timestamp or not insight.conversation_snippet:
-                continue
-            
-            # Parse the LLM snippet
-            summary, claimed_speaker, claimed_quote = self._extract_quote_from_snippet(insight.conversation_snippet)
-            
-            if claimed_quote:
-                # Get actual transcript text around this timestamp
-                actual_lines = self._get_transcript_lines_around_timestamp(insight.timestamp, transcript)
-                actual_text = ' '.join([line.get('text', '') for line in actual_lines])
-                
-                # Verify the quote
-                is_valid, best_match, ratio = self._fuzzy_match_quote(claimed_quote, actual_text)
-                
-                if is_valid and ratio >= 0.7:
-                    # Quote is valid (or close enough) - keep it
-                    print(f"✅ Quote verified for [{insight.timestamp}] (match ratio: {ratio:.2f})")
-                else:
-                    # Quote is fabricated - find a real one
-                    print(f"⚠️  Quote not found for [{insight.timestamp}] (best match: {ratio:.2f}), finding replacement...")
-                    real_speaker, real_quote = self._find_best_quote_from_transcript(actual_lines, claimed_speaker)
-                    
-                    if real_quote and real_speaker:
-                        # Reconstruct snippet with real quote
-                        insight.conversation_snippet = f"{summary} Key quote from {real_speaker}: '{real_quote}'"
-                        print(f"✅ Replaced with real quote from {real_speaker}")
-                    elif summary:
-                        # No good quote found - just keep the summary
-                        insight.conversation_snippet = summary
-                        print(f"⚠️  No suitable quote found, keeping summary only")
-            else:
-                # No quote in snippet (just summary) - that's fine
-                print(f"ℹ️  No quote in snippet for [{insight.timestamp}], keeping as-is")
-        
-        return insights
-
-    def _get_transcript_lines_around_timestamp(self, timestamp: str, transcript: str, num_lines: int = 5) -> List[dict]:
-        """
-        Get parsed transcript lines around the given timestamp.
-        Returns list of dicts with 'speaker', 'text', 'timestamp' keys.
-        """
-        target_seconds = self._parse_timestamp_to_seconds(timestamp)
-        if target_seconds is None:
-            return []
-        
-        # Parse transcript lines with timestamps
-        timestamp_pattern = r'\[(\d+:\d+(?::\d+)?)\]\s*([^:]+):\s*(.+)'
-        
-        lines_with_timestamps = []
-        for line in transcript.split('\n'):
-            line = line.strip()
-            match = re.match(timestamp_pattern, line)
-            if match:
-                ts = match.group(1)
-                speaker = match.group(2).strip()
-                text = match.group(3).strip()
-                ts_seconds = self._parse_timestamp_to_seconds(ts)
-                if ts_seconds is not None:
-                    lines_with_timestamps.append({
-                        'seconds': ts_seconds,
-                        'timestamp': ts,
-                        'speaker': speaker,
-                        'text': text
-                    })
-        
-        if not lines_with_timestamps:
-            return []
-        
-        # Find closest line to target
-        closest_idx = min(range(len(lines_with_timestamps)), 
-                         key=lambda i: abs(lines_with_timestamps[i]['seconds'] - target_seconds))
-        
-        # Extract surrounding lines
-        start_idx = max(0, closest_idx - num_lines // 2)
-        end_idx = min(len(lines_with_timestamps), closest_idx + num_lines // 2 + 1)
-        
-        return lines_with_timestamps[start_idx:end_idx]
 
     def _parse_evidence(self, evidence_list: List[dict]) -> List[CriteriaEvidence]:
         """Parse evidence items from JSON data"""

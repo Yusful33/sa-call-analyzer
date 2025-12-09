@@ -139,16 +139,7 @@ async def analyze_transcript(request: AnalyzeRequest):
                     # Extract call ID and fetch raw transcript data
                     call_id = gong_client.extract_call_id_from_url(request.gong_url)
                     transcript_data = gong_client.get_transcript(call_id)
-                    
-                    # Fetch speaker names for better display
-                    speaker_names = None
-                    try:
-                        speaker_names = gong_client.get_speaker_names(call_id)
-                        print(f"✅ Fetched names for {len(speaker_names)} speakers")
-                    except Exception as e:
-                        print(f"⚠️  Could not fetch speaker names: {e}")
-                    
-                    raw_transcript = gong_client.format_transcript_for_analysis(transcript_data, speaker_names)
+                    raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
                     print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
                     span.set_attribute("transcript.source", "gong")
                     span.set_attribute("transcript.raw_length", len(raw_transcript))

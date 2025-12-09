@@ -149,13 +149,12 @@ class GongMCPClient:
         """
         return self._make_request("/transcript", {"call_id": call_id})
 
-    def format_transcript_for_analysis(self, transcript_data: Dict, speaker_names: Dict = None) -> str:
+    def format_transcript_for_analysis(self, transcript_data: Dict) -> str:
         """
         Format Gong transcript data into readable format for analysis.
 
         Args:
             transcript_data: Raw transcript data from Gong MCP
-            speaker_names: Optional mapping of speaker IDs to name info (from get_speaker_names)
 
         Returns:
             Formatted transcript string with timestamps and speakers
@@ -239,10 +238,7 @@ class GongMCPClient:
 
                     if speaker_id != current_speaker:
                         if current_speaker and current_text:
-                            # Use actual name if available, otherwise fall back to Speaker ID
-                            speaker_info = speaker_names.get(current_speaker, {}) if speaker_names else {}
-                            speaker_label = speaker_info.get("name") or f"Speaker {current_speaker}"
-                            lines.append(f"{last_timestamp} | {speaker_label}")
+                            lines.append(f"{last_timestamp} | Speaker {current_speaker}")
                             lines.append(" ".join(current_text))
                             lines.append("")
 
@@ -254,10 +250,7 @@ class GongMCPClient:
 
                 # Add final speaker's text
                 if current_speaker and current_text:
-                    # Use actual name if available, otherwise fall back to Speaker ID
-                    speaker_info = speaker_names.get(current_speaker, {}) if speaker_names else {}
-                    speaker_label = speaker_info.get("name") or f"Speaker {current_speaker}"
-                    lines.append(f"{last_timestamp} | {speaker_label}")
+                    lines.append(f"{last_timestamp} | Speaker {current_speaker}")
                     lines.append(" ".join(current_text))
 
                 result = "\n".join(lines)
