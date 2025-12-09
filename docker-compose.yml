@@ -1,0 +1,68 @@
+# SA Call Analyzer - Docker Compose
+# All services run together, communicating via HTTP
+
+services:
+  # Main SA Call Analyzer Application
+  app:
+    build: .
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    environment:
+      - PORT=${PORT:-8080}
+      - USE_LITELLM=true
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_API_KEY=dummy
+      - MODEL_NAME=${MODEL_NAME:-claude-3-5-haiku-20241022}
+      - GONG_MCP_URL=http://gong-mcp:8080
+      - GONG_ACCESS_KEY
+      - GONG_SECRET_KEY
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - ARIZE_API_KEY
+      - ARIZE_SPACE_ID
+    depends_on:
+      - litellm
+      - gong-mcp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # LiteLLM Proxy - Routes LLM requests to various providers
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Gong MCP Server - Fetches call transcripts from Gong via MCP protocol
+  gong-mcp:
+    image: yusufarize/gong-mcp:latest
+    ports:
+      - "8081:8080"
+    environment:
+      - GONG_ACCESS_KEY
+      - GONG_ACCESS_SECRET=${GONG_SECRET_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: id-pain-network

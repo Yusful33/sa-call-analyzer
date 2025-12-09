@@ -1,0 +1,35 @@
+# Don't copy .env to container - use docker-compose environment instead
+.env
+.env.*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+

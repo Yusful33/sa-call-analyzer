@@ -1,357 +1,138 @@
-# SA Call Analyzer - CrewAI Multi-Agent System
+# SA Call Analyzer
 
-An AI-powered call analysis tool that uses **4 specialized agents** working together to provide comprehensive, actionable feedback for Solution Architects using the Command of the Message framework.
+AI-powered call analysis using 4 specialized agents to provide actionable feedback for Solution Architects.
 
-## Features
+## Quick Start
 
-- 📝 Paste transcript directly (with or without speaker labels)
-- 👥 **4 specialized AI agents** collaborate on every analysis:
-  1. 🔍 SA Identifier - Detects the Solution Architect
-  2. 🛠️ Technical Evaluator - Assesses technical performance
-  3. 💡 Sales Methodology & Discovery Expert - Evaluates discovery and Command of Message
-  4. 📝 Report Compiler - Synthesizes actionable recommendations
-- 📊 Deep analysis against Command of the Message framework
-- 💡 Specific, actionable feedback with timestamps and alternative phrasing
-- 🔍 Multiple expert perspectives on every call
-- 💰 Flexible pricing: $0.25-2.50 per call depending on model choice
-- 🔌 Supports Anthropic API, LiteLLM proxy, and local models
-- 📈 **OpenInference observability** with Arize AX for monitoring LLM performance
+### 1. Install Dependencies
 
-## How It Works
+```bash
+# Install uv (if you don't have it)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-Instead of a single AI analyzing your call, **4 specialized agents** work together sequentially:
-
-1. **SA Identifier** determines who the Solution Architect is
-2. **Technical Evaluator** reviews technical depth and architecture discussions
-3. **Sales Methodology Expert** scores discovery quality and Command of Message pillars
-4. **Report Compiler** synthesizes all insights into actionable recommendations
-
-This multi-agent approach provides deeper, more nuanced feedback from multiple expert perspectives.
-
-📖 **See [CREWAI_GUIDE.md](CREWAI_GUIDE.md) for detailed agent descriptions**
-
-## Architecture Overview
-
-### System Flow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         User Browser                             │
-│                      http://localhost:8000                       │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             │ POST /api/analyze
-                             │ { transcript, sa_name? }
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                          main.py                                 │
-│                      FastAPI Application                         │
-├─────────────────────────────────────────────────────────────────┤
-│  • Receives transcript via API                                   │
-│  • Loads environment config (.env)                               │
-│  • Routes to CrewAI analyzer                                     │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   transcript_parser.py                           │
-├─────────────────────────────────────────────────────────────────┤
-│  • Parses transcript format (with/without labels)                │
-│  • Extracts speakers and timestamps                              │
-│  • Formats for LLM processing                                    │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             │ Parsed transcript + speakers
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    crew_analyzer.py                              │
-│                   SACallAnalysisCrew                             │
-├─────────────────────────────────────────────────────────────────┤
-│                    🤖 Agent Orchestration                        │
-│                                                                  │
-│  Agent 1: 🔍 SA Identifier Agent                                │
-│  ├─ Role: Identify Solution Architect                           │
-│  └─ Output: SA name, confidence                                 │
-│           │                                                      │
-│           ▼                                                      │
-│  Agent 2: 🛠️ Technical Evaluator Agent                         │
-│  ├─ Role: Assess technical performance                          │
-│  └─ Output: Technical scores + feedback                         │
-│           │                                                      │
-│           ▼                                                      │
-│  Agent 3: 💡 Sales Methodology & Discovery Expert               │
-│  ├─ Role: Score discovery + Command of Message                  │
-│  └─ Output: Framework scores + discovery feedback               │
-│           │                                                      │
-│           ▼                                                      │
-│  Agent 4: 📝 Report Compiler Agent                              │
-│  ├─ Role: Synthesize all agent feedback                         │
-│  └─ Output: Complete analysis with actionable insights          │
-│           │                                                      │
-│           ▼                                                      │
-│  📦 Parses JSON, converts to Pydantic models                    │
-│  └─ Returns: AnalysisResult                                     │
-│                                                                  │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             │ AnalysisResult (Pydantic model)
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        models.py                                 │
-│                    Pydantic Data Models                          │
-├─────────────────────────────────────────────────────────────────┤
-│  • AnalysisResult                                                │
-│  • CommandOfMessageScore                                         │
-│  • SAPerformanceMetrics                                          │
-│  • ActionableInsight                                             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             │ Structured JSON response
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      User Browser                                │
-│                   Results displayed with:                        │
-│  • Overall scores                                                │
-│  • Top actionable insights with timestamps                       │
-│  • Specific alternative phrasing                                 │
-│  • Strengths and improvement areas                               │
-└─────────────────────────────────────────────────────────────────┘
+# Install project dependencies
+uv sync
 ```
 
-### File Structure & Responsibilities
+### 2. Configure API Key
 
-```
-id-pain/
-├── main.py                    # FastAPI app, API endpoints, startup
-├── crew_analyzer.py           # CrewAI orchestration, 4 agents defined, returns Pydantic models
-├── transcript_parser.py       # Parses transcript formats
-├── models.py                  # Pydantic data models
-├── .env                       # Configuration (API keys, model)
-├── frontend/
-│   └── index.html            # Web UI for transcript input
-├── README.md                 # This file
-├── CREWAI_GUIDE.md          # Detailed agent documentation
-└── pyproject.toml           # Dependencies (uv)
+```bash
+# Create .env file
+echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
-### LLM Integration
+Get your API key from [console.anthropic.com](https://console.anthropic.com/)
 
-The system supports multiple LLM backends:
-
-```
-┌──────────────────────────────────────────────────┐
-│              crew_analyzer.py                     │
-│          (reads .env configuration)               │
-└───────────────────┬──────────────────────────────┘
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-        ▼                       ▼
-┌──────────────┐        ┌──────────────────┐
-│  Anthropic   │        │    LiteLLM       │
-│     API      │        │  (Local Proxy)   │
-├──────────────┤        ├──────────────────┤
-│ USE_LITELLM  │        │ USE_LITELLM      │
-│   = false    │        │   = true         │
-│              │        │                  │
-│ Uses:        │        │ Supports:        │
-│ - Haiku      │        │ - Groq (free)    │
-│ - Sonnet     │        │ - GPT-4o-mini    │
-│              │        │ - Ollama (local) │
-│              │        │ - Any model      │
-└──────────────┘        └──────────────────┘
-```
-
-### Agent Collaboration Details
-
-Each agent in `crew_analyzer.py` is a CrewAI Agent with:
-- **Role**: Specific expertise (e.g., "Technical Evaluator")
-- **Goal**: What they're trying to achieve
-- **Backstory**: Context that shapes their analysis
-- **LLM**: Configured model (Haiku/Sonnet/LiteLLM)
-
-Agents run **sequentially**, with later agents accessing earlier agents' analysis through **context sharing**:
-
-```
-Agent 1 Output → Agent 2 (sees Agent 1) → Agent 3 (sees 1+2) → ...
-```
-
-This creates a **collaborative intelligence** where each agent builds on previous insights.
-
-## Command of the Message Framework
-
-The analyzer evaluates Solution Architects on:
-
-1. **Problem Identification** - Uncovering customer's business problems
-2. **Differentiation** - Articulating unique capabilities vs. competitors
-3. **Proof/Evidence** - Providing relevant case studies, metrics, demos
-4. **Required Capabilities** - Tying technical features to business outcomes
-
-## Setup
-
-### Prerequisites
-
-- [uv](https://docs.astral.sh/uv/) - Modern Python package manager (replaces pip/venv)
-  ```bash
-  # Install uv (macOS/Linux)
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-
-  # Or via Homebrew
-  brew install uv
-  ```
-- Choose ONE of:
-  - Anthropic API key ([get one here](https://console.anthropic.com/)) - Recommended
-  - LiteLLM proxy running locally (free options available)
-  - Any OpenAI-compatible API endpoint
-
-### Installation
-
-1. Clone or download this project
-2. Install dependencies with uv:
-   ```bash
-   uv sync
-   ```
-   This will automatically create a virtual environment and install all dependencies.
-
-3. Configure your model (choose one option):
-
-   **Option A: Anthropic (Recommended - Great balance of cost/quality)**
-   ```bash
-   cp .env.example .env
-   # Edit .env and set:
-   # ANTHROPIC_API_KEY=your_key_here
-   # MODEL_NAME=claude-3-5-haiku-20241022  (cheap ~$0.10/call)
-   ```
-
-   **Option B: LiteLLM with your local proxy (FREE options available)**
-   ```bash
-   cp .env.example .env
-   # Edit .env and set:
-   # USE_LITELLM=true
-   # LITELLM_BASE_URL=http://localhost:4000
-   # MODEL_NAME=groq/llama-3.1-70b-versatile  (or any model you configured)
-   ```
-
-   📖 **See [COST_GUIDE.md](COST_GUIDE.md) for detailed setup and cost comparison**
-
-### Running the Application
+### 3. Run the App
 
 ```bash
 uv run python main.py
 ```
 
-Or activate the virtual environment and run directly:
+Open http://localhost:8080 in your browser.
+
+---
+
+## Using the App
+
+1. **Paste a Gong URL** or transcript text
+2. Click **Analyze Call**
+3. Review actionable feedback with timestamps
+
+Analysis takes 2-5 minutes (4 AI agents working together).
+
+---
+
+## Docker Deployment
+
+Run with Docker Compose (includes LiteLLM proxy):
+
 ```bash
-source .venv/bin/activate  # On macOS/Linux
-python main.py
+# Make sure your .env file has ANTHROPIC_API_KEY set
+# Docker Compose reads from .env automatically
+
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f id-pain
 ```
 
-Then open http://localhost:8000 in your browser.
+Services:
+- **id-pain** (port 8080) - Main web app
+- **litellm** (port 4000) - LLM proxy (routes requests to Anthropic/OpenAI)
+- **gong-mcp** - Gong transcript fetcher
 
-You'll see all 4 agents listed on startup:
-```
-🤖 Using CrewAI Multi-Agent System (4 specialized agents)
-   1. 🔍 SA Identifier
-   2. 🛠️ Technical Evaluator
-   3. 💡 Sales Methodology & Discovery Expert
-   4. 📝 Report Compiler
-```
+---
 
-📖 **Want to understand what each agent does?** Read [CREWAI_GUIDE.md](CREWAI_GUIDE.md)
+## Configuration
 
-## Usage
+Your `.env` file should contain:
 
-1. Paste your call transcript into the text area
-2. (Optional) Specify who the SA is, or let AI auto-detect
-3. Click "Analyze Call"
-4. Review actionable feedback with specific timestamps and recommendations
+```bash
+# Required
+ANTHROPIC_API_KEY=sk-ant-your-key-here
 
-## Example Transcript Format
-
-The tool handles various formats:
-
-**With speaker labels:**
-```
-0:16 | Hakan
-Yeah, they're so wealthy.
-
-0:17 | Juan
-Yeah.
+# Optional
+MODEL_NAME=claude-3-5-haiku-20241022
+OPENAI_API_KEY=sk-your-openai-key      # If using OpenAI models
+ARIZE_API_KEY=your-arize-key           # For observability
+ARIZE_SPACE_ID=your-space-id
+GONG_ACCESS_KEY=your-gong-key          # For Gong integration
+GONG_ACCESS_KEY_SECRET=your-secret
 ```
 
-**Without labels:**
+**Note:** Docker Compose automatically uses LiteLLM to route requests. For local development without Docker, set `USE_LITELLM=false` to call Anthropic directly.
+
+---
+
+## How It Works
+
+4 specialized AI agents analyze each call:
+
+1. **SA Identifier** - Detects who the Solution Architect is
+2. **Technical Evaluator** - Assesses technical performance
+3. **Sales Methodology Expert** - Evaluates discovery & Command of Message
+4. **Report Compiler** - Synthesizes actionable recommendations
+
+Each insight includes:
+- What happened (with timestamp)
+- Why it matters
+- Better approach
+- Example phrasing
+
+---
+
+## Cost Estimate
+
+| Model | Cost/Call | Quality |
+|-------|-----------|---------|
+| Claude 3.5 Haiku | $0.25-0.50 | ⭐⭐⭐⭐ |
+| Claude 3.5 Sonnet | $1.50-2.50 | ⭐⭐⭐⭐⭐ |
+
+---
+
+## Documentation
+
+- [Gong Integration Guide](docs/GONG_INTEGRATION.md)
+- [Agent Details](docs/CREWAI_GUIDE.md)
+- [Evaluation Rubric](docs/SA_EVALUATION_RUBRIC.md)
+
+---
+
+## API
+
+```bash
+# Analyze with transcript text
+curl -X POST http://localhost:8080/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"transcript": "0:16 | John\nHello everyone..."}'
+
+# Analyze with Gong URL
+curl -X POST http://localhost:8080/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"gong_url": "https://app.gong.io/call?id=YOUR_CALL_ID"}'
+
+# Health check
+curl http://localhost:8080/health
 ```
-Yeah, they're so wealthy.
-Yeah.
-```
-
-## API Endpoints
-
-- `POST /api/analyze` - Analyze a transcript
-- `GET /health` - Health check
-
-## Cost & Performance
-
-CrewAI runs **4+ LLM calls** per analysis (one per agent). Cost depends on your model choice:
-
-| Model | Cost/Call | Quality | Speed | Best For |
-|-------|-----------|---------|-------|----------|
-| **Claude 3.5 Haiku** | **$0.25-0.50** | ⭐⭐⭐⭐ | ⚡⚡ | Regular use, cost-effective |
-| Claude 3.5 Sonnet | $1.50-2.50 | ⭐⭐⭐⭐⭐ | ⚡ | Maximum insight, important calls |
-| **Groq (via LiteLLM)** | **~$0.00** | ⭐⭐⭐ | ⚡⚡⚡ | Budget option, free tier |
-| GPT-4o-mini (LiteLLM) | $0.10-0.25 | ⭐⭐⭐⭐ | ⚡⚡ | Good balance |
-
-**Analysis Time:** 2-5 minutes (worth it for the depth!)
-
-📖 **See [CREWAI_GUIDE.md](CREWAI_GUIDE.md) for detailed cost breakdown**
-
-## Observability with Arize AX
-
-The app includes built-in **OpenInference tracing** that automatically captures:
-
-- 🔍 All LLM calls from each agent
-- 🤖 CrewAI agent steps and task execution
-- ⏱️ Latency and performance metrics
-- 💰 Token usage and costs
-- 📊 Agent interactions and context flow
-- 🐛 Errors and debugging information
-
-### Setup (Optional but Recommended)
-
-1. **Sign up for Arize** (free tier available): https://arize.com/
-
-2. **Add credentials to .env**:
-   ```bash
-   ARIZE_API_KEY=your_api_key_here
-   ARIZE_SPACE_ID=your_space_id_here
-   ```
-
-3. **Start the app** - tracing is automatic!
-   ```bash
-   uv run python main.py
-   ```
-
-   You'll see:
-   ```
-   ✅ OpenInference tracing enabled
-   📊 Sending telemetry to Arize AX
-   🔗 View traces at: https://app.arize.com/organizations
-   ```
-
-4. **View traces** at https://app.arize.com/organizations
-   - See all 4 agents' LLM calls and task execution
-   - Debug performance issues
-   - Track costs per analysis
-   - Monitor quality over time
-   - Visualize agent collaboration flow
-
-If credentials aren't provided, the app runs normally without tracing.
-
-## Tech Stack
-
-- **Backend**: FastAPI (Python)
-- **AI**: Multiple LLM options (Claude, GPT, Llama, etc.)
-- **Multi-Agent Framework**: CrewAI
-- **Frontend**: HTML/JavaScript (vanilla)
-- **API Gateway**: Direct or via LiteLLM proxy
-- **Observability**: OpenInference + Arize AX

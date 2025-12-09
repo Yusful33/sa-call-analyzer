@@ -60,7 +60,8 @@ class SACallAnalysisCrew:
                 model=model_name,
                 base_url=base_url,
                 api_key=os.getenv("LITELLM_API_KEY", "dummy"),
-                temperature=0.7
+                temperature=0.7,
+                max_tokens=4096
             )
         else:
             # Use Anthropic directly
