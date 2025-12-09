@@ -17,6 +17,7 @@ dependencies = [
     "openinference-instrumentation-crewai>=0.1.0",
     "openinference-instrumentation-langchain>=0.1.0",
     "arize-otel>=0.1.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
