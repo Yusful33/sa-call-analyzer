@@ -16,5 +16,6 @@ RUN pip install uv && uv pip install --system .
 
 EXPOSE 8080
 
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
+# Use Python's built-in PORT handling
+CMD ["python", "main.py"]
 
