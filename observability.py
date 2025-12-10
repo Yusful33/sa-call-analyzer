@@ -20,8 +20,10 @@ import os
 import logging
 from typing import Optional
 from arize.otel import register
-from openinference.instrumentation.crewai import CrewAIInstrumentor
+# NOTE: CrewAI Instrumentor disabled - creates separate root traces for each Crew.kickoff()
+# from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
+from openinference.instrumentation.litellm import LiteLLMInstrumentor
 from opentelemetry import trace
 from span_processor_fixed import CleaningSpanProcessor
 
@@ -106,11 +108,13 @@ def setup_observability(
         else:
             print("   ℹ️  Cleaning disabled (set ARIZE_ENABLE_OUTPUT_CLEANING=true to enable)")
 
-        # Instrument CrewAI (AFTER processor registered)
-        CrewAIInstrumentor().instrument(
-            tracer_provider=tracer_provider,
-            skip_dep_check=True
-        )
+        # NOTE: CrewAI Instrumentor disabled because it creates separate root traces
+        # for each Crew.kickoff() call, breaking the trace hierarchy.
+        # We rely on manual spans in crew_analyzer.py instead.
+        # CrewAIInstrumentor().instrument(
+        #     tracer_provider=tracer_provider,
+        #     skip_dep_check=True
+        # )
 
         # Instrument LangChain (AFTER processor registered)
         LangChainInstrumentor().instrument(
@@ -118,7 +122,13 @@ def setup_observability(
             skip_dep_check=True
         )
 
-        print(f"✅ OpenInference tracing enabled (CrewAI + LangChain)")
+        # Instrument LiteLLM (captures actual LLM calls with token counts)
+        LiteLLMInstrumentor().instrument(
+            tracer_provider=tracer_provider,
+            skip_dep_check=True
+        )
+
+        print(f"✅ OpenInference tracing enabled (LangChain + LiteLLM)")
         print(f"   📊 Sending telemetry to Arize AX (project: {project_name})")
         print(f"   🔗 View traces at: https://app.arize.com/organizations")
         print(f"   🔍 Tracer provider: {type(tracer_provider).__name__}")

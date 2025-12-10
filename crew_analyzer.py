@@ -99,17 +99,11 @@ class SACallAnalysisCrew:
         self.token_callback = TokenTrackingCallback()
 
         if use_litellm:
-            # Use OpenAI-compatible endpoint (LiteLLM)
-            from langchain_openai import ChatOpenAI
-            base_url = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
-            # Ensure base_url ends with /v1 for OpenAI compatibility
-            if not base_url.endswith("/v1"):
-                base_url = f"{base_url}/v1"
-            print(f"🔧 LiteLLM Config: base_url={base_url}, model={model_name}")
-            self.llm = ChatOpenAI(
+            # Use LiteLLM directly for LLM calls (enables LiteLLMInstrumentor to capture spans)
+            from langchain_community.chat_models import ChatLiteLLM
+            print(f"🔧 LiteLLM Config: model={model_name}")
+            self.llm = ChatLiteLLM(
                 model=model_name,
-                base_url=base_url,
-                api_key=os.getenv("LITELLM_API_KEY", "dummy"),
                 temperature=0.7,
                 max_tokens=4096,
                 callbacks=[self.token_callback]
