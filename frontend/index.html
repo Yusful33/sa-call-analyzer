@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SA Call Analyzer - Command of the Message</title>
+    <title>Call Analyzer</title>
     <style>
         * {
             margin: 0;
@@ -37,6 +37,16 @@
         .header p {
             font-size: 1.1em;
             opacity: 0.9;
+        }
+
+        .header .app-summary {
+            margin-top: 15px;
+            font-size: 0.95em;
+            opacity: 0.85;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            line-height: 1.5;
         }
 
         .card {
@@ -630,8 +640,14 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎯 SA Call Analyzer</h1>
+            <h1>🎯 Call Analyzer</h1>
             <p>Actionable feedback using the Command of the Message framework</p>
+            <p class="app-summary">
+                Paste a sales call transcript or Gong URL to receive AI-powered analysis. 
+                The tool classifies calls as Discovery, PoC Scoping, or Mixed, evaluates 
+                technical demonstrations, assesses sales methodology alignment, and identifies 
+                gaps with actionable recommendations for follow-up.
+            </p>
         </div>
 
         <div class="card">
@@ -680,24 +696,9 @@ The tool will auto-detect the format and identify the SA."
                 </div>
             </div>
 
-            <div class="input-section">
-                <label for="saName">Solution Architect Name (Optional)</label>
-                <input
-                    type="text"
-                    id="saName"
-                    placeholder="e.g., Hakan (leave blank for auto-detection)"
-                >
-                <p class="help-text">
-                    If you know who the SA is, enter their name. Otherwise, we'll identify them automatically.
-                </p>
-            </div>
-
             <div class="button-group">
                 <button class="btn-primary" onclick="analyzeTranscript()" id="analyzeBtn">
                     Analyze Call
-                </button>
-                <button class="btn-secondary" onclick="loadExample()">
-                    Load Example
                 </button>
             </div>
         </div>
@@ -1180,16 +1181,6 @@ The tool will auto-detect the format and identify the SA."
                     ${recommendationsHtml}
                 </div>
             `;
-        }
-
-        async function loadExample() {
-            try {
-                const response = await fetch('/api/example');
-                const data = await response.json();
-                document.getElementById('transcript').value = data.transcript;
-            } catch (error) {
-                alert('Failed to load example: ' + error.message);
-            }
         }
 
         // Allow Enter key in textarea without submitting
