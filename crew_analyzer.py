@@ -1101,9 +1101,14 @@ class SACallAnalysisCrew:
                     # Convert to Pydantic models
                         parse_span.add_event("constructing_pydantic_models")
 
-                    # Parse insights and sort chronologically
+                    # Parse insights, populate conversation snippets from actual transcript, and sort chronologically
+                        raw_insights = analysis_data.get("top_insights", [])
+                        
+                        # Post-process: Extract actual conversation snippets from transcript based on timestamps
+                        raw_insights = self._populate_snippets_in_insights(raw_insights, transcript)
+                        
                         insights = []
-                        for insight in analysis_data.get("top_insights", []):
+                        for insight in raw_insights:
                             insights.append(ActionableInsight(**insight))
 
                     # Sort insights by timestamp (chronological order)
