@@ -2,7 +2,6 @@ import os
 import json
 import re
 from typing import List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from crewai import Agent, Task, Crew, Process
 from models import (
     AnalysisResult,
@@ -736,13 +735,12 @@ class SACallAnalysisCrew:
                     context=[technical_task, sales_methodology_task]
                 )
 
-                # Create and run the analysis crew with PARALLEL execution for independent tasks
+                # Create and run the analysis crew
                 with tracer.start_as_current_span("crew_analysis_execution") as crew_span:
                     crew_span.set_attribute("openinference.span.kind", "agent")
                     crew_span.set_attribute("crew.agent_count", 3)
                     crew_span.set_attribute("crew.task_count", 3)
                     crew_span.set_attribute("crew.sa_name", sa_name)
-                    crew_span.set_attribute("crew.execution_mode", "parallel_then_sequential")
 
                     # OpenInference input - structured and readable format
                     # Extract first few exchanges for preview
@@ -767,181 +765,44 @@ class SACallAnalysisCrew:
                     # Add detailed task information as events
                     crew_span.add_event("task_1_technical_evaluation", {
                         "agent": "Senior Technical Architect & Evaluator",
-                        "objective": "Assess technical depth and accuracy",
-                        "execution": "parallel"
+                        "objective": "Assess technical depth and accuracy"
                     })
                     crew_span.add_event("task_2_sales_methodology", {
                         "agent": "Sales Methodology & Discovery Expert",
-                        "objective": "Evaluate discovery and Command of Message",
-                        "execution": "parallel"
+                        "objective": "Evaluate discovery and Command of Message"
                     })
                     crew_span.add_event("task_3_report_compilation", {
                         "agent": "Executive Performance Coach & Report Writer",
-                        "objective": "Synthesize feedback into actionable report",
-                        "execution": "sequential_after_parallel"
+                        "objective": "Synthesize feedback into actionable report"
                     })
 
-                    # Helper function to run a single-task crew
-                    def run_single_task_crew(agent, task, task_name):
-                        """Run a single agent with a single task and return the result."""
-                        crew = Crew(
-                            agents=[agent],
-                            tasks=[task],
-                            process=Process.sequential,
-                            verbose=True
-                        )
-                        result = crew.kickoff()
-                        return {
-                            "task_name": task_name,
-                            "result": result.raw if hasattr(result, 'raw') else str(result)
-                        }
+                    crew_span.add_event("creating_analysis_crew")
 
-                    # PARALLEL EXECUTION: Run technical and sales methodology tasks concurrently
-                    crew_span.add_event("starting_parallel_execution")
-                    crew_span.set_attribute("execution.status", "parallel_in_progress")
-
-                    technical_result = None
-                    sales_result = None
-
-                    with tracer.start_as_current_span("parallel_analysis") as parallel_span:
-                        parallel_span.set_attribute("openinference.span.kind", "chain")
-                        parallel_span.set_attribute("parallel.task_count", 2)
-
-                        with ThreadPoolExecutor(max_workers=2) as executor:
-                            # Submit both tasks to run in parallel
-                            future_technical = executor.submit(
-                                run_single_task_crew,
-                                agents['technical_evaluator'],
-                                technical_task,
-                                "technical_evaluation"
-                            )
-                            future_sales = executor.submit(
-                                run_single_task_crew,
-                                agents['sales_methodology_expert'],
-                                sales_methodology_task,
-                                "sales_methodology"
-                            )
-
-                            # Wait for both to complete and collect results
-                            for future in as_completed([future_technical, future_sales]):
-                                result = future.result()
-                                if result["task_name"] == "technical_evaluation":
-                                    technical_result = result["result"]
-                                    parallel_span.add_event("technical_evaluation_completed", {
-                                        "result_length": len(technical_result)
-                                    })
-                                else:
-                                    sales_result = result["result"]
-                                    parallel_span.add_event("sales_methodology_completed", {
-                                        "result_length": len(sales_result)
-                                    })
-
-                        parallel_span.set_attribute("parallel.technical_result_length", len(technical_result or ""))
-                        parallel_span.set_attribute("parallel.sales_result_length", len(sales_result or ""))
-
-                    crew_span.add_event("parallel_execution_completed")
-
-                    # SEQUENTIAL EXECUTION: Run compile task with results from parallel tasks
-                    crew_span.add_event("starting_compile_phase")
-                    crew_span.set_attribute("execution.status", "compile_in_progress")
-
-                    # Create a new compile task that includes the parallel results in its description
-                    compile_task_with_context = Task(
-                        description=f"""Compile a comprehensive, actionable performance report for {sa_name}.
-
-                    You have received analysis from two experts. Here are their findings:
-
-                    === TECHNICAL EVALUATION RESULTS ===
-                    {technical_result}
-
-                    === SALES METHODOLOGY & DISCOVERY RESULTS ===
-                    {sales_result}
-
-                    Based on these expert analyses, create a final report with:
-
-                    1. Top 3-5 actionable insights with:
-                       - Category (which skill area)
-                       - Severity (critical/important/minor)
-                       - Timestamp (REQUIRED - MUST be included for EVERY insight. Extract from the expert analysis or transcript.)
-                       - Conversation snippet (REQUIRED - Include a brief 2-3 line excerpt from the actual transcript showing the moment this occurred. Use the exact words from the transcript.)
-                       - What happened
-                       - Why it matters
-                       - Better approach
-                       - Example phrasing
-
-                    CRITICAL: Sort all insights in CHRONOLOGICAL ORDER by timestamp (earliest first).
-                    This allows readers to follow the call from beginning to end.
-                    2. List of strengths (2-3 items)
-                    3. List of improvement areas (2-3 items)
-                    4. Key moments with timestamps
-
-                    CRITICAL TIMESTAMP REQUIREMENT:
-                    EVERY insight in "top_insights" MUST have an EXACT timestamp in [MM:SS] or [HH:MM:SS] format.
-
-                    Extract exact timestamps from the expert analyses (they have already identified specific moments).
-                    Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
-                    Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
-
-                    If an expert provided a vague description, YOU must convert it to a specific time estimate.
-                    DO NOT leave timestamp as null, empty, or use descriptive text.
-
-                    Make it specific and actionable. Focus on high-impact improvements.
-                    Return as valid JSON that matches this structure:
-                    {{
-                        "call_summary": "2-3 sentence summary",
-                        "top_insights": [
-                            {{
-                                "category": "Discovery Depth",
-                                "severity": "critical",
-                                "timestamp": "[05:23]",
-                                "conversation_snippet": "Customer: 'We have data quality issues.'\nSA: 'Okay, let me show you our validation features.'\nCustomer: 'Actually, the bigger problem is...'",
-                                "what_happened": "Brief description",
-                                "why_it_matters": "Business impact",
-                                "better_approach": "What to do differently",
-                                "example_phrasing": "Exact words to use"
-                            }}
+                    analysis_crew = Crew(
+                        agents=[
+                            agents['technical_evaluator'],
+                            agents['sales_methodology_expert'],
+                            agents['report_compiler']
                         ],
-                        "strengths": [...],
-                        "improvement_areas": [...],
-                        "key_moments": [
-                            {{
-                                "timestamp": "[12:45]",
-                                "description": "Key moment description"
-                            }}
-                        ]
-                    }}
-
-                    REMEMBER:
-                    - Sort insights chronologically (earliest timestamp first)
-                    - Include actual conversation snippets from the transcript for each insight
-                    """,
-                        agent=agents['report_compiler'],
-                        expected_output="Complete JSON analysis report"
+                        tasks=[
+                            technical_task,
+                            sales_methodology_task,
+                            compile_task
+                        ],
+                        process=Process.sequential,
+                        verbose=True
                     )
 
-                    # Run the compile crew
-                    with tracer.start_as_current_span("compile_report") as compile_span:
-                        compile_span.set_attribute("openinference.span.kind", "agent")
-                        compile_span.set_attribute("input.technical_result_length", len(technical_result or ""))
-                        compile_span.set_attribute("input.sales_result_length", len(sales_result or ""))
+                    # Execute the crew with detailed progress tracking
+                    crew_span.add_event("starting_crew_kickoff")
+                    crew_span.set_attribute("execution.status", "in_progress")
 
-                        compile_crew = Crew(
-                            agents=[agents['report_compiler']],
-                            tasks=[compile_task_with_context],
-                            process=Process.sequential,
-                            verbose=True
-                        )
-
-                        final_report = compile_crew.kickoff()
-
-                        compile_span.add_event("compile_completed", {
-                            "result_length": len(str(final_report))
-                        })
-
+                    final_report = analysis_crew.kickoff()
+                    
                     # Use .raw to get clean output without terminal formatting
                     # str(final_report) includes box-drawing characters that break JSON parsing
                     final_report_text = final_report.raw if hasattr(final_report, 'raw') else str(final_report)
-
+                    
                     # Check if CrewAI already parsed the JSON for us
                     if hasattr(final_report, 'json_dict') and final_report.json_dict:
                         print(f"✅ Using pre-parsed json_dict from CrewOutput")
@@ -951,8 +812,7 @@ class SACallAnalysisCrew:
 
                     crew_span.add_event("crew_kickoff_completed", {
                         "report.length": len(final_report_text),
-                        "tasks_completed": 3,
-                        "execution_mode": "parallel_then_sequential"
+                        "tasks_completed": 3
                     })
                     crew_span.set_attribute("execution.status", "completed")
 
