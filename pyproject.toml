@@ -15,6 +15,7 @@ dependencies = [
     "langchain-anthropic>=0.1.0",
     "langchain-openai>=0.0.5",
     "langchain-community>=0.0.20",
+    "langchain-litellm>=0.1.0",
     "litellm>=1.0.0",
     "openinference-instrumentation-crewai>=0.1.0",
     "openinference-instrumentation-langchain>=0.1.0",

@@ -101,7 +101,7 @@ class SACallAnalysisCrew:
 
         if use_litellm:
             # Use LiteLLM directly for LLM calls (enables LiteLLMInstrumentor to capture spans)
-            from langchain_community.chat_models import ChatLiteLLM
+            from langchain_litellm import ChatLiteLLM
             print(f"🔧 LiteLLM Config: model={model_name}")
             self.llm = ChatLiteLLM(
                 model=model_name,
