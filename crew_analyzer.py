@@ -122,6 +122,87 @@ class SACallAnalysisCrew:
         # Store model name for cost calculations
         self.model_name = model_name
 
+    def _extract_snippet_from_transcript(self, transcript: str, timestamp: str, num_lines: int = 4) -> Optional[str]:
+        """
+        Extract actual conversation lines from transcript based on timestamp.
+        
+        Args:
+            transcript: The full transcript text
+            timestamp: Timestamp like "[12:34]", "[0:16]", "[~10:00]"
+            num_lines: Number of lines to extract (default 4)
+            
+        Returns:
+            Actual conversation snippet from transcript, or None if timestamp not found
+        """
+        if not timestamp or not transcript:
+            return None
+            
+        # Clean timestamp - remove brackets, tildes, etc. to get core time
+        clean_ts = timestamp.strip().strip('[]').strip('~').strip()
+        
+        # Split transcript into lines
+        lines = transcript.split('\n')
+        
+        # Try to find the timestamp in the transcript
+        target_line_idx = None
+        
+        for i, line in enumerate(lines):
+            # Check if this line contains the timestamp
+            if clean_ts in line or f"[{clean_ts}]" in line:
+                target_line_idx = i
+                break
+            # Also try matching just the minutes:seconds part
+            if ':' in clean_ts:
+                # Handle both "12:34" and "0:16" formats
+                parts = clean_ts.split(':')
+                if len(parts) >= 2:
+                    # Try different formats
+                    mm_ss = f"{parts[-2]}:{parts[-1]}"
+                    if mm_ss in line or f"[{mm_ss}]" in line:
+                        target_line_idx = i
+                        break
+        
+        if target_line_idx is None:
+            return None
+        
+        # Extract lines around the timestamp (include the timestamp line and following lines)
+        start_idx = target_line_idx
+        end_idx = min(target_line_idx + num_lines, len(lines))
+        
+        # Get the snippet lines
+        snippet_lines = []
+        for i in range(start_idx, end_idx):
+            line = lines[i].strip()
+            if line:  # Skip empty lines
+                snippet_lines.append(line)
+        
+        if not snippet_lines:
+            return None
+            
+        return '\n'.join(snippet_lines)
+
+    def _populate_snippets_in_insights(self, insights: list, transcript: str) -> list:
+        """
+        Post-process insights to populate conversation_snippet from actual transcript.
+        
+        Args:
+            insights: List of insight dictionaries with timestamps
+            transcript: The full transcript text
+            
+        Returns:
+            Updated insights with actual transcript snippets
+        """
+        for insight in insights:
+            timestamp = insight.get('timestamp')
+            if timestamp:
+                actual_snippet = self._extract_snippet_from_transcript(transcript, timestamp)
+                if actual_snippet:
+                    insight['conversation_snippet'] = actual_snippet
+                else:
+                    # If we can't find the timestamp, set to None instead of hallucinated text
+                    insight['conversation_snippet'] = None
+        return insights
+
     def create_agents(self):
         """Create all specialized agents"""
 
@@ -657,34 +738,25 @@ class SACallAnalysisCrew:
                     - Architecture/integration discussions
                     - Demo quality
 
-                    CRITICAL REQUIREMENTS FOR EVERY FINDING:
+                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
+                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
+                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
 
-                    1. EXACT TIMESTAMP - Extract the timestamp from the transcript where this occurred.
-                       Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
-
-                    2. VERBATIM CONVERSATION SNIPPET - Copy 2-4 lines EXACTLY as they appear in the transcript.
-                       Include the speaker names and their exact words. Do NOT paraphrase or summarize.
-
-                    Example of CORRECT format for each finding:
+                    Return your analysis as JSON with an array of findings:
                     {{
-                        "timestamp": "[24:49]",
-                        "conversation_snippet": "Customer: Can you walk me through the integration architecture?\\n{sa_name}: So basically we have REST APIs that connect to your data sources...\\nCustomer: What about real-time streaming?\\n{sa_name}: That's a good question, let me check on that.",
-                        "issue": "SA was uncertain about streaming capabilities",
-                        "recommendation": "Prepare technical deep-dive on streaming architecture"
+                        "findings": [
+                            {{
+                                "timestamp": "[24:49]",
+                                "issue": "Brief description of the technical issue or observation",
+                                "recommendation": "Specific actionable recommendation"
+                            }}
+                        ]
                     }}
 
-                    Example of INCORRECT format (DO NOT DO THIS):
-                    {{
-                        "timestamp": "[24:49]",
-                        "conversation_snippet": "Customer asks about integration, SA explains architecture",  // BAD - this is a summary, not actual quotes
-                        "issue": "...",
-                        "recommendation": "..."
-                    }}
-
-                    Return your analysis as JSON with an array of findings, each containing timestamp, conversation_snippet, issue, and recommendation.
+                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
                     """,
                     agent=agents['technical_evaluator'],
-                    expected_output="Technical evaluation with verbatim conversation snippets and specific feedback"
+                    expected_output="Technical evaluation with timestamps and specific feedback"
                 )
 
                 sales_methodology_task = Task(
@@ -712,37 +784,26 @@ class SACallAnalysisCrew:
                        - Proof/Evidence: Case studies, metrics, demos
                        - Required Capabilities: Features tied to business outcomes
 
-                    CRITICAL REQUIREMENTS FOR EVERY FINDING:
+                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
+                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
+                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
 
-                    1. EXACT TIMESTAMP - Extract the timestamp from the transcript where this occurred.
-                       Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
-
-                    2. VERBATIM CONVERSATION SNIPPET - Copy 2-4 lines EXACTLY as they appear in the transcript.
-                       Include the speaker names and their exact words. Do NOT paraphrase or summarize.
-
-                    Example of CORRECT format for each finding:
+                    Return your analysis as JSON:
                     {{
-                        "timestamp": "[12:34]",
-                        "conversation_snippet": "Customer: We've been struggling with debugging our LLM outputs.\\n{sa_name}: I see. What tools are you currently using?\\nCustomer: Mostly just logging to CloudWatch.\\n{sa_name}: Got it. How long does it typically take to identify issues?",
-                        "category": "Discovery Depth",
-                        "observation": "SA asked good follow-up questions to understand current state",
-                        "recommendation": "Continue probing for quantified metrics (MTTD/MTTR)"
+                        "findings": [
+                            {{
+                                "timestamp": "[12:34]",
+                                "category": "Discovery Depth",
+                                "observation": "What the SA did well or needs improvement",
+                                "recommendation": "Specific actionable recommendation"
+                            }}
+                        ]
                     }}
 
-                    Example of INCORRECT format (DO NOT DO THIS):
-                    {{
-                        "timestamp": "[12:34]",
-                        "conversation_snippet": "Customer discusses debugging challenges, SA asks about tools",  // BAD - this is a summary, not actual quotes
-                        "category": "Discovery Depth",
-                        "observation": "...",
-                        "recommendation": "..."
-                    }}
-
-                    Return your analysis as JSON with arrays of findings for both Discovery and Command of Message areas.
-                    Each finding MUST include timestamp, conversation_snippet, category, observation, and recommendation.
+                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
                     """,
                     agent=agents['sales_methodology_expert'],
-                    expected_output="Sales methodology evaluation with verbatim conversation snippets and Command of Message feedback"
+                    expected_output="Sales methodology evaluation with timestamps and Command of Message feedback"
                 )
 
                 # Task 4: Compile report (depends on all previous tasks)
@@ -755,8 +816,7 @@ class SACallAnalysisCrew:
                     1. Top 3-5 actionable insights with:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
-                       - Timestamp (REQUIRED - MUST be included for EVERY insight. Extract from the expert analysis or transcript.)
-                       - Conversation snippet (REQUIRED - Include a brief 2-3 line excerpt from the actual transcript showing the moment this occurred. Use the exact words from the transcript.)
+                       - Timestamp (REQUIRED - MUST be included for EVERY insight)
                        - What happened
                        - Why it matters
                        - Better approach
@@ -775,9 +835,6 @@ class SACallAnalysisCrew:
                     Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
                     Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
 
-                    If an expert provided a vague description, YOU must convert it to a specific time estimate.
-                    DO NOT leave timestamp as null, empty, or use descriptive text.
-
                     Make it specific and actionable. Focus on high-impact improvements.
                     Return as valid JSON that matches this structure:
                     {{
@@ -787,7 +844,6 @@ class SACallAnalysisCrew:
                                 "category": "Discovery Depth",
                                 "severity": "critical",
                                 "timestamp": "[05:23]",
-                                "conversation_snippet": "Customer: 'We have data quality issues.'\nSA: 'Okay, let me show you our validation features.'\nCustomer: 'Actually, the bigger problem is...'",
                                 "what_happened": "Brief description",
                                 "why_it_matters": "Business impact",
                                 "better_approach": "What to do differently",
@@ -804,9 +860,8 @@ class SACallAnalysisCrew:
                         ]
                     }}
 
-                    REMEMBER:
-                    - Sort insights chronologically (earliest timestamp first)
-                    - Include actual conversation snippets from the transcript for each insight
+                    NOTE: Do NOT include conversation_snippet field - actual quotes will be extracted programmatically.
+                    Sort insights chronologically (earliest timestamp first).
                     """,
                     agent=agents['report_compiler'],
                     expected_output="Complete JSON analysis report",
