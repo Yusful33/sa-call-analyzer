@@ -653,23 +653,34 @@ class SACallAnalysisCrew:
                     - Architecture/integration discussions
                     - Demo quality
 
-                    CRITICAL REQUIREMENT - EXACT TIMESTAMPS:
-                    For EVERY finding, you MUST provide the EXACT timestamp from the transcript where this occurred.
+                    CRITICAL REQUIREMENTS FOR EVERY FINDING:
 
-                    Steps to extract timestamps:
-                    1. Search the transcript for the exact quote or moment being referenced
-                    2. Find the timestamp marker immediately before that quote (format: [HH:MM:SS], [MM:SS], or "0:16 |")
-                    3. Include that exact timestamp in your analysis (e.g., "[05:23]", "[0:16]", "[15:30]")
-                    4. If the transcript has NO timestamps at all, estimate based on position: "[~2:00]" for early, "[~10:00]" for mid-call, "[~20:00]" for late
+                    1. EXACT TIMESTAMP - Extract the timestamp from the transcript where this occurred.
+                       Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
 
-                    DO NOT use vague descriptions like "Early in call" or "Mid-call".
-                    ALWAYS provide a specific time reference in [MM:SS] or [HH:MM:SS] format.
+                    2. VERBATIM CONVERSATION SNIPPET - Copy 2-4 lines EXACTLY as they appear in the transcript.
+                       Include the speaker names and their exact words. Do NOT paraphrase or summarize.
 
-                    Provide specific examples with timestamps.
-                    Format as JSON with scores and detailed feedback.
+                    Example of CORRECT format for each finding:
+                    {{
+                        "timestamp": "[24:49]",
+                        "conversation_snippet": "Customer: Can you walk me through the integration architecture?\\n{sa_name}: So basically we have REST APIs that connect to your data sources...\\nCustomer: What about real-time streaming?\\n{sa_name}: That's a good question, let me check on that.",
+                        "issue": "SA was uncertain about streaming capabilities",
+                        "recommendation": "Prepare technical deep-dive on streaming architecture"
+                    }}
+
+                    Example of INCORRECT format (DO NOT DO THIS):
+                    {{
+                        "timestamp": "[24:49]",
+                        "conversation_snippet": "Customer asks about integration, SA explains architecture",  // BAD - this is a summary, not actual quotes
+                        "issue": "...",
+                        "recommendation": "..."
+                    }}
+
+                    Return your analysis as JSON with an array of findings, each containing timestamp, conversation_snippet, issue, and recommendation.
                     """,
                     agent=agents['technical_evaluator'],
-                    expected_output="Technical evaluation with scores and specific feedback"
+                    expected_output="Technical evaluation with verbatim conversation snippets and specific feedback"
                 )
 
                 sales_methodology_task = Task(
@@ -697,23 +708,37 @@ class SACallAnalysisCrew:
                        - Proof/Evidence: Case studies, metrics, demos
                        - Required Capabilities: Features tied to business outcomes
 
-                    CRITICAL REQUIREMENT - EXACT TIMESTAMPS:
-                    For EVERY finding, you MUST provide the EXACT timestamp from the transcript where this occurred.
+                    CRITICAL REQUIREMENTS FOR EVERY FINDING:
 
-                    Steps to extract timestamps:
-                    1. Search the transcript for the exact quote or moment being referenced
-                    2. Find the timestamp marker immediately before that quote (format: [HH:MM:SS], [MM:SS], or "0:16 |")
-                    3. Include that exact timestamp in your analysis (e.g., "[05:23]", "[0:16]", "[15:30]")
-                    4. If the transcript has NO timestamps at all, estimate based on position: "[~2:00]" for early, "[~10:00]" for mid-call, "[~20:00]" for late
+                    1. EXACT TIMESTAMP - Extract the timestamp from the transcript where this occurred.
+                       Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
 
-                    DO NOT use vague descriptions like "Early in call" or "Mid-call".
-                    ALWAYS provide a specific time reference in [MM:SS] or [HH:MM:SS] format.
+                    2. VERBATIM CONVERSATION SNIPPET - Copy 2-4 lines EXACTLY as they appear in the transcript.
+                       Include the speaker names and their exact words. Do NOT paraphrase or summarize.
 
-                    Provide specific examples with timestamps for both areas.
-                    Format as JSON with detailed qualitative feedback and recommendations.
+                    Example of CORRECT format for each finding:
+                    {{
+                        "timestamp": "[12:34]",
+                        "conversation_snippet": "Customer: We've been struggling with debugging our LLM outputs.\\n{sa_name}: I see. What tools are you currently using?\\nCustomer: Mostly just logging to CloudWatch.\\n{sa_name}: Got it. How long does it typically take to identify issues?",
+                        "category": "Discovery Depth",
+                        "observation": "SA asked good follow-up questions to understand current state",
+                        "recommendation": "Continue probing for quantified metrics (MTTD/MTTR)"
+                    }}
+
+                    Example of INCORRECT format (DO NOT DO THIS):
+                    {{
+                        "timestamp": "[12:34]",
+                        "conversation_snippet": "Customer discusses debugging challenges, SA asks about tools",  // BAD - this is a summary, not actual quotes
+                        "category": "Discovery Depth",
+                        "observation": "...",
+                        "recommendation": "..."
+                    }}
+
+                    Return your analysis as JSON with arrays of findings for both Discovery and Command of Message areas.
+                    Each finding MUST include timestamp, conversation_snippet, category, observation, and recommendation.
                     """,
                     agent=agents['sales_methodology_expert'],
-                    expected_output="Sales methodology and discovery evaluation with qualitative Command of Message feedback"
+                    expected_output="Sales methodology evaluation with verbatim conversation snippets and Command of Message feedback"
                 )
 
                 # Task 4: Compile report (depends on all previous tasks)
