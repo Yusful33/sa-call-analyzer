@@ -28,8 +28,55 @@ from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from observability import force_flush_spans
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+from typing import Any, Dict, List
+from uuid import UUID
 
 load_dotenv()
+
+
+class TokenTrackingCallback(BaseCallbackHandler):
+    """
+    LangChain callback that captures token usage and adds it to the current OpenTelemetry span.
+    This enables cost tracking in Arize by providing token counts.
+    """
+    
+    def __init__(self):
+        self.tracer = trace.get_tracer("token-tracking")
+    
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+        """Capture token usage when LLM call completes."""
+        current_span = trace.get_current_span()
+        
+        if response.llm_output:
+            token_usage = response.llm_output.get("token_usage", {})
+            model_name = response.llm_output.get("model_name", "unknown")
+            
+            # Also check for usage in different formats
+            if not token_usage and "usage" in response.llm_output:
+                token_usage = response.llm_output["usage"]
+            
+            prompt_tokens = token_usage.get("prompt_tokens", 0)
+            completion_tokens = token_usage.get("completion_tokens", 0)
+            total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
+            
+            if current_span and current_span.is_recording():
+                # OpenInference semantic conventions for token counts
+                current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
+                current_span.set_attribute("llm.token_count.completion", completion_tokens)
+                current_span.set_attribute("llm.token_count.total", total_tokens)
+                current_span.set_attribute("llm.model_name", model_name)
+                
+                # Also add as an event for visibility
+                current_span.add_event("llm_token_usage", {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "model": model_name
+                })
+                
+            print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total ({model_name})")
 
 
 class SACallAnalysisCrew:
@@ -47,6 +94,9 @@ class SACallAnalysisCrew:
         # Determine which LLM to use based on environment
         use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
         model_name = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
+        
+        # Create token tracking callback for cost visibility
+        self.token_callback = TokenTrackingCallback()
 
         if use_litellm:
             # Use OpenAI-compatible endpoint (LiteLLM)
@@ -61,7 +111,8 @@ class SACallAnalysisCrew:
                 base_url=base_url,
                 api_key=os.getenv("LITELLM_API_KEY", "dummy"),
                 temperature=0.7,
-                max_tokens=4096
+                max_tokens=4096,
+                callbacks=[self.token_callback]
             )
         else:
             # Use Anthropic directly
@@ -69,8 +120,12 @@ class SACallAnalysisCrew:
             self.llm = ChatAnthropic(
                 model=model_name,
                 anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-                temperature=0.7
+                temperature=0.7,
+                callbacks=[self.token_callback]
             )
+        
+        # Store model name for cost calculations
+        self.model_name = model_name
 
     def create_agents(self):
         """Create all specialized agents"""

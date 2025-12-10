@@ -22,7 +22,6 @@ from typing import Optional
 from arize.otel import register
 from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
-from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
 from span_processor_fixed import CleaningSpanProcessor
 
@@ -119,13 +118,7 @@ def setup_observability(
             skip_dep_check=True
         )
 
-        # Instrument OpenAI (captures ChatOpenAI calls to LiteLLM's OpenAI-compatible endpoint)
-        OpenAIInstrumentor().instrument(
-            tracer_provider=tracer_provider,
-            skip_dep_check=True
-        )
-
-        print(f"✅ OpenInference tracing enabled (CrewAI + LangChain + OpenAI)")
+        print(f"✅ OpenInference tracing enabled (CrewAI + LangChain)")
         print(f"   📊 Sending telemetry to Arize AX (project: {project_name})")
         print(f"   🔗 View traces at: https://app.arize.com/organizations")
         print(f"   🔍 Tracer provider: {type(tracer_provider).__name__}")
