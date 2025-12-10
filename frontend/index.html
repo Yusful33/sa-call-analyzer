@@ -1101,15 +1101,49 @@ The tool will auto-detect the format and identify the SA."
                 `;
             }
 
-            // Build missing elements and recommendations
+            // Build missing elements segmented by call type
             let missingHtml = '';
-            if (classification.missing_elements && classification.missing_elements.length > 0) {
+            const callType = classification.call_type;
+            const missingElements = classification.missing_elements || {};
+            
+            // Show Discovery missing elements for discovery or mixed calls
+            const showDiscovery = (callType === 'discovery' || callType === 'mixed' || callType === 'unclear');
+            const discoveryMissing = missingElements.discovery || [];
+            
+            // Show PoC Scoping missing elements for poc_scoping or mixed calls
+            const showPocScoping = (callType === 'poc_scoping' || callType === 'mixed' || callType === 'unclear');
+            const pocScopingMissing = missingElements.poc_scoping || [];
+            
+            if ((showDiscovery && discoveryMissing.length > 0) || (showPocScoping && pocScopingMissing.length > 0)) {
+                let discoveryHtml = '';
+                if (showDiscovery && discoveryMissing.length > 0) {
+                    discoveryHtml = `
+                        <div class="missing-category">
+                            <h5>🔍 Discovery Gaps</h5>
+                            <ul>
+                                ${discoveryMissing.map(e => `<li>${e}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+                
+                let pocScopingHtml = '';
+                if (showPocScoping && pocScopingMissing.length > 0) {
+                    pocScopingHtml = `
+                        <div class="missing-category">
+                            <h5>📋 PoC Scoping Gaps</h5>
+                            <ul>
+                                ${pocScopingMissing.map(e => `<li>${e}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+                
                 missingHtml = `
                     <div class="missing-elements">
                         <h4>⚠️ Missing Elements</h4>
-                        <ul>
-                            ${classification.missing_elements.map(e => `<li>${e}</li>`).join('')}
-                        </ul>
+                        ${discoveryHtml}
+                        ${pocScopingHtml}
                     </div>
                 `;
             }

@@ -315,6 +315,12 @@ class PocScopingCriteria(BaseModel):
 # CALL CLASSIFICATION RESULT
 # ============================================================================
 
+class MissingElements(BaseModel):
+    """Missing elements segmented by call type"""
+    discovery: List[str] = Field(default_factory=list)  # Missing discovery criteria
+    poc_scoping: List[str] = Field(default_factory=list)  # Missing PoC scoping criteria
+
+
 class CallClassification(BaseModel):
     """Complete call classification with criteria assessment"""
     call_type: CallType
@@ -329,8 +335,9 @@ class CallClassification(BaseModel):
     poc_scoping_criteria: Optional[PocScopingCriteria] = None
     poc_scoping_completion_score: float = 0.0
     
-    # Key gaps and recommendations
-    missing_elements: List[str] = Field(default_factory=list)
+    # Key gaps segmented by call type
+    missing_elements: MissingElements = Field(default_factory=MissingElements)
+    # Recommendations for next steps
     recommendations: List[str] = Field(default_factory=list)
 
 

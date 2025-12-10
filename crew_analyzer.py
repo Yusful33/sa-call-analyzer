@@ -22,7 +22,8 @@ from models import (
     TimelineMilestones,
     ResourcesCommitted,
     CriteriaEvidence,
-    MissedOpportunity
+    MissedOpportunity,
+    MissingElements
 )
 from dotenv import load_dotenv
 from opentelemetry import trace
@@ -604,7 +605,10 @@ class SACallAnalysisCrew:
                                 "missed_opportunities": []
                             }}
                         }},
-                        "missing_elements": ["List of key missing criteria with specific gaps"],
+                        "missing_elements": {{
+                            "discovery": ["List of missing DISCOVERY criteria - include only if call_type is 'discovery' or 'mixed'"],
+                            "poc_scoping": ["List of missing POC SCOPING criteria - include only if call_type is 'poc_scoping' or 'mixed'"]
+                        }},
                         "recommendations": ["Specific actions with example questions for next call"]
                     }}
                     """,
@@ -1419,7 +1423,7 @@ class SACallAnalysisCrew:
                 discovery_completion_score=discovery_score,
                 poc_scoping_criteria=poc_criteria,
                 poc_scoping_completion_score=poc_score,
-                missing_elements=data.get("missing_elements", []),
+                missing_elements=self._parse_missing_elements(data.get("missing_elements", {})),
                 recommendations=data.get("recommendations", [])
             )
 
@@ -1437,6 +1441,24 @@ class SACallAnalysisCrew:
             import traceback
             traceback.print_exc()
             return None
+
+    def _parse_missing_elements(self, data) -> MissingElements:
+        """Parse missing elements from classification data, handling both old and new formats."""
+        # Handle new nested format: {"discovery": [...], "poc_scoping": [...]}
+        if isinstance(data, dict):
+            return MissingElements(
+                discovery=data.get("discovery", []),
+                poc_scoping=data.get("poc_scoping", [])
+            )
+        # Handle old flat list format for backwards compatibility
+        elif isinstance(data, list):
+            # Put all items in both categories as a fallback
+            return MissingElements(
+                discovery=data,
+                poc_scoping=data
+            )
+        # Handle empty/None
+        return MissingElements()
 
     def _extract_insights_from_raw_text(self, raw_text: str, sa_name: str) -> dict:
         """
