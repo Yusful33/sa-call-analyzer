@@ -854,11 +854,11 @@ class SACallAnalysisCrew:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
                        - Timestamp (REQUIRED - MUST be included for EVERY insight)
-                       - Conversation snippet (1-2 sentence SYNTHESIS of what was discussed at this moment - NOT a verbatim quote)
+                       - Conversation snippet (MISSED OPPORTUNITY - where the SA could have asked a probing question but didn't)
                        - What happened
                        - Why it matters
                        - Better approach
-                       - Example phrasing
+                       - Example phrasing (A Command of the Message discovery question the SA should have asked)
 
                     CRITICAL: Sort all insights in CHRONOLOGICAL ORDER by timestamp (earliest first).
                     This allows readers to follow the call from beginning to end.
@@ -873,10 +873,18 @@ class SACallAnalysisCrew:
                     Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
                     Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
 
-                    CONVERSATION SNIPPET REQUIREMENT:
-                    For each insight, include a "conversation_snippet" that is a BRIEF 1-2 sentence synthesis
-                    of what was discussed at that moment. Do NOT try to quote verbatim - just summarize the exchange.
-                    Example: "Customer expressed concerns about integration complexity; SA pivoted to demo without addressing."
+                    CONVERSATION SNIPPET REQUIREMENT (MISSED OPPORTUNITY):
+                    For each insight, the "conversation_snippet" should describe the MISSED OPPORTUNITY moment:
+                    - What did the customer say that opened a door for deeper discovery?
+                    - What did the SA do instead of asking a probing question?
+                    Example: "Customer mentioned struggling with compliance reviews taking weeks; SA immediately pivoted to product demo instead of exploring the business impact of delays."
+
+                    EXAMPLE PHRASING REQUIREMENT (DISCOVERY QUESTION):
+                    For each insight, the "example_phrasing" should be a specific Command of the Message discovery question:
+                    - Focus on uncovering pain, business impact, stakeholders, or required capabilities
+                    - Phrase it as an actual question the SA could ask
+                    - Make it specific to the context of the missed opportunity
+                    Example: "What happens to your team's other priorities when a compliance review takes longer than expected? How does that impact your quarterly goals?"
 
                     Make it specific and actionable. Focus on high-impact improvements.
                     Return as valid JSON that matches this structure:
@@ -887,11 +895,11 @@ class SACallAnalysisCrew:
                                 "category": "Discovery Depth",
                                 "severity": "critical",
                                 "timestamp": "[05:23]",
-                                "conversation_snippet": "Brief 1-2 sentence synthesis of the exchange at this moment",
+                                "conversation_snippet": "Customer mentioned struggling with compliance reviews; SA immediately pivoted to product demo instead of exploring the pain deeper.",
                                 "what_happened": "Brief description",
                                 "why_it_matters": "Business impact",
                                 "better_approach": "What to do differently",
-                                "example_phrasing": "Exact words to use"
+                                "example_phrasing": "What's the business impact when a compliance review takes longer than expected? How does that affect your team's other priorities?"
                             }}
                         ],
                         "strengths": [...],
