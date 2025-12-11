@@ -144,6 +144,41 @@
             background: #e0e0e0;
         }
 
+        .btn-recap {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            margin-top: 20px;
+            padding: 12px 24px;
+            font-size: 14px;
+        }
+
+        .btn-recap:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(39, 174, 96, 0.4);
+        }
+
+        .btn-recap:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .recap-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+            border: 1px solid #dee2e6;
+        }
+
+        .recap-section h3 {
+            margin-bottom: 15px;
+            color: #495057;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+
         button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -867,10 +902,74 @@ The tool will auto-detect the format and identify the SA."
                 <ul class="list">
                     ${data.key_moments.map(m => `<li><strong>${m.timestamp}</strong>: ${m.description}</li>`).join('')}
                 </ul>
+                
+                ${data.recap_data ? `
+                <div class="recap-section">
+                    <h3>📊 Generate Recap Slide</h3>
+                    <p style="margin-bottom: 15px; color: #666;">
+                        Create a Google Slides presentation with the Command of the Message recap for your next call.
+                    </p>
+                    <button class="btn-recap" id="generateRecapBtn" onclick="generateRecapSlide()">
+                        🎯 Generate Recap Slide in Google Slides
+                    </button>
+                    <p id="recapStatus" style="margin-top: 10px; display: none;"></p>
+                </div>
+                ` : ''}
             `;
+            
+            // Store recap data for later use
+            window.currentRecapData = data.recap_data;
 
             results.classList.add('show');
             results.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        async function generateRecapSlide() {
+            const btn = document.getElementById('generateRecapBtn');
+            const status = document.getElementById('recapStatus');
+            
+            if (!window.currentRecapData) {
+                alert('No recap data available. Please analyze a call first.');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating...';
+            status.style.display = 'block';
+            status.textContent = 'Creating your Google Slides presentation...';
+            status.style.color = '#666';
+            
+            try {
+                const response = await fetch('/api/generate-recap-slide', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(window.currentRecapData)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to generate recap slide');
+                }
+                
+                const result = await response.json();
+                
+                status.innerHTML = `✅ Recap slide created! <a href="${result.presentation_url}" target="_blank" style="color: #27ae60; font-weight: bold;">Open in Google Slides →</a>`;
+                status.style.color = '#27ae60';
+                
+                // Also open in new tab
+                window.open(result.presentation_url, '_blank');
+                
+                btn.textContent = '✅ Recap Created - Click to Generate Another';
+                btn.disabled = false;
+                
+            } catch (error) {
+                status.textContent = '❌ Error: ' + error.message;
+                status.style.color = '#e74c3c';
+                btn.textContent = '🎯 Generate Recap Slide in Google Slides';
+                btn.disabled = false;
+            }
         }
 
         function buildEvidenceHtml(evidence) {

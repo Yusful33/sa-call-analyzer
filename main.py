@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-from models import AnalyzeRequest, AnalysisResult
+from models import AnalyzeRequest, AnalysisResult, RecapSlideData
 from transcript_parser import TranscriptParser
 from crew_analyzer import SACallAnalysisCrew
 from gong_mcp_client import GongMCPClient
@@ -254,6 +254,56 @@ async def analyze_transcript(request: AnalyzeRequest):
             raise HTTPException(
                 status_code=500,
                 detail=f"Analysis failed: {str(e)}"
+            )
+
+
+@app.post("/api/generate-recap-slide")
+async def generate_recap_slide(recap_data: RecapSlideData):
+    """
+    Generate a Google Slides presentation with the recap data.
+    
+    Returns the URL of the created presentation.
+    """
+    with tracer.start_as_current_span("generate_recap_slide") as span:
+        span.set_attribute("openinference.span.kind", "chain")
+        
+        try:
+            # Check if Google credentials are configured
+            if not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Google Slides integration is not configured. Please set GOOGLE_SERVICE_ACCOUNT_JSON environment variable."
+                )
+            
+            # Import here to avoid startup errors if Google libs not installed
+            from recap_generator import generate_recap_slide as create_slide
+            
+            # Generate the presentation
+            presentation_url = create_slide(recap_data)
+            
+            span.set_attribute("presentation.url", presentation_url)
+            span.set_status(Status(StatusCode.OK))
+            
+            return {
+                "success": True,
+                "presentation_url": presentation_url,
+                "message": "Recap slide created successfully"
+            }
+            
+        except HTTPException:
+            raise
+        except ImportError as e:
+            span.set_status(Status(StatusCode.ERROR, f"Import error: {str(e)}"))
+            raise HTTPException(
+                status_code=503,
+                detail="Google Slides dependencies not installed. Please install google-api-python-client and google-auth."
+            )
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate recap slide: {str(e)}"
             )
 
 

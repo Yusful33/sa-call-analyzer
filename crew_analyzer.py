@@ -23,7 +23,8 @@ from models import (
     ResourcesCommitted,
     CriteriaEvidence,
     MissedOpportunity,
-    MissingElements
+    MissingElements,
+    RecapSlideData
 )
 from dotenv import load_dotenv
 from opentelemetry import trace
@@ -1223,6 +1224,14 @@ class SACallAnalysisCrew:
                             key_moments=analysis_data.get("key_moments", []),
                             call_classification=call_classification  # Add classification result
                         )
+                        
+                        # Generate recap slide data
+                        try:
+                            recap_data = self.generate_recap_data(transcript, call_classification, analysis_data)
+                            result.recap_data = recap_data
+                            print(f"✅ Recap data generated with {len(recap_data.current_state)} current state items")
+                        except Exception as e:
+                            print(f"⚠️ Could not generate recap data: {e}")
 
                     # Add metadata about the parsed results
                         parse_span.set_attribute("analysis.insight_count", len(result.top_insights))
@@ -1589,6 +1598,120 @@ class SACallAnalysisCrew:
             )
         # Handle empty/None
         return MissingElements()
+
+    def generate_recap_data(self, transcript: str, call_classification: Optional[CallClassification], analysis_data: dict) -> RecapSlideData:
+        """
+        Generate recap slide data using an LLM to synthesize the Command of Message sections.
+        
+        Args:
+            transcript: The call transcript
+            call_classification: The call classification result (if available)
+            analysis_data: The parsed analysis data from the crew
+            
+        Returns:
+            RecapSlideData with the 5 Command of Message sections
+        """
+        tracer = trace.get_tracer("recap-generator")
+        
+        with tracer.start_as_current_span("generate_recap_data") as span:
+            span.set_attribute("openinference.span.kind", "chain")
+            
+            # Build context from classification data
+            classification_context = ""
+            if call_classification:
+                if call_classification.discovery_criteria:
+                    dc = call_classification.discovery_criteria
+                    classification_context += f"""
+Discovery Information:
+- Pain/Current State Notes: {dc.pain_current_state.notes if dc.pain_current_state else 'N/A'}
+- Required Capabilities Notes: {dc.required_capabilities.notes if dc.required_capabilities else 'N/A'}
+- Competitive Landscape: {dc.competitive_landscape.notes if dc.competitive_landscape else 'N/A'}
+"""
+                if call_classification.poc_scoping_criteria:
+                    pc = call_classification.poc_scoping_criteria
+                    classification_context += f"""
+PoC Scoping Information:
+- Use Case Notes: {pc.use_case_scoped.notes if pc.use_case_scoped else 'N/A'}
+- Success Metrics: {pc.metrics_success_criteria.notes if pc.metrics_success_criteria else 'N/A'}
+"""
+            
+            # Build the prompt for recap generation
+            recap_task = Task(
+                description=f"""Based on the following call transcript and analysis, generate a Command of the Message recap for the next call.
+
+TRANSCRIPT:
+{transcript[:10000]}  # Limit transcript length
+
+ANALYSIS CONTEXT:
+{classification_context}
+
+Call Summary: {analysis_data.get('call_summary', 'N/A')}
+Key Insights: {json.dumps(analysis_data.get('top_insights', [])[:3], indent=2)}
+
+Generate a recap with these 5 sections (2-4 bullet points each):
+
+1. CURRENT STATE - The customer's current situation, pain points, and challenges they discussed
+2. FUTURE STATE - What the customer wants to achieve, their desired outcomes
+3. NEGATIVE CONSEQUENCES - What happens if they don't act (business risks, costs of inaction)
+4. POSITIVE BUSINESS OUTCOMES - Benefits they'll see from implementing a solution
+5. REQUIRED CAPABILITIES - What they need from a solution to achieve their goals
+
+Return as JSON:
+{{
+    "current_state": ["bullet 1", "bullet 2", "bullet 3"],
+    "future_state": ["bullet 1", "bullet 2"],
+    "negative_consequences": ["bullet 1", "bullet 2"],
+    "positive_business_outcomes": ["bullet 1", "bullet 2", "bullet 3"],
+    "required_capabilities": ["bullet 1", "bullet 2", "bullet 3"]
+}}
+
+Be specific and use actual details from the call. Each bullet should be concise (under 15 words).
+""",
+                agent=self.agents['report_compiler'] if hasattr(self, 'agents') else Agent(
+                    role="Recap Generator",
+                    goal="Generate Command of the Message recap content",
+                    backstory="Expert at synthesizing sales calls into actionable recaps",
+                    llm=self.llm,
+                    verbose=True
+                ),
+                expected_output="JSON with 5 recap sections"
+            )
+            
+            # Run the task
+            try:
+                recap_crew = Crew(
+                    agents=[recap_task.agent],
+                    tasks=[recap_task],
+                    process=Process.sequential,
+                    verbose=True
+                )
+                result = recap_crew.kickoff()
+                result_text = result.raw if hasattr(result, 'raw') else str(result)
+                
+                # Parse the JSON result
+                json_start = result_text.find('{')
+                json_end = result_text.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    recap_json = json.loads(result_text[json_start:json_end])
+                    
+                    recap_data = RecapSlideData(
+                        current_state=recap_json.get("current_state", []),
+                        future_state=recap_json.get("future_state", []),
+                        negative_consequences=recap_json.get("negative_consequences", []),
+                        positive_business_outcomes=recap_json.get("positive_business_outcomes", []),
+                        required_capabilities=recap_json.get("required_capabilities", [])
+                    )
+                    
+                    span.set_attribute("recap.sections_generated", 5)
+                    span.set_status(Status(StatusCode.OK))
+                    return recap_data
+                    
+            except Exception as e:
+                print(f"⚠️ Failed to generate recap data: {e}")
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+            
+            # Return empty recap data on failure
+            return RecapSlideData()
 
     def _extract_insights_from_raw_text(self, raw_text: str, sa_name: str) -> dict:
         """

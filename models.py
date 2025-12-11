@@ -369,6 +369,17 @@ class SAPerformanceMetrics(BaseModel):
     value_articulation: Optional[float] = 7.0  # 1-10 (can be decimal like 6.5)
 
 
+class RecapSlideData(BaseModel):
+    """Data for generating a recap slide for the next call"""
+    customer_name: str = ""
+    call_date: str = ""
+    current_state: List[str] = Field(default_factory=list)  # Current customer situation/pain points
+    future_state: List[str] = Field(default_factory=list)  # Desired outcome after implementation
+    negative_consequences: List[str] = Field(default_factory=list)  # What happens if they don't act
+    positive_business_outcomes: List[str] = Field(default_factory=list)  # Benefits of moving forward
+    required_capabilities: List[str] = Field(default_factory=list)  # What they need from a solution
+
+
 class AnalysisResult(BaseModel):
     """Complete analysis results"""
     sa_identified: str  # Who we identified as the SA
@@ -384,3 +395,6 @@ class AnalysisResult(BaseModel):
     
     # Call classification (new)
     call_classification: Optional[CallClassification] = None
+    
+    # Recap slide data for next call
+    recap_data: Optional[RecapSlideData] = None
