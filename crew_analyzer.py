@@ -585,6 +585,19 @@ class SACallAnalysisCrew:
                     IMPORTANT: For each criteria section, you MUST provide:
                     1. "evidence" - Array of evidence items showing WHERE and WHAT was captured
                     2. "missed_opportunities" - Array of moments where we COULD have gathered more info
+                    
+                    MISSED OPPORTUNITIES STRUCTURE (REQUIRED for ALL criteria sections):
+                    Every missed_opportunity MUST include ALL of these fields:
+                    {{
+                        "criteria_name": "name of the uncaptured criteria",
+                        "timestamp": "[MM:SS]",
+                        "context": "What happened - what the customer said and what the SA did instead",
+                        "suggested_question": "A specific discovery question the SA should have asked (REQUIRED - never empty)",
+                        "why_important": "Why asking this question matters for the deal"
+                    }}
+                    
+                    The "suggested_question" field is CRITICAL - it must be a specific, actionable question
+                    the SA could ask to uncover more information. NEVER leave it empty or as "".
 
                     Return your analysis as JSON with this EXACT structure:
                     {{
@@ -634,7 +647,15 @@ class SACallAnalysisCrew:
                                 "decision_maker_confirmed": true/false,
                                 "notes": "stakeholder summary",
                                 "evidence": [],
-                                "missed_opportunities": []
+                                "missed_opportunities": [
+                                    {{
+                                        "criteria_name": "decision_maker_confirmed",
+                                        "timestamp": "[MM:SS]",
+                                        "context": "Customer mentioned their manager but SA did not ask about decision process",
+                                        "suggested_question": "Who else needs to be involved in the decision to move forward? What does your approval process look like?",
+                                        "why_important": "Understanding decision maker ensures we're building consensus with the right stakeholders"
+                                    }}
+                                ]
                             }},
                             "required_capabilities": {{
                                 "top_rcs_ranked": true/false,
