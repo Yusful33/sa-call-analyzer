@@ -122,14 +122,14 @@ class SACallAnalysisCrew:
         # Store model name for cost calculations
         self.model_name = model_name
 
-    def _extract_snippet_from_transcript(self, transcript: str, timestamp: str, num_lines: int = 4) -> Optional[str]:
+    def _extract_snippet_from_transcript(self, transcript: str, timestamp: str, max_chars: int = 500) -> Optional[str]:
         """
         Extract actual conversation lines from transcript based on timestamp.
         
         Args:
             transcript: The full transcript text
             timestamp: Timestamp like "[12:34]", "[0:16]", "[~10:00]"
-            num_lines: Number of lines to extract (default 4)
+            max_chars: Maximum characters to extract (default 500)
             
         Returns:
             Actual conversation snippet from transcript, or None if timestamp not found
@@ -143,43 +143,75 @@ class SACallAnalysisCrew:
         # Split transcript into lines
         lines = transcript.split('\n')
         
+        # Build list of timestamp variations to search for
+        search_patterns = [clean_ts, f"[{clean_ts}]"]
+        
+        # Handle different timestamp formats: "02:16", "2:16", "00:02:16"
+        if ':' in clean_ts:
+            parts = clean_ts.split(':')
+            if len(parts) == 2:
+                mm, ss = parts
+                # Try with and without leading zeros
+                search_patterns.extend([
+                    f"{int(mm)}:{ss}",  # "2:16"
+                    f"{int(mm):02d}:{ss}",  # "02:16"
+                    f"[{int(mm)}:{ss}]",
+                    f"[{int(mm):02d}:{ss}]",
+                ])
+            elif len(parts) == 3:
+                hh, mm, ss = parts
+                search_patterns.extend([
+                    f"{int(mm)}:{ss}",  # Just MM:SS
+                    f"{int(hh)}:{int(mm)}:{ss}",
+                ])
+        
         # Try to find the timestamp in the transcript
         target_line_idx = None
         
         for i, line in enumerate(lines):
-            # Check if this line contains the timestamp
-            if clean_ts in line or f"[{clean_ts}]" in line:
-                target_line_idx = i
+            for pattern in search_patterns:
+                if pattern in line:
+                    target_line_idx = i
+                    break
+            if target_line_idx is not None:
                 break
-            # Also try matching just the minutes:seconds part
-            if ':' in clean_ts:
-                # Handle both "12:34" and "0:16" formats
-                parts = clean_ts.split(':')
-                if len(parts) >= 2:
-                    # Try different formats
-                    mm_ss = f"{parts[-2]}:{parts[-1]}"
-                    if mm_ss in line or f"[{mm_ss}]" in line:
-                        target_line_idx = i
-                        break
         
         if target_line_idx is None:
             return None
         
-        # Extract lines around the timestamp (include the timestamp line and following lines)
-        start_idx = target_line_idx
-        end_idx = min(target_line_idx + num_lines, len(lines))
+        # Extract text starting from the timestamp, limited by character count
+        snippet_parts = []
+        char_count = 0
         
-        # Get the snippet lines
-        snippet_lines = []
-        for i in range(start_idx, end_idx):
+        for i in range(target_line_idx, min(target_line_idx + 6, len(lines))):
             line = lines[i].strip()
-            if line:  # Skip empty lines
-                snippet_lines.append(line)
+            if not line:
+                continue
+                
+            # If adding this line would exceed limit, truncate it
+            if char_count + len(line) > max_chars:
+                remaining = max_chars - char_count
+                if remaining > 50:  # Only add if we can fit meaningful content
+                    # Try to break at a sentence or word boundary
+                    truncated = line[:remaining]
+                    last_period = truncated.rfind('.')
+                    last_space = truncated.rfind(' ')
+                    if last_period > remaining * 0.5:
+                        truncated = truncated[:last_period + 1]
+                    elif last_space > remaining * 0.5:
+                        truncated = truncated[:last_space] + "..."
+                    else:
+                        truncated = truncated + "..."
+                    snippet_parts.append(truncated)
+                break
+            
+            snippet_parts.append(line)
+            char_count += len(line) + 1  # +1 for newline
         
-        if not snippet_lines:
+        if not snippet_parts:
             return None
             
-        return '\n'.join(snippet_lines)
+        return '\n'.join(snippet_parts)
 
     def _populate_snippets_in_insights(self, insights: list, transcript: str) -> list:
         """
@@ -687,10 +719,15 @@ class SACallAnalysisCrew:
                             }}
                         }},
                         "missing_elements": {{
-                            "discovery": ["List of missing DISCOVERY criteria - include only if call_type is 'discovery' or 'mixed'"],
-                            "poc_scoping": ["List of missing POC SCOPING criteria - include only if call_type is 'poc_scoping' or 'mixed'"]
+                            "discovery": ["REQUIRED: 3-5 bullet points summarizing the KEY discovery gaps, e.g. 'Did not quantify business impact', 'Missing stakeholder map'"],
+                            "poc_scoping": ["REQUIRED: 3-5 bullet points summarizing the KEY PoC scoping gaps, e.g. 'No success metrics defined', 'Timeline not discussed'"]
                         }},
                         "recommendations": ["Specific actions with example questions for next call"]
+                        
+                        IMPORTANT: The "missing_elements" field is REQUIRED and must contain a summary of the most important gaps.
+                        - For discovery calls: Focus on pain/impact, stakeholders, competitive landscape gaps
+                        - For poc_scoping calls: Focus on use case, metrics, timeline, resources gaps
+                        - Always include at least 3 items in the relevant category based on call_type
                     }}
                     """,
                         agent=agents['call_classifier'],
@@ -817,6 +854,7 @@ class SACallAnalysisCrew:
                        - Category (which skill area)
                        - Severity (critical/important/minor)
                        - Timestamp (REQUIRED - MUST be included for EVERY insight)
+                       - Conversation snippet (1-2 sentence SYNTHESIS of what was discussed at this moment - NOT a verbatim quote)
                        - What happened
                        - Why it matters
                        - Better approach
@@ -835,6 +873,11 @@ class SACallAnalysisCrew:
                     Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
                     Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
 
+                    CONVERSATION SNIPPET REQUIREMENT:
+                    For each insight, include a "conversation_snippet" that is a BRIEF 1-2 sentence synthesis
+                    of what was discussed at that moment. Do NOT try to quote verbatim - just summarize the exchange.
+                    Example: "Customer expressed concerns about integration complexity; SA pivoted to demo without addressing."
+
                     Make it specific and actionable. Focus on high-impact improvements.
                     Return as valid JSON that matches this structure:
                     {{
@@ -844,6 +887,7 @@ class SACallAnalysisCrew:
                                 "category": "Discovery Depth",
                                 "severity": "critical",
                                 "timestamp": "[05:23]",
+                                "conversation_snippet": "Brief 1-2 sentence synthesis of the exchange at this moment",
                                 "what_happened": "Brief description",
                                 "why_it_matters": "Business impact",
                                 "better_approach": "What to do differently",
@@ -860,7 +904,6 @@ class SACallAnalysisCrew:
                         ]
                     }}
 
-                    NOTE: Do NOT include conversation_snippet field - actual quotes will be extracted programmatically.
                     Sort insights chronologically (earliest timestamp first).
                     """,
                     agent=agents['report_compiler'],
@@ -1101,11 +1144,9 @@ class SACallAnalysisCrew:
                     # Convert to Pydantic models
                         parse_span.add_event("constructing_pydantic_models")
 
-                    # Parse insights, populate conversation snippets from actual transcript, and sort chronologically
+                    # Parse insights and sort chronologically
+                    # Note: conversation_snippet is now a synthesized summary generated by the LLM
                         raw_insights = analysis_data.get("top_insights", [])
-                        
-                        # Post-process: Extract actual conversation snippets from transcript based on timestamps
-                        raw_insights = self._populate_snippets_in_insights(raw_insights, transcript)
                         
                         insights = []
                         for insight in raw_insights:
