@@ -83,13 +83,13 @@ class TokenTrackingCallback(BaseCallbackHandler):
 
 class SACallAnalysisCrew:
     """
-    CrewAI-powered SA Call Analysis System.
+    CrewAI-powered Call Analysis System.
 
-    Uses 4 specialized agents to comprehensively analyze Solution Architect performance:
-    1. SA Identifier - Identifies the Solution Architect
-    2. Technical Evaluator - Assesses technical skills
+    Uses specialized agents to comprehensively analyze sales call performance:
+    1. Call Classifier - Classifies the call type (Discovery vs PoC Scoping)
+    2. Technical Evaluator - Assesses technical discussion quality
     3. Sales Methodology & Discovery Expert - Evaluates discovery and Command of Message framework
-    4. Report Compiler - Synthesizes feedback
+    4. Report Compiler - Synthesizes feedback into actionable insights
     """
 
     def __init__(self):
@@ -239,21 +239,6 @@ class SACallAnalysisCrew:
     def create_agents(self):
         """Create all specialized agents"""
 
-        sa_identifier = Agent(
-            role='Solution Architect Identifier',
-            goal='Accurately identify who the Solution Architect is in the call transcript',
-            backstory="""You are an expert at analyzing conversation patterns and roles.
-            You can identify Solution Architects by looking for:
-            - Technical architecture discussions
-            - Data integration and infrastructure talks
-            - Technical scoping and requirements gathering
-            - Feature and implementation details
-            - Technical problem-solving""",
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
         technical_evaluator = Agent(
             role='Senior Technical Architect & Evaluator',
             goal='Assess the Solution Architect\'s technical depth, accuracy, and demonstration quality',
@@ -342,7 +327,6 @@ class SACallAnalysisCrew:
         )
 
         return {
-            'sa_identifier': sa_identifier,
             'technical_evaluator': technical_evaluator,
             'sales_methodology_expert': sales_methodology_expert,
             'report_compiler': report_compiler,
@@ -353,7 +337,6 @@ class SACallAnalysisCrew:
         self,
         transcript: str,
         speakers: List[str],
-        manual_sa: Optional[str] = None,
         transcript_data: Optional[dict] = None
     ) -> AnalysisResult:
         """
@@ -388,120 +371,6 @@ class SACallAnalysisCrew:
             result = None  # Initialize result
             try:
                 agents = self.create_agents()
-
-                # Task 1: Identify SA
-                with tracer.start_as_current_span("identify_sa") as sa_span:
-                    sa_span.set_attribute("openinference.span.kind", "agent")
-                    sa_span.set_attribute("speakers.available", ", ".join(speakers) if speakers else "none")
-                    sa_span.set_attribute("speakers.count", len(speakers))
-                    # OpenInference input
-                    sa_span.set_attribute("input.value", json.dumps({
-                        "speakers": speakers,
-                        "transcript_preview": transcript[:500] + "..." if len(transcript) > 500 else transcript,
-                        "manual_sa": manual_sa
-                    }))
-                    sa_span.set_attribute("input.mime_type", "application/json")
-
-                    if manual_sa:
-                        sa_name = manual_sa
-                        sa_identification_result = f"SA manually specified: {manual_sa}"
-                        sa_span.set_attribute("identification.method", "manual")
-                        sa_span.add_event("manual_sa_provided", {"sa_name": manual_sa})
-                    else:
-                        sa_span.set_attribute("identification.method", "crew_analysis")
-
-                        # Use hybrid sampling if raw transcript data is available
-                        if transcript_data:
-                            sa_span.set_attribute("identification.sampling_method", "hybrid")
-                            from gong_mcp_client import GongMCPClient
-                            gong_client = GongMCPClient()
-
-                            # Extract call_id from transcript_data if available
-                            call_id = None
-                            if "callTranscripts" in transcript_data:
-                                call_id = transcript_data["callTranscripts"][0].get("callId")
-
-                            transcript_sample = gong_client.create_hybrid_sample_for_sa_identification(
-                                transcript_data,
-                                call_id=call_id,
-                                max_speakers=3
-                            )
-                            sa_span.add_event("hybrid_sampling_used", {
-                                "sample_length": len(transcript_sample)
-                            })
-                            print(f"📊 Using hybrid sampling: {len(transcript_sample)} chars")
-                        else:
-                            # Fallback to old character-based sampling
-                            sa_span.set_attribute("identification.sampling_method", "character_based")
-                            transcript_len = len(transcript)
-                            if transcript_len <= 5000:
-                                transcript_sample = transcript
-                            else:
-                                # Sample from beginning, middle, and end
-                                beginning = transcript[:2000]
-                                middle_start = transcript_len // 2 - 1000
-                                middle = transcript[middle_start:middle_start + 2000]
-                                end = transcript[-1000:]
-                                transcript_sample = f"{beginning}\n\n... [middle section] ...\n\n{middle}\n\n... [later section] ...\n\n{end}"
-                            print(f"📊 Using character-based sampling: {len(transcript_sample)} chars")
-
-                        identify_sa_task = Task(
-                            description=f"""Analyze this call transcript sample and identify who the Solution Architect (SA) is.
-
-                            Available speakers: {', '.join(speakers) if speakers else 'Unknown (no speaker labels)'}
-
-                            {transcript_sample}
-
-                            The Solution Architect is typically the person who:
-                            - Discusses technical architecture and implementation
-                            - Explains product features and capabilities
-                            - Answers technical questions
-                            - Conducts demos or technical walkthroughs
-                            - Discusses integration and data architecture
-                            - Has higher word count and longer, more technical turns
-
-                            NOTE: Initial small talk and pleasantries are normal - look beyond that for technical content.
-                            If statistics are provided, heavily weight the speaker with higher word count and SA likelihood score.
-
-                            Provide:
-                            1. The SA's name (if names are provided, use the actual name; otherwise use the speaker ID)
-                            2. Confidence level (high/medium/low)
-                            3. Brief reasoning based on the statistics and content
-
-                            Format: "SA Name: <name or speaker_id>, Confidence: <level>, Reasoning: <brief explanation>"
-                            """,
-                            agent=agents['sa_identifier'],
-                            expected_output="SA identification with speaker ID, confidence, and reasoning"
-                        )
-
-                        # Execute SA identification
-                        sa_span.add_event("starting_sa_crew")
-                        sa_crew = Crew(
-                            agents=[agents['sa_identifier']],
-                            tasks=[identify_sa_task],
-                            process=Process.sequential,
-                            verbose=True
-                        )
-                        sa_identification_result = sa_crew.kickoff()
-                        sa_name = self._extract_sa_name(str(sa_identification_result))
-                        print(f"🔍 SA Identification Result: {sa_identification_result}")
-                        print(f"✅ Extracted SA Name: {sa_name}")
-                        sa_span.add_event("sa_crew_completed", {
-                            "raw_result": str(sa_identification_result)[:200],
-                            "extracted_name": sa_name
-                        })
-
-                    sa_span.set_attribute("sa.identified_name", sa_name)
-                    # OpenInference output
-                    sa_span.set_attribute("output.value", json.dumps({
-                        "sa_name": sa_name,
-                        "method": "manual" if manual_sa else "crew_analysis"
-                    }))
-                    sa_span.set_attribute("output.mime_type", "application/json")
-                    sa_span.set_status(Status(StatusCode.OK))
-
-                # Add SA identification to span
-                analysis_span.add_event("sa_identified", {"sa_name": sa_name})
 
                 # ============================================================
                 # STEP 1: Run Call Classification (separate crew for clean output)
@@ -787,7 +656,7 @@ class SACallAnalysisCrew:
 
                 # Task 3-5: Parallel analysis by different experts
                 technical_task = Task(
-                    description=f"""Analyze the technical performance of {sa_name} in this call.
+                    description=f"""Analyze the technical performance of the sales rep in this call.
 
                     Transcript:
                     {transcript}
@@ -819,7 +688,7 @@ class SACallAnalysisCrew:
                 )
 
                 sales_methodology_task = Task(
-                    description=f"""Analyze {sa_name}'s sales methodology and discovery performance in this call.
+                    description=f"""Analyze the sales rep's sales methodology and discovery performance in this call.
 
                     Transcript:
                     {transcript}
@@ -867,7 +736,7 @@ class SACallAnalysisCrew:
 
                 # Task 4: Compile report (depends on all previous tasks)
                 compile_task = Task(
-                    description=f"""Compile a comprehensive, actionable performance report for {sa_name}.
+                    description=f"""Compile a comprehensive, actionable performance report for the sales rep.
 
                     Based on all the analysis from technical and sales methodology experts,
                     create a final report with:
@@ -946,7 +815,6 @@ class SACallAnalysisCrew:
                     crew_span.set_attribute("openinference.span.kind", "agent")
                     crew_span.set_attribute("crew.agent_count", 3)
                     crew_span.set_attribute("crew.task_count", 3)
-                    crew_span.set_attribute("crew.sa_name", sa_name)
 
                     # OpenInference input - structured and readable format
                     # Extract first few exchanges for preview
@@ -958,7 +826,6 @@ class SACallAnalysisCrew:
                         transcript_preview += f"\n\n... ({remaining_lines} more lines)"
 
                     crew_span.set_attribute("input.value", json.dumps({
-                        "sa_name": sa_name,
                         "transcript_stats": {
                             "total_length": len(transcript),
                             "line_count": len(all_lines),
@@ -1035,7 +902,6 @@ class SACallAnalysisCrew:
                             formatted_output = {
                                 "summary": {
                                     "call_summary": parsed_report.get("call_summary", "N/A"),
-                                    "sa_identified": sa_name,
                                     "insight_count": len(parsed_report.get("top_insights", [])),
                                     "strength_count": len(parsed_report.get("strengths", [])),
                                     "improvement_count": len(parsed_report.get("improvement_areas", []))
@@ -1159,7 +1025,7 @@ class SACallAnalysisCrew:
                                 parse_span.set_attribute("error.message", str(e))
 
                                 # Smart fallback: Extract meaningful content from raw text
-                                analysis_data = self._extract_insights_from_raw_text(final_report_text, sa_name)
+                                analysis_data = self._extract_insights_from_raw_text(final_report_text)
 
                     # Helper function to safely convert to float
                         def safe_float(value, default=7.0):
@@ -1208,8 +1074,6 @@ class SACallAnalysisCrew:
                         insights.sort(key=lambda x: extract_timestamp_value(x.timestamp))
 
                         result = AnalysisResult(
-                            sa_identified=sa_name,
-                            sa_confidence="high",  # Crew consensus
                             call_summary=analysis_data.get("call_summary", ""),
                             overall_score=safe_float(analysis_data.get("overall_score")),
                             command_scores=CommandOfMessageScore(
@@ -1240,8 +1104,6 @@ class SACallAnalysisCrew:
                         parse_span.set_attribute("analysis.key_moment_count", len(result.key_moments))
                     # OpenInference output - parsed and structured analysis result
                         parse_span.set_attribute("output.value", json.dumps({
-                            "sa_identified": result.sa_identified,
-                            "sa_confidence": result.sa_confidence,
                             "call_summary": result.call_summary,
                             "insight_count": len(result.top_insights),
                             "strength_count": len(result.strengths),
@@ -1285,7 +1147,6 @@ class SACallAnalysisCrew:
                 # Add result metadata to analysis_span (parent span)
                 analysis_span.set_attributes({
                     "output.value": json.dumps({
-                        "sa_identified": sa_name,
                         "call_summary": result.call_summary,
                         "overall_score": result.overall_score,
                         "command_scores": result.command_scores.model_dump(),
@@ -1307,33 +1168,6 @@ class SACallAnalysisCrew:
         force_flush_spans()
 
         return result
-
-    def _extract_sa_name(self, identification_result: str) -> str:
-        """Extract SA name from identification result"""
-        print(f"🔍 Extracting SA name from: {identification_result[:200]}...")
-
-        # Try multiple patterns
-        patterns = [
-            "SA Name:",
-            "Solution Architect:",
-            "SA is",
-            "identified as",
-            "The SA is",
-            "The Solution Architect is"
-        ]
-
-        for pattern in patterns:
-            if pattern in identification_result:
-                # Extract text after pattern
-                parts = identification_result.split(pattern)[1].split(",")[0].split("\n")[0]
-                extracted = parts.strip().strip('"').strip("'")
-                if extracted and extracted != "Unknown" and len(extracted) > 0:
-                    print(f"✅ Extracted SA name using pattern '{pattern}': {extracted}")
-                    return extracted
-
-        # Fallback - log warning
-        print(f"⚠️  Could not extract SA name from identification result. Using 'Unknown SA'")
-        return "Unknown SA"
 
     def _parse_evidence(self, evidence_list: List[dict]) -> List[CriteriaEvidence]:
         """Parse evidence items from JSON data"""
@@ -1713,7 +1547,7 @@ Be specific and use actual details from the call. Each bullet should be concise 
             # Return empty recap data on failure
             return RecapSlideData()
 
-    def _extract_insights_from_raw_text(self, raw_text: str, sa_name: str) -> dict:
+    def _extract_insights_from_raw_text(self, raw_text: str) -> dict:
         """
         Extract meaningful insights from raw crew output when JSON parsing fails.
         Uses regex patterns and heuristics to find strengths, improvements, and key moments.
@@ -1839,14 +1673,14 @@ Be specific and use actual details from the call. Each bullet should be concise 
                 "severity": "important",
                 "timestamp": None,
                 "conversation_snippet": None,
-                "what_happened": f"Comprehensive analysis performed for {sa_name}'s call performance.",
+                "what_happened": "Comprehensive analysis performed for the sales rep's call performance.",
                 "why_it_matters": "Multi-agent review provides thorough evaluation of technical depth, discovery quality, and sales methodology.",
                 "better_approach": "Review the strengths and improvement areas sections below for actionable feedback.",
                 "example_phrasing": None
             }]
         
         if not call_summary:
-            call_summary = f"Call analysis for {sa_name}. Review insights below for specific feedback."
+            call_summary = "Call analysis complete. Review insights below for specific feedback."
         
         return {
             "call_summary": call_summary,

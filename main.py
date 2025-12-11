@@ -25,8 +25,8 @@ from opentelemetry.trace import Status, StatusCode
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="SA Call Analyzer - CrewAI Multi-Agent System",
-    description="Analyze Solution Architect performance using Command of the Message framework with 4 specialized AI agents"
+    title="Call Analyzer - CrewAI Multi-Agent System",
+    description="Analyze sales call performance using Command of the Message framework with specialized AI agents"
 )
 
 # Enable CORS for local development
@@ -62,7 +62,7 @@ except Exception as e:
     print(f"⚠️  Gong MCP client not available: {e}")
 
 print("🤖 Using CrewAI Multi-Agent System (4 specialized agents)")
-print("   1. 🔍 SA Identifier")
+print("   1. 🔍 Call Classifier")
 print("   2. 🛠️ Technical Evaluator")
 print("   3. 💡 Sales Methodology & Discovery Expert")
 print("   4. 📝 Report Compiler")
@@ -77,7 +77,7 @@ async def root():
         return HTMLResponse("""
         <html>
             <body>
-                <h1>SA Call Analyzer API</h1>
+                <h1>Call Analyzer API</h1>
                 <p>Frontend not found. API is running at <a href="/docs">/docs</a></p>
             </body>
         </html>
@@ -97,7 +97,7 @@ async def health_check():
 @app.post("/api/analyze", response_model=AnalysisResult)
 async def analyze_transcript(request: AnalyzeRequest):
     """
-    Analyze a call transcript and provide actionable feedback for the SA.
+    Analyze a call transcript and provide actionable feedback for the sales rep.
 
     You can provide either:
     - transcript: Manual transcript text (with or without speaker labels)
@@ -107,13 +107,10 @@ async def analyze_transcript(request: AnalyzeRequest):
         "analyze_call_request",
         attributes={
             "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
-            "request.has_sa_name": bool(request.sa_name),
-            "request.sa_name": request.sa_name or "auto-detect",
             # OpenInference input - the API request
             "input.value": json.dumps({
                 "gong_url": request.gong_url,
-                "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
-                "sa_name": request.sa_name
+                "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript
             }),
             "input.mime_type": "application/json",
             # OpenInference span kind - this is a chain orchestrating the workflow
@@ -190,28 +187,22 @@ async def analyze_transcript(request: AnalyzeRequest):
 
             span.add_event("starting_crew_analysis", {
                 "transcript.length": len(formatted_transcript),
-                "speaker.count": len(speakers),
-                "manual_sa": request.sa_name or "auto-detect"
+                "speaker.count": len(speakers)
             })
 
             # Perform analysis
             result = analyzer.analyze_call(
                 transcript=formatted_transcript,
                 speakers=speakers,
-                manual_sa=request.sa_name,
                 transcript_data=transcript_data  # Pass raw data for hybrid sampling if available
             )
 
-            span.set_attribute("analysis.sa_identified", result.sa_identified)
-            span.set_attribute("analysis.sa_confidence", result.sa_confidence)
             span.set_attribute("analysis.insight_count", len(result.top_insights))
             span.set_attribute("analysis.strength_count", len(result.strengths))
             span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
 
             # OpenInference output - the complete analysis result
             span.set_attribute("output.value", json.dumps({
-                "sa_identified": result.sa_identified,
-                "sa_confidence": result.sa_confidence,
                 "call_summary": result.call_summary,
                 "top_insights": [
                     {
@@ -233,7 +224,6 @@ async def analyze_transcript(request: AnalyzeRequest):
 
             span.set_status(Status(StatusCode.OK))
             span.add_event("analysis_complete", {
-                "sa_identified": result.sa_identified,
                 "insight_count": len(result.top_insights)
             })
 
@@ -335,7 +325,7 @@ if __name__ == "__main__":
         print("   See .env.example for reference")
 
     port = int(os.getenv("PORT", 8080))
-    print("🚀 Starting SA Call Analyzer...")
+    print("🚀 Starting Call Analyzer...")
     print(f"📝 Open http://localhost:{port} in your browser")
     print(f"📚 API docs available at http://localhost:{port}/docs")
 

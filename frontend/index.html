@@ -624,13 +624,6 @@
             margin-left: 8px;
         }
 
-        .sa-info {
-            background: #e8f4f8;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
         .section-title {
             font-size: 1.5em;
             color: #333;
@@ -876,11 +869,6 @@ The tool will auto-detect the format and identify the SA."
             const classificationHtml = buildClassificationHtml(data.call_classification);
 
             results.innerHTML = `
-                <div class="sa-info">
-                    <strong>Solution Architect Identified:</strong> ${data.sa_identified}
-                    <span style="color: #666; margin-left: 10px;">(Confidence: ${data.sa_confidence})</span>
-                </div>
-
                 ${classificationHtml}
 
                 <h2>${data.call_summary}</h2>
@@ -1008,9 +996,16 @@ The tool will auto-detect the format and identify the SA."
             let captured = 0;
             let notCaptured = 0;
             
+            // Fields to exclude from counting (they're redundant/not displayed in UI)
+            const excludeFields = [
+                'people_impact_understood',
+                'process_impact_understood', 
+                'technology_impact_understood'
+            ];
+            
             for (const [key, value] of Object.entries(criteriaObj)) {
-                // Skip non-boolean fields and metadata fields
-                if (typeof value === 'boolean') {
+                // Skip non-boolean fields, metadata fields, and excluded fields
+                if (typeof value === 'boolean' && !excludeFields.includes(key)) {
                     if (value === true) {
                         captured++;
                     } else {

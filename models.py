@@ -22,7 +22,6 @@ class AnalyzeRequest(BaseModel):
     """Request to analyze a transcript"""
     transcript: Optional[str] = None  # Manual transcript text
     gong_url: Optional[str] = None  # Gong call URL (alternative to transcript)
-    sa_name: Optional[str] = None  # Manual override for SA identification
 
     def model_post_init(self, __context):
         """Validate that either transcript or gong_url is provided."""
@@ -382,8 +381,6 @@ class RecapSlideData(BaseModel):
 
 class AnalysisResult(BaseModel):
     """Complete analysis results"""
-    sa_identified: str  # Who we identified as the SA
-    sa_confidence: str  # "high", "medium", "low"
     call_summary: str
     overall_score: Optional[float] = 7.0  # 1-10 (optional, defaults to 7.0)
     command_scores: CommandOfMessageScore
