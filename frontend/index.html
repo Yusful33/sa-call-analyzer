@@ -682,7 +682,8 @@
                 Paste a sales call transcript or Gong URL to receive AI-powered analysis. 
                 The tool classifies calls as Discovery, PoC Scoping, or Mixed, evaluates 
                 technical demonstrations, assesses sales methodology alignment, and identifies 
-                gaps with actionable recommendations for follow-up.
+                gaps with actionable recommendations. You'll also receive a <strong>two-slide PowerPoint deck</strong> 
+                with a recap of the conversation and probing questions for your next call.
             </p>
         </div>
 
@@ -869,6 +870,19 @@ The tool will auto-detect the format and identify the SA."
             const classificationHtml = buildClassificationHtml(data.call_classification);
 
             results.innerHTML = `
+                ${data.recap_data ? `
+                <div class="recap-section" style="margin-bottom: 25px;">
+                    <h3>📊 Recap Slide Deck</h3>
+                    <p style="margin-bottom: 15px; color: #666;">
+                        Download a <strong>two-slide PowerPoint deck</strong> with a recap of the conversation and probing questions for your next call.
+                    </p>
+                    <button class="btn-recap" id="generateRecapBtn" onclick="generateRecapSlide()">
+                        📥 Download Recap Slides (.pptx)
+                    </button>
+                    <p id="recapStatus" style="margin-top: 10px; display: none;"></p>
+                </div>
+                ` : ''}
+
                 ${classificationHtml}
 
                 <h2>${data.call_summary}</h2>
@@ -890,19 +904,6 @@ The tool will auto-detect the format and identify the SA."
                 <ul class="list">
                     ${data.key_moments.map(m => `<li><strong>${m.timestamp}</strong>: ${m.description}</li>`).join('')}
                 </ul>
-                
-                ${data.recap_data ? `
-                <div class="recap-section">
-                    <h3>📊 Generate Recap Slide</h3>
-                    <p style="margin-bottom: 15px; color: #666;">
-                        Create a Google Slides presentation with the Command of the Message recap for your next call.
-                    </p>
-                    <button class="btn-recap" id="generateRecapBtn" onclick="generateRecapSlide()">
-                        🎯 Generate Recap Slide in Google Slides
-                    </button>
-                    <p id="recapStatus" style="margin-top: 10px; display: none;"></p>
-                </div>
-                ` : ''}
             `;
             
             // Store recap data for later use
@@ -924,7 +925,7 @@ The tool will auto-detect the format and identify the SA."
             btn.disabled = true;
             btn.textContent = '⏳ Generating...';
             status.style.display = 'block';
-            status.textContent = 'Creating your Google Slides presentation...';
+            status.textContent = 'Creating your PowerPoint presentation...';
             status.style.color = '#666';
             
             try {
@@ -941,21 +942,36 @@ The tool will auto-detect the format and identify the SA."
                     throw new Error(error.detail || 'Failed to generate recap slide');
                 }
                 
-                const result = await response.json();
+                // Get the blob and download it
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
                 
-                status.innerHTML = `✅ Recap slide created! <a href="${result.presentation_url}" target="_blank" style="color: #27ae60; font-weight: bold;">Open in Google Slides →</a>`;
+                // Get filename from Content-Disposition header or use default
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'Recap_Slide.pptx';
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename="(.+)"/);
+                    if (match) filename = match[1];
+                }
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                status.innerHTML = `✅ PowerPoint downloaded! Open it in PowerPoint, Google Slides, or Keynote.`;
                 status.style.color = '#27ae60';
                 
-                // Also open in new tab
-                window.open(result.presentation_url, '_blank');
-                
-                btn.textContent = '✅ Recap Created - Click to Generate Another';
+                btn.textContent = '📥 Download Recap Slide (.pptx)';
                 btn.disabled = false;
                 
             } catch (error) {
                 status.textContent = '❌ Error: ' + error.message;
                 status.style.color = '#e74c3c';
-                btn.textContent = '🎯 Generate Recap Slide in Google Slides';
+                btn.textContent = '📥 Download Recap Slide (.pptx)';
                 btn.disabled = false;
             }
         }

@@ -22,8 +22,7 @@ dependencies = [
     "openinference-instrumentation-litellm>=0.1.0",
     "arize-otel>=0.1.0",
     "requests>=2.31.0",
-    "google-api-python-client>=2.0.0",
-    "google-auth>=2.0.0",
+    "python-pptx>=0.6.21",
 ]
 
 [project.optional-dependencies]

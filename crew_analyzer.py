@@ -1435,7 +1435,8 @@ class SACallAnalysisCrew:
 
     def generate_recap_data(self, transcript: str, call_classification: Optional[CallClassification], analysis_data: dict) -> RecapSlideData:
         """
-        Generate recap slide data using an LLM to synthesize the Command of Message sections.
+        Generate recap slide data using an LLM to synthesize Key Initiatives, Challenges,
+        Solution Requirements, and Follow-up Questions.
         
         Args:
             transcript: The call transcript
@@ -1443,7 +1444,7 @@ class SACallAnalysisCrew:
             analysis_data: The parsed analysis data from the crew
             
         Returns:
-            RecapSlideData with the 5 Command of Message sections
+            RecapSlideData with the recap sections and follow-up questions
         """
         tracer = trace.get_tracer("recap-generator")
         
@@ -1452,7 +1453,22 @@ class SACallAnalysisCrew:
             
             # Build context from classification data
             classification_context = ""
+            missed_opportunities = []
+            missing_elements_list = []
+            recommendations_list = []
+            
             if call_classification:
+                # Extract Missing Elements (from classification)
+                if call_classification.missing_elements:
+                    if call_classification.missing_elements.discovery:
+                        missing_elements_list.extend(call_classification.missing_elements.discovery)
+                    if call_classification.missing_elements.poc_scoping:
+                        missing_elements_list.extend(call_classification.missing_elements.poc_scoping)
+                
+                # Extract Recommendations for Next Call
+                if call_classification.recommendations:
+                    recommendations_list = call_classification.recommendations[:5]
+                
                 if call_classification.discovery_criteria:
                     dc = call_classification.discovery_criteria
                     classification_context += f"""
@@ -1461,6 +1477,14 @@ Discovery Information:
 - Required Capabilities Notes: {dc.required_capabilities.notes if dc.required_capabilities else 'N/A'}
 - Competitive Landscape: {dc.competitive_landscape.notes if dc.competitive_landscape else 'N/A'}
 """
+                    # Collect missed opportunities for question generation
+                    if dc.pain_current_state and dc.pain_current_state.missed_opportunities:
+                        missed_opportunities.extend(dc.pain_current_state.missed_opportunities)
+                    if dc.stakeholder_map and dc.stakeholder_map.missed_opportunities:
+                        missed_opportunities.extend(dc.stakeholder_map.missed_opportunities)
+                    if dc.required_capabilities and dc.required_capabilities.missed_opportunities:
+                        missed_opportunities.extend(dc.required_capabilities.missed_opportunities)
+                        
                 if call_classification.poc_scoping_criteria:
                     pc = call_classification.poc_scoping_criteria
                     classification_context += f"""
@@ -1468,47 +1492,93 @@ PoC Scoping Information:
 - Use Case Notes: {pc.use_case_scoped.notes if pc.use_case_scoped else 'N/A'}
 - Success Metrics: {pc.metrics_success_criteria.notes if pc.metrics_success_criteria else 'N/A'}
 """
+                    # Collect missed opportunities from PoC scoping
+                    if pc.use_case_scoped and pc.use_case_scoped.missed_opportunities:
+                        missed_opportunities.extend(pc.use_case_scoped.missed_opportunities)
+                    if pc.metrics_success_criteria and pc.metrics_success_criteria.missed_opportunities:
+                        missed_opportunities.extend(pc.metrics_success_criteria.missed_opportunities)
+            
+            # Extract suggested questions from missed opportunities
+            suggested_questions = []
+            for mo in missed_opportunities[:8]:
+                if hasattr(mo, 'suggested_question') and mo.suggested_question:
+                    suggested_questions.append(mo.suggested_question)
             
             # Build the prompt for recap generation
             recap_task = Task(
-                description=f"""Based on the following call transcript and analysis, generate a Command of the Message recap for the next call.
+                description=f"""Based on the following call transcript and analysis, generate a recap slide for the next call.
 
 TRANSCRIPT:
-{transcript[:10000]}  # Limit transcript length
+{transcript[:10000]}
 
 ANALYSIS CONTEXT:
 {classification_context}
 
 Call Summary: {analysis_data.get('call_summary', 'N/A')}
-Key Insights: {json.dumps(analysis_data.get('top_insights', [])[:3], indent=2)}
 
-Generate a recap with these 5 sections (2-4 bullet points each):
+=== MISSING ELEMENTS (gaps that need to be addressed) ===
+{json.dumps(missing_elements_list[:8], indent=2) if missing_elements_list else 'None identified'}
 
-1. CURRENT STATE - The customer's current situation, pain points, and challenges they discussed
-2. FUTURE STATE - What the customer wants to achieve, their desired outcomes
-3. NEGATIVE CONSEQUENCES - What happens if they don't act (business risks, costs of inaction)
-4. POSITIVE BUSINESS OUTCOMES - Benefits they'll see from implementing a solution
-5. REQUIRED CAPABILITIES - What they need from a solution to achieve their goals
+=== RECOMMENDATIONS FOR NEXT CALL ===
+{json.dumps(recommendations_list, indent=2) if recommendations_list else 'None identified'}
+
+=== SUGGESTED QUESTIONS FROM MISSED OPPORTUNITIES ===
+{json.dumps(suggested_questions, indent=2) if suggested_questions else 'None identified'}
+
+FIRST, extract the following metadata from the transcript:
+- CUSTOMER NAME: The company/organization name of the prospect or customer (e.g., "Fidelity", "Acme Corp", "Netflix"). 
+  Look for introductions like "Hi, I'm [name] from [COMPANY]" or speaker labels like "[Company Name] John Smith:".
+  If multiple customer attendees are present, use their company name.
+- CALL DATE: The date of the call if mentioned in the transcript, otherwise leave empty.
+
+Then generate a recap with these 4 sections:
+
+1. KEY INITIATIVES - What the customer is trying to accomplish (their goals and projects)
+   - Focus on their strategic objectives and what they want to build/achieve
+   - Use specific details from the call (team names, project names, timelines mentioned)
+
+2. CHALLENGES - Pain points and problems they're facing
+   - What's blocking them or causing friction
+   - Be specific about the impact (time wasted, manual processes, lack of visibility)
+
+3. SOLUTION REQUIREMENTS - What they need from a solution
+   - Technical requirements mentioned (integrations, features, capabilities)
+   - Business requirements (security, scalability, ease of use)
+
+4. FOLLOW-UP QUESTIONS - Probing questions to ask on the NEXT call
+   - CRITICAL: Use the MISSING ELEMENTS, RECOMMENDATIONS, and SUGGESTED QUESTIONS above as your PRIMARY source
+   - Convert each gap or recommendation into a specific, actionable question
+   - Format as actual questions starting with "Can you help me understand...", "What would happen if...", "Who is responsible for...", etc.
+   - Include 4-6 high-value questions that directly address the gaps identified
+   - Questions should be specific to THIS customer's situation, not generic
 
 Return as JSON:
 {{
-    "current_state": ["bullet 1", "bullet 2", "bullet 3"],
-    "future_state": ["bullet 1", "bullet 2"],
-    "negative_consequences": ["bullet 1", "bullet 2"],
-    "positive_business_outcomes": ["bullet 1", "bullet 2", "bullet 3"],
-    "required_capabilities": ["bullet 1", "bullet 2", "bullet 3"]
+    "customer_name": "Company name of the prospect/customer",
+    "call_date": "Date if mentioned, otherwise empty string",
+    "key_initiatives": ["Initiative 1 with specific details", "Initiative 2"],
+    "challenges": ["Challenge 1 with impact", "Challenge 2"],
+    "solution_requirements": ["Requirement 1", "Requirement 2", "Requirement 3"],
+    "follow_up_questions": [
+        "Can you help me understand [specific gap from missing elements]?",
+        "What would be the impact if [relates to a challenge]?",
+        "Who on your team is responsible for [specific area]?",
+        "What timeline are you working with for [specific initiative]?"
+    ]
 }}
 
-Be specific and use actual details from the call. Each bullet should be concise (under 15 words).
+IMPORTANT: 
+- The customer_name field is REQUIRED - extract the prospect/customer company name from the transcript.
+- The follow_up_questions MUST be derived from the MISSING ELEMENTS and RECOMMENDATIONS sections above. Do NOT generate generic questions - each question should address a specific gap identified in the analysis.
 """,
                 agent=self.agents['report_compiler'] if hasattr(self, 'agents') else Agent(
                     role="Recap Generator",
-                    goal="Generate Command of the Message recap content",
-                    backstory="Expert at synthesizing sales calls into actionable recaps",
+                    goal="Generate actionable recap content with follow-up questions",
+                    backstory="Expert at synthesizing sales calls into actionable recaps with probing questions",
                     llm=self.llm,
                     verbose=True
                 ),
-                expected_output="JSON with 5 recap sections"
+                expected_output="JSON with 4 recap sections including follow-up questions"
             )
             
             # Run the task
@@ -1529,14 +1599,17 @@ Be specific and use actual details from the call. Each bullet should be concise 
                     recap_json = json.loads(result_text[json_start:json_end])
                     
                     recap_data = RecapSlideData(
-                        current_state=recap_json.get("current_state", []),
-                        future_state=recap_json.get("future_state", []),
-                        negative_consequences=recap_json.get("negative_consequences", []),
-                        positive_business_outcomes=recap_json.get("positive_business_outcomes", []),
-                        required_capabilities=recap_json.get("required_capabilities", [])
+                        customer_name=recap_json.get("customer_name", ""),
+                        call_date=recap_json.get("call_date", ""),
+                        key_initiatives=recap_json.get("key_initiatives", []),
+                        challenges=recap_json.get("challenges", []),
+                        solution_requirements=recap_json.get("solution_requirements", []),
+                        follow_up_questions=recap_json.get("follow_up_questions", [])
                     )
                     
-                    span.set_attribute("recap.sections_generated", 5)
+                    span.set_attribute("recap.customer_name", recap_data.customer_name)
+                    span.set_attribute("recap.sections_generated", 4)
+                    span.set_attribute("recap.questions_count", len(recap_data.follow_up_questions))
                     span.set_status(Status(StatusCode.OK))
                     return recap_data
                     

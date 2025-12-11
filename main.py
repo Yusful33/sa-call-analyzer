@@ -15,7 +15,7 @@ tracer_provider = setup_observability(project_name="sa-call-analyzer")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from models import AnalyzeRequest, AnalysisResult, RecapSlideData
 from transcript_parser import TranscriptParser
 from crew_analyzer import SACallAnalysisCrew
@@ -250,43 +250,48 @@ async def analyze_transcript(request: AnalyzeRequest):
 @app.post("/api/generate-recap-slide")
 async def generate_recap_slide(recap_data: RecapSlideData):
     """
-    Generate a Google Slides presentation with the recap data.
+    Generate a PowerPoint presentation with the recap data.
     
-    Returns the URL of the created presentation.
+    Returns the PowerPoint file as a download.
     """
     with tracer.start_as_current_span("generate_recap_slide") as span:
         span.set_attribute("openinference.span.kind", "chain")
         
         try:
-            # Check if Google credentials are configured
-            if not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
-                raise HTTPException(
-                    status_code=503,
-                    detail="Google Slides integration is not configured. Please set GOOGLE_SERVICE_ACCOUNT_JSON environment variable."
-                )
-            
-            # Import here to avoid startup errors if Google libs not installed
             from recap_generator import generate_recap_slide as create_slide
             
-            # Generate the presentation
-            presentation_url = create_slide(recap_data)
+            # Generate the PowerPoint file
+            pptx_bytes = create_slide(recap_data)
             
-            span.set_attribute("presentation.url", presentation_url)
+            # Create filename with customer name and date
+            customer_name = recap_data.customer_name or "Call"
+            safe_name = "".join(c for c in customer_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            
+            # Include date in filename if available
+            if recap_data.call_date:
+                safe_date = "".join(c for c in recap_data.call_date if c.isalnum() or c in (' ', '-', '_')).strip()
+                safe_date = safe_date.replace(' ', '_')
+                filename = f"Recap_{safe_name}_{safe_date}.pptx"
+            else:
+                filename = f"Recap_{safe_name}.pptx"
+            
+            span.set_attribute("presentation.filename", filename)
+            span.set_attribute("presentation.size_bytes", len(pptx_bytes))
             span.set_status(Status(StatusCode.OK))
             
-            return {
-                "success": True,
-                "presentation_url": presentation_url,
-                "message": "Recap slide created successfully"
-            }
+            return Response(
+                content=pptx_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
             
-        except HTTPException:
-            raise
         except ImportError as e:
             span.set_status(Status(StatusCode.ERROR, f"Import error: {str(e)}"))
             raise HTTPException(
                 status_code=503,
-                detail="Google Slides dependencies not installed. Please install google-api-python-client and google-auth."
+                detail="PowerPoint dependencies not installed. Please install python-pptx."
             )
         except Exception as e:
             span.set_status(Status(StatusCode.ERROR, str(e)))

@@ -372,11 +372,10 @@ class RecapSlideData(BaseModel):
     """Data for generating a recap slide for the next call"""
     customer_name: str = ""
     call_date: str = ""
-    current_state: List[str] = Field(default_factory=list)  # Current customer situation/pain points
-    future_state: List[str] = Field(default_factory=list)  # Desired outcome after implementation
-    negative_consequences: List[str] = Field(default_factory=list)  # What happens if they don't act
-    positive_business_outcomes: List[str] = Field(default_factory=list)  # Benefits of moving forward
-    required_capabilities: List[str] = Field(default_factory=list)  # What they need from a solution
+    key_initiatives: List[str] = Field(default_factory=list)  # Customer's key goals/initiatives
+    challenges: List[str] = Field(default_factory=list)  # Pain points and challenges discussed
+    solution_requirements: List[str] = Field(default_factory=list)  # What they need from a solution
+    follow_up_questions: List[str] = Field(default_factory=list)  # Probing questions for next call
 
 
 class AnalysisResult(BaseModel):

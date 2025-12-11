@@ -1,293 +1,236 @@
 """
-Google Slides Recap Generator
+PowerPoint Recap Generator
 
-Generates a formatted recap slide in Google Slides with Command of the Message sections:
-- Current State
-- Future State
-- Negative Consequences
-- Positive Business Outcomes
-- Required Capabilities
+Generates a two-slide recap presentation in PowerPoint matching the Arize style:
+- Slide 1: Key Initiatives, Challenges, Solution Requirements
+- Slide 2: Questions for Next Call (highlighted in magenta)
 """
 
-import os
-import json
-from typing import Optional
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import io
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 
 from models import RecapSlideData
 
 
-class GoogleSlidesGenerator:
-    """Generates recap slides in Google Slides using service account authentication."""
-    
-    SCOPES = [
-        'https://www.googleapis.com/auth/presentations',
-        'https://www.googleapis.com/auth/drive'
-    ]
-    
-    def __init__(self):
-        """Initialize the Google Slides generator with service account credentials."""
-        self.credentials = None
-        self.slides_service = None
-        self.drive_service = None
-        self._authenticate()
-    
-    def _authenticate(self):
-        """Authenticate using service account credentials from environment variable."""
-        creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
-        
-        if not creds_json:
-            raise ValueError(
-                "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set. "
-                "Please provide service account credentials as a JSON string."
-            )
-        
-        try:
-            creds_info = json.loads(creds_json)
-            self.credentials = service_account.Credentials.from_service_account_info(
-                creds_info,
-                scopes=self.SCOPES
-            )
-            self.slides_service = build('slides', 'v1', credentials=self.credentials)
-            self.drive_service = build('drive', 'v3', credentials=self.credentials)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
-        except Exception as e:
-            raise ValueError(f"Failed to authenticate with Google: {e}")
-    
-    def create_recap_presentation(self, data: RecapSlideData) -> str:
-        """
-        Create a new Google Slides presentation with a recap slide.
-        
-        Args:
-            data: RecapSlideData containing the content for the slide
-            
-        Returns:
-            URL of the created presentation
-        """
-        try:
-            # Create a new presentation
-            title = f"Call Recap: {data.customer_name}" if data.customer_name else "Call Recap"
-            presentation = self.slides_service.presentations().create(
-                body={'title': title}
-            ).execute()
-            
-            presentation_id = presentation['presentationId']
-            
-            # Get the default slide ID (first slide created automatically)
-            slides = presentation.get('slides', [])
-            if slides:
-                first_slide_id = slides[0]['objectId']
-                # Delete the default title slide
-                self.slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={
-                        'requests': [{'deleteObject': {'objectId': first_slide_id}}]
-                    }
-                ).execute()
-            
-            # Create our custom recap slide
-            self._create_recap_slide(presentation_id, data)
-            
-            # Make the presentation viewable by anyone with the link
-            self._set_sharing_permissions(presentation_id)
-            
-            return f"https://docs.google.com/presentation/d/{presentation_id}/edit"
-            
-        except HttpError as e:
-            raise Exception(f"Google Slides API error: {e}")
-    
-    def _create_recap_slide(self, presentation_id: str, data: RecapSlideData):
-        """Create the formatted recap slide with all sections."""
-        
-        # Generate unique IDs for elements
-        slide_id = 'recap_slide_1'
-        
-        requests = []
-        
-        # Create a blank slide
-        requests.append({
-            'createSlide': {
-                'objectId': slide_id,
-                'slideLayoutReference': {'predefinedLayout': 'BLANK'}
-            }
-        })
-        
-        # Title
-        title_text = f"Call Recap: {data.customer_name}" if data.customer_name else "Call Recap"
-        if data.call_date:
-            title_text += f"\n{data.call_date}"
-        
-        requests.extend(self._create_text_box(
-            slide_id, 'title_box', title_text,
-            left=50, top=20, width=620, height=50,
-            font_size=24, bold=True, alignment='CENTER'
-        ))
-        
-        # Current State (top left)
-        current_state_text = "CURRENT STATE\n" + "\n".join(f"• {item}" for item in data.current_state) if data.current_state else "CURRENT STATE\n• (No data)"
-        requests.extend(self._create_text_box(
-            slide_id, 'current_state_box', current_state_text,
-            left=25, top=80, width=330, height=140,
-            font_size=11, header_size=14
-        ))
-        
-        # Future State (top right)
-        future_state_text = "FUTURE STATE\n" + "\n".join(f"• {item}" for item in data.future_state) if data.future_state else "FUTURE STATE\n• (No data)"
-        requests.extend(self._create_text_box(
-            slide_id, 'future_state_box', future_state_text,
-            left=365, top=80, width=330, height=140,
-            font_size=11, header_size=14
-        ))
-        
-        # Negative Consequences (middle left)
-        neg_consequences_text = "NEGATIVE CONSEQUENCES\n" + "\n".join(f"• {item}" for item in data.negative_consequences) if data.negative_consequences else "NEGATIVE CONSEQUENCES\n• (No data)"
-        requests.extend(self._create_text_box(
-            slide_id, 'neg_consequences_box', neg_consequences_text,
-            left=25, top=230, width=330, height=140,
-            font_size=11, header_size=14
-        ))
-        
-        # Positive Business Outcomes (middle right)
-        pos_outcomes_text = "POSITIVE BUSINESS OUTCOMES\n" + "\n".join(f"• {item}" for item in data.positive_business_outcomes) if data.positive_business_outcomes else "POSITIVE BUSINESS OUTCOMES\n• (No data)"
-        requests.extend(self._create_text_box(
-            slide_id, 'pos_outcomes_box', pos_outcomes_text,
-            left=365, top=230, width=330, height=140,
-            font_size=11, header_size=14
-        ))
-        
-        # Required Capabilities (bottom, full width)
-        req_caps_text = "REQUIRED CAPABILITIES\n" + "\n".join(f"• {item}" for item in data.required_capabilities) if data.required_capabilities else "REQUIRED CAPABILITIES\n• (No data)"
-        requests.extend(self._create_text_box(
-            slide_id, 'req_caps_box', req_caps_text,
-            left=25, top=380, width=670, height=120,
-            font_size=11, header_size=14
-        ))
-        
-        # Execute all requests
-        self.slides_service.presentations().batchUpdate(
-            presentationId=presentation_id,
-            body={'requests': requests}
-        ).execute()
-    
-    def _create_text_box(
-        self,
-        slide_id: str,
-        element_id: str,
-        text: str,
-        left: int,
-        top: int,
-        width: int,
-        height: int,
-        font_size: int = 12,
-        header_size: int = 14,
-        bold: bool = False,
-        alignment: str = 'START'
-    ) -> list:
-        """Create requests for a text box with styling."""
-        
-        requests = [
-            # Create the shape
-            {
-                'createShape': {
-                    'objectId': element_id,
-                    'shapeType': 'TEXT_BOX',
-                    'elementProperties': {
-                        'pageObjectId': slide_id,
-                        'size': {
-                            'width': {'magnitude': width, 'unit': 'PT'},
-                            'height': {'magnitude': height, 'unit': 'PT'}
-                        },
-                        'transform': {
-                            'scaleX': 1,
-                            'scaleY': 1,
-                            'translateX': left,
-                            'translateY': top,
-                            'unit': 'PT'
-                        }
-                    }
-                }
-            },
-            # Insert text
-            {
-                'insertText': {
-                    'objectId': element_id,
-                    'text': text,
-                    'insertionIndex': 0
-                }
-            },
-            # Style the text
-            {
-                'updateTextStyle': {
-                    'objectId': element_id,
-                    'style': {
-                        'fontSize': {'magnitude': font_size, 'unit': 'PT'},
-                        'bold': bold
-                    },
-                    'textRange': {'type': 'ALL'},
-                    'fields': 'fontSize,bold'
-                }
-            },
-            # Style the header (first line) if different
-            {
-                'updateTextStyle': {
-                    'objectId': element_id,
-                    'style': {
-                        'fontSize': {'magnitude': header_size, 'unit': 'PT'},
-                        'bold': True,
-                        'foregroundColor': {
-                            'opaqueColor': {
-                                'rgbColor': {'red': 0.2, 'green': 0.2, 'blue': 0.6}
-                            }
-                        }
-                    },
-                    'textRange': {
-                        'type': 'FIXED_RANGE',
-                        'startIndex': 0,
-                        'endIndex': text.find('\n') if '\n' in text else len(text)
-                    },
-                    'fields': 'fontSize,bold,foregroundColor'
-                }
-            },
-            # Set paragraph alignment
-            {
-                'updateParagraphStyle': {
-                    'objectId': element_id,
-                    'style': {'alignment': alignment},
-                    'textRange': {'type': 'ALL'},
-                    'fields': 'alignment'
-                }
-            }
-        ]
-        
-        return requests
-    
-    def _set_sharing_permissions(self, presentation_id: str):
-        """Set the presentation to be viewable by anyone with the link."""
-        try:
-            self.drive_service.permissions().create(
-                fileId=presentation_id,
-                body={
-                    'type': 'anyone',
-                    'role': 'reader'
-                }
-            ).execute()
-        except HttpError as e:
-            # Log but don't fail if sharing permissions can't be set
-            print(f"Warning: Could not set sharing permissions: {e}")
+# Color scheme matching the reference slide
+MAGENTA = RGBColor(200, 30, 120)  # Magenta/pink for titles and questions
+DARK_TEXT = RGBColor(50, 50, 60)  # Dark text
+LIGHT_BG = RGBColor(245, 248, 255)  # Light blue-ish background
 
 
-def generate_recap_slide(data: RecapSlideData) -> str:
+def _add_footer(slide):
+    """Add Arize branding footer to a slide."""
+    footer_box = slide.shapes.add_textbox(Inches(0.3), Inches(7.1), Inches(3), Inches(0.3))
+    tf = footer_box.text_frame
+    tf.paragraphs[0].text = "Arize  |  We Make Models Work"
+    tf.paragraphs[0].font.size = Pt(10)
+    tf.paragraphs[0].font.color.rgb = MAGENTA
+
+
+def _set_slide_background(slide):
+    """Set the light blue-gray background for a slide."""
+    background = slide.background
+    fill = background.fill
+    fill.solid()
+    fill.fore_color.rgb = LIGHT_BG
+
+
+def create_recap_presentation(data: RecapSlideData) -> bytes:
     """
-    Convenience function to generate a recap slide.
+    Create a PowerPoint presentation with two slides:
+    - Slide 1: Recap (Key Initiatives, Challenges, Solution Requirements)
+    - Slide 2: Questions for Next Call
+    
+    Args:
+        data: RecapSlideData containing the content for the slides
+        
+    Returns:
+        Bytes of the PowerPoint file
+    """
+    # Create presentation with widescreen dimensions
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]  # Blank layout
+    
+    # =========================================
+    # SLIDE 1: RECAP
+    # =========================================
+    slide1 = prs.slides.add_slide(blank_layout)
+    _set_slide_background(slide1)
+    
+    # Title - Customer Name Recap
+    title_text = f"{data.customer_name} Recap:" if data.customer_name else "Call Recap:"
+    
+    title_box = slide1.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(12.333), Inches(0.6))
+    title_frame = title_box.text_frame
+    title_frame.paragraphs[0].text = title_text
+    title_frame.paragraphs[0].font.size = Pt(36)
+    title_frame.paragraphs[0].font.bold = True
+    title_frame.paragraphs[0].font.color.rgb = MAGENTA
+    title_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+    
+    # Subtitle - Call Date (if available)
+    if data.call_date:
+        date_box = slide1.shapes.add_textbox(Inches(0.5), Inches(0.85), Inches(12.333), Inches(0.3))
+        date_frame = date_box.text_frame
+        date_frame.paragraphs[0].text = f"Call Date: {data.call_date}"
+        date_frame.paragraphs[0].font.size = Pt(14)
+        date_frame.paragraphs[0].font.italic = True
+        date_frame.paragraphs[0].font.color.rgb = DARK_TEXT
+        date_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+    
+    # Section dimensions for 2-column layout
+    col_width = Inches(6.0)
+    left_x = Inches(0.5)
+    right_x = Inches(6.833)
+    top_y = Inches(1.1)
+    
+    # Helper function to add section title
+    def add_section_title(slide, x, y, title, width=col_width):
+        title_box = slide.shapes.add_textbox(x, y, width, Inches(0.4))
+        tf = title_box.text_frame
+        tf.paragraphs[0].text = title
+        tf.paragraphs[0].font.size = Pt(24)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = MAGENTA
+    
+    # Helper function to add bullet points
+    def add_bullet_points(slide, x, y, items, width=col_width, highlight_all=False, max_items=5):
+        content_box = slide.shapes.add_textbox(x, y, width, Inches(2.2))
+        tf = content_box.text_frame
+        tf.word_wrap = True
+        
+        if items:
+            for i, item in enumerate(items[:max_items]):
+                if i == 0:
+                    p = tf.paragraphs[0]
+                else:
+                    p = tf.add_paragraph()
+                
+                p.text = f"• {item}"
+                p.font.size = Pt(14)
+                p.space_after = Pt(8)
+                
+                if highlight_all:
+                    p.font.color.rgb = MAGENTA
+                    p.font.bold = True
+                else:
+                    p.font.color.rgb = DARK_TEXT
+        else:
+            tf.paragraphs[0].text = "• (To be discovered)"
+            tf.paragraphs[0].font.size = Pt(14)
+            tf.paragraphs[0].font.color.rgb = RGBColor(150, 150, 150)
+            tf.paragraphs[0].font.italic = True
+    
+    # ===== KEY INITIATIVES (Left Column) =====
+    add_section_title(slide1, left_x, top_y, "Key Initiatives:")
+    add_bullet_points(slide1, left_x, top_y + Inches(0.5), data.key_initiatives)
+    
+    # ===== CHALLENGES (Right Column) =====
+    add_section_title(slide1, right_x, top_y, "Challenges:")
+    add_bullet_points(slide1, right_x, top_y + Inches(0.5), data.challenges)
+    
+    # ===== SOLUTION REQUIREMENTS (Full Width) =====
+    req_y = Inches(4.2)
+    add_section_title(slide1, left_x, req_y, "Solution Requirements:", width=Inches(12.333))
+    
+    # Solution requirements as bullet points
+    req_box = slide1.shapes.add_textbox(left_x, req_y + Inches(0.5), Inches(12.333), Inches(2.2))
+    tf = req_box.text_frame
+    tf.word_wrap = True
+    
+    if data.solution_requirements:
+        for i, item in enumerate(data.solution_requirements[:6]):
+            if i == 0:
+                p = tf.paragraphs[0]
+            else:
+                p = tf.add_paragraph()
+            p.text = f"• {item}"
+            p.font.size = Pt(14)
+            p.font.color.rgb = DARK_TEXT
+            p.space_after = Pt(6)
+    else:
+        tf.paragraphs[0].text = "• (To be discovered)"
+        tf.paragraphs[0].font.size = Pt(14)
+        tf.paragraphs[0].font.color.rgb = RGBColor(150, 150, 150)
+        tf.paragraphs[0].font.italic = True
+    
+    _add_footer(slide1)
+    
+    # =========================================
+    # SLIDE 2: QUESTIONS FOR NEXT CALL
+    # =========================================
+    slide2 = prs.slides.add_slide(blank_layout)
+    _set_slide_background(slide2)
+    
+    # Title
+    q_title_text = "🎯 Questions for Next Call"
+    if data.customer_name:
+        q_title_text = f"🎯 Questions for Next Call with {data.customer_name}"
+    
+    q_title_box = slide2.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(12.333), Inches(0.8))
+    tf = q_title_box.text_frame
+    tf.paragraphs[0].text = q_title_text
+    tf.paragraphs[0].font.size = Pt(36)
+    tf.paragraphs[0].font.bold = True
+    tf.paragraphs[0].font.color.rgb = MAGENTA
+    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
+    
+    # Subtitle
+    subtitle_box = slide2.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(12.333), Inches(0.4))
+    tf = subtitle_box.text_frame
+    tf.paragraphs[0].text = "Probing questions to uncover gaps and deepen discovery"
+    tf.paragraphs[0].font.size = Pt(16)
+    tf.paragraphs[0].font.italic = True
+    tf.paragraphs[0].font.color.rgb = DARK_TEXT
+    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
+    
+    # Questions - large and prominent
+    questions_box = slide2.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.733), Inches(4.5))
+    tf = questions_box.text_frame
+    tf.word_wrap = True
+    
+    if data.follow_up_questions:
+        for i, question in enumerate(data.follow_up_questions[:6]):
+            if i == 0:
+                p = tf.paragraphs[0]
+            else:
+                p = tf.add_paragraph()
+            
+            # Number the questions
+            p.text = f"{i + 1}. {question}"
+            p.font.size = Pt(18)
+            p.font.color.rgb = MAGENTA
+            p.font.bold = True
+            p.space_after = Pt(20)
+    else:
+        tf.paragraphs[0].text = "No specific questions identified - review missed opportunities in the analysis."
+        tf.paragraphs[0].font.size = Pt(16)
+        tf.paragraphs[0].font.color.rgb = RGBColor(150, 150, 150)
+        tf.paragraphs[0].font.italic = True
+    
+    _add_footer(slide2)
+    
+    # Save to bytes
+    pptx_bytes = io.BytesIO()
+    prs.save(pptx_bytes)
+    pptx_bytes.seek(0)
+    
+    return pptx_bytes.getvalue()
+
+
+def generate_recap_slide(data: RecapSlideData) -> bytes:
+    """
+    Convenience function to generate a recap presentation.
     
     Args:
         data: RecapSlideData containing the content
         
     Returns:
-        URL of the created Google Slides presentation
+        Bytes of the PowerPoint file
     """
-    generator = GoogleSlidesGenerator()
-    return generator.create_recap_presentation(data)
+    return create_recap_presentation(data)
