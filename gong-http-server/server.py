@@ -11,6 +11,16 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Gong MCP HTTP Wrapper", version="1.0.0")
 
+
+def parse_mcp_response(result: Dict) -> Any:
+    """Parse MCP server response and extract JSON content."""
+    if isinstance(result, dict) and "content" in result:
+        content = result["content"]
+        if isinstance(content, list) and len(content) > 0:
+            text_content = content[0].get("text", "{}")
+            return json.loads(text_content)
+    return result
+
 # Path to the MCP server - can be configured via env var
 MCP_SERVER_CMD = os.getenv("MCP_SERVER_CMD", "node /app/dist/index.js")
 
@@ -108,6 +118,10 @@ class ListCallsRequest(BaseModel):
     to_date: Optional[str] = None
 
 
+class CallInfoRequest(BaseModel):
+    call_id: str
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
@@ -127,16 +141,7 @@ async def get_transcript(request: TranscriptRequest):
     """
     try:
         result = mcp_client.call_tool("retrieve_transcripts", {"callIds": [request.call_id]})
-        
-        # MCP server wraps response in content array
-        if isinstance(result, dict) and "content" in result:
-            content = result["content"]
-            if isinstance(content, list) and len(content) > 0:
-                text_content = content[0].get("text", "{}")
-                return json.loads(text_content)
-        
-        return result
-        
+        return parse_mcp_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -160,16 +165,27 @@ async def list_calls(request: ListCallsRequest):
             params["toDateTime"] = request.to_date
         
         result = mcp_client.call_tool("list_calls", params)
+        return parse_mcp_response(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/call-info")
+async def get_call_info(request: CallInfoRequest):
+    """
+    Get metadata for a specific call including date, title, duration.
+    
+    Uses the custom MCP server's get_call_info tool.
+    
+    Args:
+        request: CallInfoRequest with call_id
         
-        # MCP server wraps response in content array
-        if isinstance(result, dict) and "content" in result:
-            content = result["content"]
-            if isinstance(content, list) and len(content) > 0:
-                text_content = content[0].get("text", "{}")
-                return json.loads(text_content)
-        
-        return result
-        
+    Returns:
+        Call metadata from Gong via MCP including scheduled date, title, etc.
+    """
+    try:
+        result = mcp_client.call_tool("get_call_info", {"callId": request.call_id})
+        return parse_mcp_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

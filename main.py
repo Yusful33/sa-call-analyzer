@@ -107,10 +107,12 @@ async def analyze_transcript(request: AnalyzeRequest):
         "analyze_call_request",
         attributes={
             "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
+            "request.model": request.model or "default",
             # OpenInference input - the API request
             "input.value": json.dumps({
                 "gong_url": request.gong_url,
-                "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript
+                "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
+                "model": request.model
             }),
             "input.mime_type": "application/json",
             # OpenInference span kind - this is a chain orchestrating the workflow
@@ -137,11 +139,19 @@ async def analyze_transcript(request: AnalyzeRequest):
                     call_id = gong_client.extract_call_id_from_url(request.gong_url)
                     transcript_data = gong_client.get_transcript(call_id)
                     raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
+                    
+                    # Get call date from Gong metadata
+                    call_date = gong_client.get_call_date(call_id)
+                    if call_date:
+                        print(f"📅 Call date: {call_date}")
+                        span.set_attribute("call.date", call_date)
+                    
                     print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
                     span.set_attribute("transcript.source", "gong")
                     span.set_attribute("transcript.raw_length", len(raw_transcript))
                     span.add_event("gong_fetch_success", {
-                        "transcript.length": len(raw_transcript)
+                        "transcript.length": len(raw_transcript),
+                        "call.date": call_date or "not_available"
                     })
                 except Exception as e:
                     span.set_status(Status(StatusCode.ERROR, f"Gong fetch failed: {str(e)}"))
@@ -153,6 +163,7 @@ async def analyze_transcript(request: AnalyzeRequest):
             else:
                 raw_transcript = request.transcript
                 transcript_data = None  # No raw data for manual transcripts
+                call_date = ""  # No date for manual transcripts
                 span.set_attribute("transcript.source", "manual")
                 span.set_attribute("transcript.raw_length", len(raw_transcript))
                 span.add_event("using_manual_transcript")
@@ -194,7 +205,9 @@ async def analyze_transcript(request: AnalyzeRequest):
             result = analyzer.analyze_call(
                 transcript=formatted_transcript,
                 speakers=speakers,
-                transcript_data=transcript_data  # Pass raw data for hybrid sampling if available
+                transcript_data=transcript_data,  # Pass raw data for hybrid sampling if available
+                call_date=call_date,  # Pass call date for recap generation (from Gong metadata)
+                model=request.model  # Pass selected model from UI
             )
 
             span.set_attribute("analysis.insight_count", len(result.top_insights))
@@ -263,17 +276,24 @@ async def generate_recap_slide(recap_data: RecapSlideData):
             # Generate the PowerPoint file
             pptx_bytes = create_slide(recap_data)
             
-            # Create filename with customer name and date
+            # Create filename with date and customer name
             customer_name = recap_data.customer_name or "Call"
-            safe_name = "".join(c for c in customer_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            call_date = recap_data.call_date or ""
             
-            # Include date in filename if available
-            if recap_data.call_date:
-                safe_date = "".join(c for c in recap_data.call_date if c.isalnum() or c in (' ', '-', '_')).strip()
+            print(f"📁 Generating filename - Customer: '{customer_name}', Date: '{call_date}'")
+            
+            safe_name = "".join(c for c in customer_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            safe_name = safe_name.replace(' ', '_')
+            
+            # Include date in filename if available (date first, then name)
+            if call_date:
+                safe_date = "".join(c for c in call_date if c.isalnum() or c in (' ', '-', '_')).strip()
                 safe_date = safe_date.replace(' ', '_')
-                filename = f"Recap_{safe_name}_{safe_date}.pptx"
+                filename = f"Recap_{safe_date}_{safe_name}.pptx"
             else:
                 filename = f"Recap_{safe_name}.pptx"
+            
+            print(f"📁 Final filename: {filename}")
             
             span.set_attribute("presentation.filename", filename)
             span.set_attribute("presentation.size_bytes", len(pptx_bytes))

@@ -733,6 +733,19 @@ The tool will auto-detect the format and identify the SA."
                 </div>
             </div>
 
+            <div class="input-section" style="margin-bottom: 20px;">
+                <label for="modelSelect">AI Model</label>
+                <select id="modelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fast, Cost-effective)</option>
+                    <option value="claude-sonnet-4">Claude 4 Sonnet (Balanced)</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini (Fast)</option>
+                    <option value="gpt-4o">GPT-4o (Most Capable)</option>
+                </select>
+                <p class="help-text">
+                    Choose the AI model for analysis. Haiku is fastest, Sonnet/GPT-4o provide deeper insights.
+                </p>
+            </div>
+
             <div class="button-group">
                 <button class="btn-primary" onclick="analyzeTranscript()" id="analyzeBtn">
                     Analyze Call
@@ -789,9 +802,13 @@ The tool will auto-detect the format and identify the SA."
             loading.style.display = 'block';
             results.classList.remove('show');
 
+            // Get selected model
+            const selectedModel = document.getElementById('modelSelect').value;
+
             // Build request body based on current tab
             const requestBody = {
-                sa_name: null  // Auto-detect from transcript
+                sa_name: null,  // Auto-detect from transcript
+                model: selectedModel  // Pass selected model to API
             };
 
             if (currentTab === 'gong') {

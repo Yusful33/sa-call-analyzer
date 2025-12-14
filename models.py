@@ -22,6 +22,7 @@ class AnalyzeRequest(BaseModel):
     """Request to analyze a transcript"""
     transcript: Optional[str] = None  # Manual transcript text
     gong_url: Optional[str] = None  # Gong call URL (alternative to transcript)
+    model: Optional[str] = None  # LLM model to use (e.g., claude-3-5-haiku-20241022)
 
     def model_post_init(self, __context):
         """Validate that either transcript or gong_url is provided."""

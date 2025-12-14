@@ -3,13 +3,11 @@
 
 FROM node:20-alpine AS mcp-builder
 
-# Install git to clone the MCP server
-RUN apk add --no-cache git
-
-# Clone and build the official gong-mcp server
+# Copy and build the local MCP server
 WORKDIR /mcp
-RUN git clone https://github.com/kenazk/gong-mcp.git .
+COPY mcp-server/package.json mcp-server/tsconfig.json ./
 RUN npm install
+COPY mcp-server/src ./src
 RUN npm run build
 
 # Final image with Python HTTP wrapper

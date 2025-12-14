@@ -94,18 +94,26 @@ class SACallAnalysisCrew:
 
     def __init__(self):
         # Determine which LLM to use based on environment
-        use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
-        model_name = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
+        self.use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
+        self.default_model = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
         
         # Create token tracking callback for cost visibility
         self.token_callback = TokenTrackingCallback()
 
-        if use_litellm:
-            # Use LiteLLM directly for LLM calls (enables LiteLLMInstrumentor to capture spans)
+        # Initialize with default model
+        self._configure_llm(self.default_model)
+    
+    def _configure_llm(self, model_name: str):
+        """Configure the LLM with the specified model."""
+        if self.use_litellm:
+            # Use LiteLLM proxy for LLM calls
             from langchain_litellm import ChatLiteLLM
-            print(f"🔧 LiteLLM Config: model={model_name}")
+            litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
+            print(f"🔧 LiteLLM Config: model={model_name}, base_url={litellm_base_url}")
             self.llm = ChatLiteLLM(
                 model=model_name,
+                api_base=litellm_base_url,
+                api_key=os.getenv("LITELLM_API_KEY", "dummy"),
                 temperature=0.7,
                 max_tokens=4096,
                 callbacks=[self.token_callback]
@@ -337,7 +345,9 @@ class SACallAnalysisCrew:
         self,
         transcript: str,
         speakers: List[str],
-        transcript_data: Optional[dict] = None
+        transcript_data: Optional[dict] = None,
+        call_date: str = "",
+        model: Optional[str] = None
     ) -> AnalysisResult:
         """
         Analyze a call transcript using the crew of specialized agents.
@@ -345,12 +355,20 @@ class SACallAnalysisCrew:
         Args:
             transcript: The call transcript (formatted)
             speakers: List of speaker names (if available)
-            manual_sa: Manually specified SA name (optional)
             transcript_data: Raw transcript data from Gong (optional, for hybrid sampling)
+            call_date: The date of the call (optional, from Gong metadata)
+            model: LLM model to use (optional, defaults to environment config)
 
         Returns:
             AnalysisResult with structured analysis
         """
+        
+        # Configure model if specified (allows per-request model selection)
+        if model and model != self.model_name:
+            print(f"🔄 Switching model from {self.model_name} to {model}")
+            self._configure_llm(model)
+            # Recreate agents with new LLM
+            self.agents = self.create_agents()
 
         # Get tracer (must be obtained after setup_observability is called)
         tracer = trace.get_tracer("sa-call-analyzer")
@@ -1091,9 +1109,9 @@ class SACallAnalysisCrew:
                         
                         # Generate recap slide data
                         try:
-                            recap_data = self.generate_recap_data(transcript, call_classification, analysis_data)
+                            recap_data = self.generate_recap_data(transcript, call_classification, analysis_data, call_date)
                             result.recap_data = recap_data
-                            print(f"✅ Recap data generated with {len(recap_data.current_state)} current state items")
+                            print(f"✅ Recap data generated - Customer: '{recap_data.customer_name}', Date: '{recap_data.call_date}'")
                         except Exception as e:
                             print(f"⚠️ Could not generate recap data: {e}")
 
@@ -1203,18 +1221,23 @@ class SACallAnalysisCrew:
 
     def _parse_classification(self, classification_text: str) -> Optional[CallClassification]:
         """Parse classification result from the Call Classifier agent"""
-        print(f"📊 Parsing classification result ({len(classification_text)} chars)...")
+        import sys
+        print(f"📊 Parsing classification result ({len(classification_text)} chars)...", flush=True)
+        print(f"📊 Classification text preview: {classification_text[:500]}...", flush=True)
 
         try:
             # Extract JSON from the result
             json_start = classification_text.find('{')
             json_end = classification_text.rfind('}') + 1
+            print(f"📊 JSON bounds: start={json_start}, end={json_end}", flush=True)
 
             if json_start >= 0 and json_end > json_start:
                 json_str = classification_text[json_start:json_end]
+                print(f"📊 Extracted JSON length: {len(json_str)}", flush=True)
                 data = json.loads(json_str)
+                print(f"📊 Parsed JSON keys: {list(data.keys())}", flush=True)
             else:
-                print("⚠️  No JSON found in classification result")
+                print("⚠️  No JSON found in classification result", flush=True)
                 return None
 
             # Parse call type
@@ -1400,7 +1423,8 @@ class SACallAnalysisCrew:
                 recommendations=data.get("recommendations", [])
             )
 
-            print(f"✅ Classification: {call_type.value} (confidence: {classification.confidence})")
+            print(f"✅ Classification: {call_type.value} (confidence: {classification.confidence})", flush=True)
+            print(f"✅ Discovery score: {classification.discovery_completion_score}%, PoC score: {classification.poc_scoping_completion_score}%", flush=True)
             print(f"   Discovery score: {discovery_score:.1f}%")
             print(f"   PoC Scoping score: {poc_score:.1f}%")
 
@@ -1433,7 +1457,7 @@ class SACallAnalysisCrew:
         # Handle empty/None
         return MissingElements()
 
-    def generate_recap_data(self, transcript: str, call_classification: Optional[CallClassification], analysis_data: dict) -> RecapSlideData:
+    def generate_recap_data(self, transcript: str, call_classification: Optional[CallClassification], analysis_data: dict, call_date: str = "") -> RecapSlideData:
         """
         Generate recap slide data using an LLM to synthesize Key Initiatives, Challenges,
         Solution Requirements, and Follow-up Questions.
@@ -1442,6 +1466,7 @@ class SACallAnalysisCrew:
             transcript: The call transcript
             call_classification: The call classification result (if available)
             analysis_data: The parsed analysis data from the crew
+            call_date: The date of the call (from Gong metadata or empty)
             
         Returns:
             RecapSlideData with the recap sections and follow-up questions
@@ -1598,16 +1623,23 @@ IMPORTANT:
                 if json_start >= 0 and json_end > json_start:
                     recap_json = json.loads(result_text[json_start:json_end])
                     
+                    # Use LLM-extracted date, or fall back to Gong metadata date
+                    extracted_date = recap_json.get("call_date", "")
+                    final_date = extracted_date if extracted_date else call_date
+                    
                     recap_data = RecapSlideData(
                         customer_name=recap_json.get("customer_name", ""),
-                        call_date=recap_json.get("call_date", ""),
+                        call_date=final_date,
                         key_initiatives=recap_json.get("key_initiatives", []),
                         challenges=recap_json.get("challenges", []),
                         solution_requirements=recap_json.get("solution_requirements", []),
                         follow_up_questions=recap_json.get("follow_up_questions", [])
                     )
                     
+                    print(f"✅ Recap data extracted - Customer: '{recap_data.customer_name}', Date: '{recap_data.call_date}' (from {'LLM' if extracted_date else 'Gong metadata'})")
+                    
                     span.set_attribute("recap.customer_name", recap_data.customer_name)
+                    span.set_attribute("recap.call_date", recap_data.call_date)
                     span.set_attribute("recap.sections_generated", 4)
                     span.set_attribute("recap.questions_count", len(recap_data.follow_up_questions))
                     span.set_status(Status(StatusCode.OK))

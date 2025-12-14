@@ -149,6 +149,79 @@ class GongMCPClient:
         """
         return self._make_request("/transcript", {"call_id": call_id})
 
+    def get_call_info(self, call_id: str) -> Dict:
+        """
+        Get call metadata including the call date.
+
+        Args:
+            call_id: Gong call ID
+
+        Returns:
+            Call info dictionary with 'scheduled', 'title', 'duration', etc.
+
+        Raises:
+            RuntimeError: If request fails
+        """
+        with self.tracer.start_as_current_span(
+            "get_call_info",
+            attributes={
+                "gong.call_id": call_id,
+                "openinference.span.kind": "tool",
+            }
+        ) as span:
+            try:
+                response = self._make_request("/call-info", {"call_id": call_id})
+                span.set_attribute("call.has_scheduled", "scheduled" in response)
+                span.set_status(Status(StatusCode.OK))
+                return response
+            except Exception as e:
+                # If call-info endpoint doesn't exist, return empty dict
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                print(f"⚠️ Could not get call info: {e}")
+                return {}
+
+    def get_call_date(self, call_id: str) -> str:
+        """
+        Get the formatted call date for a call.
+
+        Args:
+            call_id: Gong call ID
+
+        Returns:
+            Formatted date string (e.g., "December 10, 2025") or empty string if not available
+        """
+        try:
+            call_info = self.get_call_info(call_id)
+            
+            # Try to get 'scheduled' field (ISO format timestamp)
+            scheduled = call_info.get("scheduled") or call_info.get("started") or call_info.get("date")
+            
+            if scheduled:
+                from datetime import datetime
+                # Parse ISO format date
+                if isinstance(scheduled, str):
+                    # Try parsing ISO format
+                    try:
+                        dt = datetime.fromisoformat(scheduled.replace('Z', '+00:00'))
+                        return dt.strftime("%B %d, %Y")
+                    except ValueError:
+                        # Try other formats
+                        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                            try:
+                                dt = datetime.strptime(scheduled[:len(fmt.replace('%', ''))+4], fmt)
+                                return dt.strftime("%B %d, %Y")
+                            except ValueError:
+                                continue
+                elif isinstance(scheduled, (int, float)):
+                    # Unix timestamp (milliseconds)
+                    dt = datetime.fromtimestamp(scheduled / 1000 if scheduled > 1e12 else scheduled)
+                    return dt.strftime("%B %d, %Y")
+            
+            return ""
+        except Exception as e:
+            print(f"⚠️ Could not extract call date: {e}")
+            return ""
+
     def format_transcript_for_analysis(self, transcript_data: Dict) -> str:
         """
         Format Gong transcript data into readable format for analysis.

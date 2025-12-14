@@ -10,22 +10,22 @@ model_list:
   # Anthropic Claude Models (Recommended)
   - model_name: claude-3-5-haiku-20241022
     litellm_params:
-      model: claude-3-5-haiku-20241022
+      model: anthropic/claude-3-5-haiku-20241022
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  - model_name: claude-3-5-sonnet-20241022
+  - model_name: claude-sonnet-4
     litellm_params:
-      model: claude-3-5-sonnet-20241022
+      model: anthropic/claude-sonnet-4-20250514
       api_key: os.environ/ANTHROPIC_API_KEY
 
   # OpenAI Models (Optional)
   - model_name: gpt-4o-mini
     litellm_params:
-      model: gpt-4o-mini
+      model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
 
   - model_name: gpt-4o
     litellm_params:
-      model: gpt-4o
+      model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
 
