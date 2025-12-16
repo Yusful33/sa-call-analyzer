@@ -52,6 +52,7 @@ class MissedOpportunity(BaseModel):
     context: str  # What was happening when the opportunity arose
     suggested_question: str  # What question could have been asked
     why_important: str  # Why this information matters
+    collected_later: Optional[bool] = False  # True if this info was collected later in the call (should be excluded from missed_opportunities)
 
 
 # ============================================================================

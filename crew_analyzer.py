@@ -29,6 +29,7 @@ from models import (
 from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from opentelemetry import context as trace_context
 from observability import force_flush_spans
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
@@ -40,16 +41,52 @@ load_dotenv()
 
 class TokenTrackingCallback(BaseCallbackHandler):
     """
-    LangChain callback that captures token usage and adds it to the current OpenTelemetry span.
-    This enables cost tracking in Arize by providing token counts.
+    LangChain callback that captures token usage and creates LLM spans with cost tracking.
+    This ensures LLM calls are visible in Arize even if LangChainInstrumentor doesn't create spans.
     """
     
     def __init__(self):
-        self.tracer = trace.get_tracer("token-tracking")
+        self.tracer = trace.get_tracer("llm-tracking")
+        self.active_spans = {}  # Track spans by run_id: {span, start_time}
+    
+    def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], *, run_id: UUID, **kwargs: Any) -> None:
+        """Create LLM span when LLM call starts."""
+        current_span = trace.get_current_span()
+        
+        # Extract model name from serialized config if available
+        model_name = "unknown"
+        if serialized:
+            model_name = serialized.get("id", serialized.get("_type", ["unknown"])[-1] if isinstance(serialized.get("_type"), list) else "unknown")
+        
+        # Create LLM span as child of current span
+        if current_span and current_span.is_recording():
+            llm_span = self.tracer.start_span(
+                f"llm.{model_name}",
+                attributes={
+                    "openinference.span.kind": "llm",
+                    "llm.model_name": model_name,
+                    "llm.system": "litellm",  # Will be updated if we detect otherwise
+                    "input.value": json.dumps(prompts) if prompts else "",
+                    "input.mime_type": "application/json",
+                }
+            )
+            
+            # Make it the current span
+            context = trace.set_span_in_context(llm_span)
+            token = trace_context.attach(context)
+            
+            from opentelemetry.util.types import time_ns
+            self.active_spans[run_id] = {
+                "span": llm_span,
+                "context_token": token,
+                "start_time": time_ns(),
+            }
+            
+            print(f"🔵 LLM call started: {model_name} (run_id={run_id})")
     
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
-        """Capture token usage when LLM call completes."""
-        current_span = trace.get_current_span()
+        """Capture token usage when LLM call completes and update LLM span."""
+        span_info = self.active_spans.pop(run_id, None)
         
         if response.llm_output:
             token_usage = response.llm_output.get("token_usage", {})
@@ -63,22 +100,74 @@ class TokenTrackingCallback(BaseCallbackHandler):
             completion_tokens = token_usage.get("completion_tokens", 0)
             total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
             
-            if current_span and current_span.is_recording():
-                # OpenInference semantic conventions for token counts
-                current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
-                current_span.set_attribute("llm.token_count.completion", completion_tokens)
-                current_span.set_attribute("llm.token_count.total", total_tokens)
-                current_span.set_attribute("llm.model_name", model_name)
+            if span_info:
+                # Update the span we created in on_llm_start
+                llm_span = span_info["span"]
                 
-                # Also add as an event for visibility
-                current_span.add_event("llm_token_usage", {
+                # Update model name if we got it from response
+                llm_span.set_attribute("llm.model_name", model_name)
+                llm_span.set_attribute("llm.token_count.prompt", prompt_tokens)
+                llm_span.set_attribute("llm.token_count.completion", completion_tokens)
+                llm_span.set_attribute("llm.token_count.total", total_tokens)
+                
+                # Add output if available
+                if response.generations and len(response.generations) > 0:
+                    output_text = str(response.generations[0][0].text) if response.generations[0] else ""
+                    llm_span.set_attribute("output.value", output_text[:5000] + "..." if len(output_text) > 5000 else output_text)
+                    llm_span.set_attribute("output.mime_type", "text/plain")
+                
+                # Add cost tracking using OpenInference semantic conventions
+                try:
+                    from tracing_enhancements import add_cost_attributes_to_span
+                    add_cost_attributes_to_span(
+                        llm_span,
+                        model_name,
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens
+                    )
+                    cost = llm_span._attributes.get('llm.cost.total', 0) if hasattr(llm_span, '_attributes') else 0
+                    print(f"✅ LLM span completed: {model_name} ({total_tokens} tokens, ${cost:.6f})")
+                except Exception as e:
+                    print(f"⚠️  Error adding cost attributes: {e}")
+                
+                # Add event for visibility
+                llm_span.add_event("llm_token_usage", {
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "model": model_name
                 })
                 
+                llm_span.set_status(Status(StatusCode.OK))
+                
+                # End the span and detach context
+                llm_span.end()
+                trace_context.detach(span_info["context_token"])
+            else:
+                # No span was created in on_llm_start, try to add to current span
+                current_span = trace.get_current_span()
+                if current_span and current_span.is_recording():
+                    current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
+                    current_span.set_attribute("llm.token_count.completion", completion_tokens)
+                    current_span.set_attribute("llm.token_count.total", total_tokens)
+                    current_span.set_attribute("llm.model_name", model_name)
+                    
+                    try:
+                        from tracing_enhancements import add_cost_attributes_to_span
+                        add_cost_attributes_to_span(
+                            current_span,
+                            model_name,
+                            prompt_tokens,
+                            completion_tokens,
+                            total_tokens
+                        )
+                    except Exception as e:
+                        print(f"⚠️  Error adding cost attributes: {e}")
+            
             print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total ({model_name})")
+        else:
+            print(f"⚠️  on_llm_end called but no span_info found for run_id={run_id}")
 
 
 class SACallAnalysisCrew:
@@ -105,6 +194,12 @@ class SACallAnalysisCrew:
     
     def _configure_llm(self, model_name: str):
         """Configure the LLM with the specified model."""
+        # Create callback manager explicitly to ensure instrumentation hooks in
+        # This ensures LangChainInstrumentor can properly track calls
+        from langchain_core.callbacks import CallbackManager
+        
+        callback_manager = CallbackManager([self.token_callback])
+        
         if self.use_litellm:
             # Use LiteLLM proxy for LLM calls
             from langchain_litellm import ChatLiteLLM
@@ -116,7 +211,7 @@ class SACallAnalysisCrew:
                 api_key=os.getenv("LITELLM_API_KEY", "dummy"),
                 temperature=0.7,
                 max_tokens=4096,
-                callbacks=[self.token_callback]
+                callbacks=callback_manager  # Use callback manager instead of list
             )
         else:
             # Use Anthropic directly
@@ -125,7 +220,7 @@ class SACallAnalysisCrew:
                 model=model_name,
                 anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
                 temperature=0.7,
-                callbacks=[self.token_callback]
+                callbacks=callback_manager  # Use callback manager instead of list
             )
         
         # Store model name for cost calculations
@@ -386,19 +481,70 @@ class SACallAnalysisCrew:
             }
         ) as analysis_span:
             print(f"📊 Created span: {analysis_span.get_span_context().span_id if analysis_span else 'None'}")
+            
+            # DEBUG: Check current span context
+            current_span = trace.get_current_span()
+            if current_span:
+                span_ctx = current_span.get_span_context()
+                print(f"🔍 Current span context - Trace ID: {format(span_ctx.trace_id, '032x')}, Span ID: {format(span_ctx.span_id, '016x')}")
+            else:
+                print("🔍 No current span context found")
+            
             result = None  # Initialize result
             try:
                 agents = self.create_agents()
+                
+                # DEBUG: Verify agents have LLM with proper callbacks
+                if agents and isinstance(agents, dict) and len(agents) > 0:
+                    first_agent = list(agents.values())[0]
+                    if first_agent and hasattr(first_agent, 'llm'):
+                        print(f"🔍 Agent LLM type: {type(first_agent.llm).__name__}")
+                        if hasattr(first_agent.llm, 'callbacks'):
+                            callbacks = first_agent.llm.callbacks
+                            print(f"🔍 Agent LLM callbacks: {type(callbacks).__name__}")
+                            if hasattr(callbacks, 'handlers'):
+                                print(f"🔍 Callback handlers count: {len(callbacks.handlers) if callbacks.handlers else 0}")
 
                 # ============================================================
                 # STEP 1: Run Call Classification (separate crew for clean output)
                 # ============================================================
-                with tracer.start_as_current_span("call_classification") as class_span:
-                    class_span.set_attribute("openinference.span.kind", "agent")
-                    class_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                    class_span.set_attribute("input.mime_type", "text/plain")
+                # Add prompt template tracking for classification
+                classification_prompt_template = """Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
 
-                    classification_task = Task(
+Transcript:
+{transcript}
+
+DISCOVERY CALL CRITERIA - Look for evidence of:
+1. PAIN & CURRENT STATE VALIDATED
+2. STAKEHOLDER MAP COMPLETE
+3. REQUIRED CAPABILITIES (RCs) PRIORITIZED
+4. COMPETITIVE LANDSCAPE UNDERSTOOD
+
+POC SCOPING CALL CRITERIA - Look for evidence of:
+1. USE CASE SCOPED
+2. IMPLEMENTATION REQUIREMENTS
+3. METRICS & SUCCESS CRITERIA
+4. TIMELINE & MILESTONES
+5. RESOURCES COMMITTED"""
+                
+                try:
+                    from tracing_enhancements import trace_with_prompt_template
+                    prompt_context = trace_with_prompt_template(
+                        template=classification_prompt_template,
+                        version="1.0",
+                        variables={"transcript": transcript[:2000] + "..." if len(transcript) > 2000 else transcript}
+                    )
+                except ImportError:
+                    from contextlib import nullcontext
+                    prompt_context = nullcontext()
+                
+                with prompt_context:
+                    with tracer.start_as_current_span("call_classification") as class_span:
+                        class_span.set_attribute("openinference.span.kind", "agent")
+                        class_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                        class_span.set_attribute("input.mime_type", "text/plain")
+
+                        classification_task = Task(
                         description=f"""Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
 
                     Transcript:
@@ -474,6 +620,19 @@ class SACallAnalysisCrew:
                     1. "evidence" - Array of evidence items showing WHERE and WHAT was captured
                     2. "missed_opportunities" - Array of moments where we COULD have gathered more info
                     
+                    MISSED OPPORTUNITIES - CRITICAL VALIDATION RULE:
+                    Before flagging ANY missed opportunity, you MUST:
+                    1. Check the "evidence" array for the SAME criteria_name
+                    2. Review the FULL transcript chronologically - if the information appears later in the call, do NOT include it as missed
+                    3. If evidence exists with a LATER timestamp, this is NOT a missed opportunity (information was collected, just later)
+                    4. Only flag as "missed_opportunity" if the information was NEVER collected anywhere in the call
+                    
+                    Example:
+                    - If customer mentions "we use React" at [05:00] but SA doesn't ask about framework
+                    - BUT framework is discussed and confirmed at [15:30] in evidence array
+                    - This should NOT be flagged as a missed opportunity (information was collected, just later)
+                    - Only flag if framework was NEVER discussed/confirmed anywhere in the call
+                    
                     MISSED OPPORTUNITIES STRUCTURE (REQUIRED for ALL criteria sections):
                     Every missed_opportunity MUST include ALL of these fields:
                     {{
@@ -486,6 +645,9 @@ class SACallAnalysisCrew:
                     
                     The "suggested_question" field is CRITICAL - it must be a specific, actionable question
                     the SA could ask to uncover more information. NEVER leave it empty or as "".
+                    
+                    REMEMBER: Only include opportunities where the information was TRULY never collected.
+                    If information appears later in the transcript, exclude it from missed_opportunities.
 
                     Return your analysis as JSON with this EXACT structure:
                     {{
@@ -723,6 +885,11 @@ class SACallAnalysisCrew:
                        - Engagement with customer
                        - Rapport building (including appropriate small talk)
                        Identify missed opportunities and suggest better questions.
+                       
+                       CRITICAL: Before identifying a missed opportunity, review the FULL transcript chronologically.
+                       Only flag as "missed" if the information was NEVER collected anywhere in the call.
+                       If information was collected later (even if it could have been asked earlier), do NOT flag it as missed.
+                       Focus on truly missed information, not timing preferences.
 
                     2. COMMAND OF THE MESSAGE FRAMEWORK:
                        - Problem Identification: Uncovering business problems
@@ -1213,11 +1380,79 @@ class SACallAnalysisCrew:
                     timestamp=item.get("timestamp"),
                     context=item.get("context", ""),
                     suggested_question=item.get("suggested_question", ""),
-                    why_important=item.get("why_important", "")
+                    why_important=item.get("why_important", ""),
+                    collected_later=item.get("collected_later", False)
                 ))
             except Exception:
                 pass  # Skip malformed items
         return opportunities
+    
+    def _validate_missed_opportunities(
+        self, 
+        missed_opportunities: List[MissedOpportunity], 
+        evidence: List[CriteriaEvidence]
+    ) -> List[MissedOpportunity]:
+        """
+        Filter out missed opportunities where the same information was collected later in the call.
+        
+        This provides a safety net to catch cases where the LLM didn't perfectly follow
+        the instruction to check for later evidence.
+        """
+        if not missed_opportunities or not evidence:
+            return missed_opportunities
+        
+        # Create a map of criteria_name -> list of evidence timestamps
+        evidence_by_criteria = {}
+        for ev in evidence:
+            if ev.captured and ev.timestamp:
+                criteria = ev.criteria_name
+                if criteria not in evidence_by_criteria:
+                    evidence_by_criteria[criteria] = []
+                evidence_by_criteria[criteria].append(ev.timestamp)
+        
+        def parse_timestamp(ts: str) -> Optional[int]:
+            """Convert timestamp string like '[05:23]' or '[1:15:30]' to seconds"""
+            if not ts:
+                return None
+            try:
+                # Remove brackets and whitespace
+                clean_ts = ts.strip().strip('[]').strip('~').strip()
+                parts = clean_ts.split(':')
+                if len(parts) == 2:  # MM:SS
+                    return int(parts[0]) * 60 + int(parts[1])
+                elif len(parts) == 3:  # HH:MM:SS
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            except (ValueError, IndexError):
+                return None
+        
+        validated_opportunities = []
+        for mo in missed_opportunities:
+            # Skip if explicitly marked as collected_later
+            if mo.collected_later:
+                continue
+            
+            # Check if same criteria appears in evidence
+            if mo.criteria_name in evidence_by_criteria:
+                mo_timestamp_sec = parse_timestamp(mo.timestamp) if mo.timestamp else None
+                
+                # Check if any evidence timestamp is later than the missed opportunity timestamp
+                # Only filter out if we can definitively compare timestamps
+                evidence_collected_later = False
+                for ev_timestamp in evidence_by_criteria[mo.criteria_name]:
+                    ev_timestamp_sec = parse_timestamp(ev_timestamp)
+                    # Only filter if we can parse both timestamps and evidence is clearly later
+                    if mo_timestamp_sec is not None and ev_timestamp_sec is not None:
+                        if ev_timestamp_sec > mo_timestamp_sec:
+                            evidence_collected_later = True
+                            break
+                
+                if evidence_collected_later:
+                    # Information was collected later, so this is not a true missed opportunity
+                    continue
+            
+            validated_opportunities.append(mo)
+        
+        return validated_opportunities
 
     def _parse_classification(self, classification_text: str) -> Optional[CallClassification]:
         """Parse classification result from the Call Classifier agent"""
@@ -1275,7 +1510,10 @@ class SACallAnalysisCrew:
                         experiment_time_quantified=pain_data.get("experiment_time_quantified", False),
                         notes=pain_data.get("notes"),
                         evidence=self._parse_evidence(pain_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(pain_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(pain_data.get("missed_opportunities", [])),
+                            self._parse_evidence(pain_data.get("evidence", []))
+                        )
                     )
 
                     stakeholder_data = discovery_data.get("stakeholder_map", {})
@@ -1286,7 +1524,10 @@ class SACallAnalysisCrew:
                         decision_maker_confirmed=stakeholder_data.get("decision_maker_confirmed", False),
                         notes=stakeholder_data.get("notes"),
                         evidence=self._parse_evidence(stakeholder_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(stakeholder_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(stakeholder_data.get("missed_opportunities", [])),
+                            self._parse_evidence(stakeholder_data.get("evidence", []))
+                        )
                     )
 
                     rc_data = discovery_data.get("required_capabilities", {})
@@ -1303,7 +1544,10 @@ class SACallAnalysisCrew:
                         deal_breakers_identified=rc_data.get("deal_breakers_identified", False),
                         notes=rc_data.get("notes"),
                         evidence=self._parse_evidence(rc_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(rc_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(rc_data.get("missed_opportunities", [])),
+                            self._parse_evidence(rc_data.get("evidence", []))
+                        )
                     )
 
                     comp_data = discovery_data.get("competitive_landscape", {})
@@ -1314,7 +1558,10 @@ class SACallAnalysisCrew:
                         key_differentiators_identified=comp_data.get("key_differentiators_identified", False),
                         notes=comp_data.get("notes"),
                         evidence=self._parse_evidence(comp_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(comp_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(comp_data.get("missed_opportunities", [])),
+                            self._parse_evidence(comp_data.get("evidence", []))
+                        )
                     )
 
                     discovery_criteria = DiscoveryCriteria(
@@ -1347,7 +1594,10 @@ class SACallAnalysisCrew:
                         integration_complexity_assessed=use_case_data.get("integration_complexity_assessed", False),
                         notes=use_case_data.get("notes"),
                         evidence=self._parse_evidence(use_case_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(use_case_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(use_case_data.get("missed_opportunities", [])),
+                            self._parse_evidence(use_case_data.get("evidence", []))
+                        )
                     )
 
                     impl_data = poc_data.get("implementation_requirements", {})
@@ -1358,7 +1608,10 @@ class SACallAnalysisCrew:
                         blockers_list=impl_data.get("blockers_list", []),
                         notes=impl_data.get("notes"),
                         evidence=self._parse_evidence(impl_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(impl_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(impl_data.get("missed_opportunities", [])),
+                            self._parse_evidence(impl_data.get("evidence", []))
+                        )
                     )
 
                     metrics_data = poc_data.get("metrics_success_criteria", {})
@@ -1370,7 +1623,10 @@ class SACallAnalysisCrew:
                         competitive_favorable_criteria=metrics_data.get("competitive_favorable_criteria", False),
                         notes=metrics_data.get("notes"),
                         evidence=self._parse_evidence(metrics_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(metrics_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(metrics_data.get("missed_opportunities", [])),
+                            self._parse_evidence(metrics_data.get("evidence", []))
+                        )
                     )
 
                     timeline_data = poc_data.get("timeline_milestones", {})
@@ -1384,7 +1640,10 @@ class SACallAnalysisCrew:
                         next_steps_discussed=timeline_data.get("next_steps_discussed", False),
                         notes=timeline_data.get("notes"),
                         evidence=self._parse_evidence(timeline_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(timeline_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(timeline_data.get("missed_opportunities", [])),
+                            self._parse_evidence(timeline_data.get("evidence", []))
+                        )
                     )
 
                     resources_data = poc_data.get("resources_committed", {})
@@ -1396,7 +1655,10 @@ class SACallAnalysisCrew:
                         communication_channel_created=resources_data.get("communication_channel_created", False),
                         notes=resources_data.get("notes"),
                         evidence=self._parse_evidence(resources_data.get("evidence", [])),
-                        missed_opportunities=self._parse_missed_opportunities(resources_data.get("missed_opportunities", []))
+                        missed_opportunities=self._validate_missed_opportunities(
+                            self._parse_missed_opportunities(resources_data.get("missed_opportunities", [])),
+                            self._parse_evidence(resources_data.get("evidence", []))
+                        )
                     )
 
                     poc_criteria = PocScopingCriteria(

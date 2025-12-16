@@ -54,15 +54,15 @@ def setup_observability(
         arize_space_id: Arize space ID (defaults to ARIZE_SPACE_ID env var)
     """
 
-    # Get credentials from environment if not provided
-    # NOTE: load_dotenv() should be called before this in main.py
-    # This ensures .env values are loaded into os.environ
+    # Get credentials from environment variables directly
+    # Using system environment variables (not .env file) to work with uv/venv
     api_key = arize_api_key or os.getenv("ARIZE_API_KEY")
     space_id = arize_space_id or os.getenv("ARIZE_SPACE_ID")
 
     # Verify credentials are present
     if api_key and space_id:
         print(f"✅ Arize credentials loaded (API Key: {len(api_key)} chars, Space ID: {len(space_id)} chars)")
+        print(f"   Using Space ID: {space_id[:20]}...")
 
     if not api_key or not space_id:
         print("⚠️  WARNING: Arize credentials not found. Observability disabled.")
@@ -111,24 +111,63 @@ def setup_observability(
         # NOTE: CrewAI Instrumentor disabled because it creates separate root traces
         # for each Crew.kickoff() call, breaking the trace hierarchy.
         # We rely on manual spans in crew_analyzer.py instead.
-        # CrewAIInstrumentor().instrument(
-        #     tracer_provider=tracer_provider,
-        #     skip_dep_check=True
-        # )
+        # 
+        # UNCOMMENT BELOW FOR TESTING: Enable to see if CrewAI traces appear in Arize
+        # This helps diagnose if CrewAI is bypassing LangChain's callback system
+        enable_crewai_instrumentor = os.getenv("ENABLE_CREWAI_INSTRUMENTOR", "false").lower() == "true"
+        if enable_crewai_instrumentor:
+            from openinference.instrumentation.crewai import CrewAIInstrumentor
+            print("   ⚠️  CrewAI Instrumentor enabled for testing (creates separate root traces)")
+            CrewAIInstrumentor().instrument(
+                tracer_provider=tracer_provider,
+                skip_dep_check=True
+            )
 
         # Instrument LangChain (AFTER processor registered)
-        LangChainInstrumentor().instrument(
+        langchain_instrumentor = LangChainInstrumentor()
+        langchain_instrumentor.instrument(
             tracer_provider=tracer_provider,
             skip_dep_check=True
         )
 
         # Instrument LiteLLM (captures actual LLM calls with token counts)
-        LiteLLMInstrumentor().instrument(
+        litellm_instrumentor = LiteLLMInstrumentor()
+        litellm_instrumentor.instrument(
             tracer_provider=tracer_provider,
             skip_dep_check=True
         )
 
-        print(f"✅ OpenInference tracing enabled (LangChain + LiteLLM)")
+        # DEBUG: Verify instrumentation worked
+        print("\n🔍 Instrumentation Verification:")
+        if hasattr(langchain_instrumentor, '_tracer') and langchain_instrumentor._tracer:
+            print("   ✅ LangChain instrumentor has tracer attached")
+        else:
+            print("   ❌ LangChain instrumentor tracer is None!")
+        
+        # Check if BaseCallbackManager is wrapped
+        try:
+            import langchain_core.callbacks
+            is_wrapped = hasattr(langchain_core.callbacks.BaseCallbackManager.__init__, '__wrapped__')
+            print(f"   {'✅' if is_wrapped else '❌'} BaseCallbackManager.__init__ wrapped: {is_wrapped}")
+        except Exception as e:
+            print(f"   ⚠️  Could not verify BaseCallbackManager wrapping: {e}")
+
+        # DEBUG: Check span processor and exporter configuration
+        print("\n🔍 Span Export Configuration:")
+        if hasattr(tracer_provider, '_active_span_processor'):
+            processor = tracer_provider._active_span_processor
+            print(f"   Span processor type: {type(processor).__name__}")
+            if hasattr(processor, '_span_processors'):
+                for i, p in enumerate(processor._span_processors):
+                    print(f"   - Processor {i}: {type(p).__name__}")
+                    if hasattr(p, 'span_exporter'):
+                        print(f"     Exporter: {type(p.span_exporter).__name__}")
+                    elif hasattr(p, '_exporter'):
+                        print(f"     Exporter (internal): {type(p._exporter).__name__}")
+        else:
+            print("   ⚠️  No active span processor found")
+
+        print(f"\n✅ OpenInference tracing enabled (LangChain + LiteLLM)")
         print(f"   📊 Sending telemetry to Arize AX (project: {project_name})")
         print(f"   🔗 View traces at: https://app.arize.com/organizations")
         print(f"   🔍 Tracer provider: {type(tracer_provider).__name__}")

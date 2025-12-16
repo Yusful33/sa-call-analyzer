@@ -1,10 +1,45 @@
 import os
 import json
-from dotenv import load_dotenv
+import time
+from pathlib import Path
+from contextlib import nullcontext
 
-# Load environment variables FIRST
-# override=True ensures .env file takes precedence over system env vars
-load_dotenv(override=True)
+# Get the directory where this file is located
+BASE_DIR = Path(__file__).parent
+
+# Use environment variables directly (not .env file)
+# This allows uv/venv to manage environment variables
+# The .env file is kept for reference/documentation only
+
+# DEBUG: Verify environment variables are set and optionally check .env file matches
+env_path = BASE_DIR / '.env'
+arize_space_id_env = os.getenv("ARIZE_SPACE_ID")
+arize_api_key_env = os.getenv("ARIZE_API_KEY")
+
+print(f"\n🔍 Environment Variable Check:")
+print(f"   ARIZE_API_KEY: {'SET' if arize_api_key_env else 'NOT SET'} ({len(arize_api_key_env) if arize_api_key_env else 0} chars)")
+print(f"   ARIZE_SPACE_ID: {'SET' if arize_space_id_env else 'NOT SET'} ({len(arize_space_id_env) if arize_space_id_env else 0} chars)")
+
+if arize_space_id_env:
+    print(f"   Space ID value (first 20 chars): {arize_space_id_env[:20]}...")
+
+# Optional: Verify .env file matches environment variables (for documentation)
+if env_path.exists() and arize_space_id_env:
+    try:
+        with open(env_path, 'r') as f:
+            for line in f:
+                if line.startswith('ARIZE_SPACE_ID='):
+                    env_file_value = line.split('=', 1)[1].strip()
+                    if env_file_value != arize_space_id_env:
+                        print(f"   ⚠️  WARNING: .env file Space ID doesn't match environment variable!")
+                        print(f"      .env file: {env_file_value[:20]}...")
+                        print(f"      env var:   {arize_space_id_env[:20]}...")
+                        print(f"      Consider updating .env file to match your environment variables")
+                    else:
+                        print(f"   ✅ .env file matches environment variable")
+                    break
+    except Exception as e:
+        print(f"   ⚠️  Could not verify .env file: {e}")
 
 # Initialize observability BEFORE importing CrewAI
 # This ensures our Arize TracerProvider is set up before CrewAI tries to set up its own
@@ -103,161 +138,189 @@ async def analyze_transcript(request: AnalyzeRequest):
     - transcript: Manual transcript text (with or without speaker labels)
     - gong_url: Gong call URL (will fetch transcript automatically via MCP)
     """
-    with tracer.start_as_current_span(
-        "analyze_call_request",
-        attributes={
-            "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
-            "request.model": request.model or "default",
-            # OpenInference input - the API request
-            "input.value": json.dumps({
-                "gong_url": request.gong_url,
-                "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
-                "model": request.model
-            }),
-            "input.mime_type": "application/json",
-            # OpenInference span kind - this is a chain orchestrating the workflow
-            "openinference.span.kind": "chain",
-        }
-    ) as span:
-        try:
-            # Fetch transcript from Gong if URL is provided
-            if request.gong_url:
-                span.add_event("fetching_from_gong", {
-                    "gong.url": request.gong_url
-                })
-
-                if not gong_client:
-                    span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Gong MCP client not available. Check that Gong MCP server is running."
-                    )
-
-                try:
-                    print(f"📞 Fetching transcript from Gong URL: {request.gong_url}")
-                    # Extract call ID and fetch raw transcript data
-                    call_id = gong_client.extract_call_id_from_url(request.gong_url)
-                    transcript_data = gong_client.get_transcript(call_id)
-                    raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
-                    
-                    # Get call date from Gong metadata
-                    call_date = gong_client.get_call_date(call_id)
-                    if call_date:
-                        print(f"📅 Call date: {call_date}")
-                        span.set_attribute("call.date", call_date)
-                    
-                    print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
-                    span.set_attribute("transcript.source", "gong")
-                    span.set_attribute("transcript.raw_length", len(raw_transcript))
-                    span.add_event("gong_fetch_success", {
-                        "transcript.length": len(raw_transcript),
-                        "call.date": call_date or "not_available"
+    # Add user/session tracking if available
+    try:
+        from tracing_enhancements import trace_with_metadata
+        # Extract user/session info from request if available
+        user_id = getattr(request, 'user_id', None) or os.getenv('USER_ID')
+        session_id = getattr(request, 'session_id', None) or f"session_{int(time.time())}"
+        metadata_context = trace_with_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            tags=["api", "call_analysis"],
+            metadata={
+                "request_id": f"req_{int(time.time())}",
+                "model": request.model or "default",
+            }
+        )
+    except ImportError:
+        metadata_context = None
+        user_id = None
+        session_id = None
+    
+    # Use context manager if available
+    context_manager = metadata_context if metadata_context else nullcontext()
+    
+    with context_manager:
+        with tracer.start_as_current_span(
+            "analyze_call_request",
+            attributes={
+                "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
+                "request.model": request.model or "default",
+                # OpenInference input - the API request
+                "input.value": json.dumps({
+                    "gong_url": request.gong_url,
+                    "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
+                    "model": request.model
+                }),
+                "input.mime_type": "application/json",
+                # OpenInference span kind - this is a chain orchestrating the workflow
+                "openinference.span.kind": "chain",
+            }
+        ) as span:
+            try:
+                # Fetch transcript from Gong if URL is provided
+                if request.gong_url:
+                    span.add_event("fetching_from_gong", {
+                        "gong.url": request.gong_url
                     })
-                except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, f"Gong fetch failed: {str(e)}"))
-                    span.record_exception(e)
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Failed to fetch transcript from Gong: {str(e)}"
-                    )
-            else:
-                raw_transcript = request.transcript
-                transcript_data = None  # No raw data for manual transcripts
-                call_date = ""  # No date for manual transcripts
-                span.set_attribute("transcript.source", "manual")
-                span.set_attribute("transcript.raw_length", len(raw_transcript))
-                span.add_event("using_manual_transcript")
 
-            # Validate transcript is not empty
-            if not raw_transcript or not raw_transcript.strip():
-                span.set_status(Status(StatusCode.ERROR, "Empty transcript"))
-                raise HTTPException(status_code=400, detail="Transcript cannot be empty")
+                    if not gong_client:
+                        span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Gong MCP client not available. Check that Gong MCP server is running."
+                        )
 
-            # Parse the transcript
-            with tracer.start_as_current_span("parse_transcript") as parse_span:
-                parse_span.set_attribute("openinference.span.kind", "chain")
-                parsed_lines, has_labels = TranscriptParser.parse(raw_transcript)
-                parse_span.set_attribute("transcript.has_labels", has_labels)
-                parse_span.set_attribute("transcript.line_count", len(parsed_lines))
-                span.add_event("transcript_parsed", {
-                    "has_labels": has_labels,
-                    "line_count": len(parsed_lines)
+                    try:
+                        print(f"📞 Fetching transcript from Gong URL: {request.gong_url}")
+                        # Extract call ID and fetch raw transcript data
+                        call_id = gong_client.extract_call_id_from_url(request.gong_url)
+                        transcript_data = gong_client.get_transcript(call_id)
+                        raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
+                        
+                        # Get call date from Gong metadata
+                        call_date = gong_client.get_call_date(call_id)
+                        if call_date:
+                            print(f"📅 Call date: {call_date}")
+                            span.set_attribute("call.date", call_date)
+                        
+                        print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
+                        span.set_attribute("transcript.source", "gong")
+                        span.set_attribute("transcript.raw_length", len(raw_transcript))
+                        span.add_event("gong_fetch_success", {
+                            "transcript.length": len(raw_transcript),
+                            "call.date": call_date or "not_available"
+                        })
+                    except Exception as e:
+                        span.set_status(Status(StatusCode.ERROR, f"Gong fetch failed: {str(e)}"))
+                        span.record_exception(e)
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Failed to fetch transcript from Gong: {str(e)}"
+                        )
+                else:
+                    raw_transcript = request.transcript
+                    transcript_data = None  # No raw data for manual transcripts
+                    call_date = ""  # No date for manual transcripts
+                    span.set_attribute("transcript.source", "manual")
+                    span.set_attribute("transcript.raw_length", len(raw_transcript))
+                    span.add_event("using_manual_transcript")
+
+                # Validate transcript is not empty
+                if not raw_transcript or not raw_transcript.strip():
+                    span.set_status(Status(StatusCode.ERROR, "Empty transcript"))
+                    raise HTTPException(status_code=400, detail="Transcript cannot be empty")
+
+                # Parse the transcript
+                with tracer.start_as_current_span("parse_transcript") as parse_span:
+                    parse_span.set_attribute("openinference.span.kind", "chain")
+                    parsed_lines, has_labels = TranscriptParser.parse(raw_transcript)
+                    parse_span.set_attribute("transcript.has_labels", has_labels)
+                    parse_span.set_attribute("transcript.line_count", len(parsed_lines))
+                    span.add_event("transcript_parsed", {
+                        "has_labels": has_labels,
+                        "line_count": len(parsed_lines)
+                    })
+
+                # Format for analysis
+                with tracer.start_as_current_span("format_for_analysis") as format_span:
+                    format_span.set_attribute("openinference.span.kind", "chain")
+                    formatted_transcript = TranscriptParser.format_for_analysis(parsed_lines)
+                    format_span.set_attribute("transcript.formatted_length", len(formatted_transcript))
+
+                # Extract speakers if available
+                speakers = TranscriptParser.extract_speakers(parsed_lines) if has_labels else []
+                span.set_attribute("transcript.speaker_count", len(speakers))
+                if speakers:
+                    span.set_attribute("transcript.speakers", ", ".join(speakers))
+
+                span.add_event("starting_crew_analysis", {
+                    "transcript.length": len(formatted_transcript),
+                    "speaker.count": len(speakers)
                 })
 
-            # Format for analysis
-            with tracer.start_as_current_span("format_for_analysis") as format_span:
-                format_span.set_attribute("openinference.span.kind", "chain")
-                formatted_transcript = TranscriptParser.format_for_analysis(parsed_lines)
-                format_span.set_attribute("transcript.formatted_length", len(formatted_transcript))
+                # Perform analysis
+                result = analyzer.analyze_call(
+                    transcript=formatted_transcript,
+                    speakers=speakers,
+                    transcript_data=transcript_data,  # Pass raw data for hybrid sampling if available
+                    call_date=call_date,  # Pass call date for recap generation (from Gong metadata)
+                    model=request.model  # Pass selected model from UI
+                )
 
-            # Extract speakers if available
-            speakers = TranscriptParser.extract_speakers(parsed_lines) if has_labels else []
-            span.set_attribute("transcript.speaker_count", len(speakers))
-            if speakers:
-                span.set_attribute("transcript.speakers", ", ".join(speakers))
+                span.set_attribute("analysis.insight_count", len(result.top_insights))
+                span.set_attribute("analysis.strength_count", len(result.strengths))
+                span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
 
-            span.add_event("starting_crew_analysis", {
-                "transcript.length": len(formatted_transcript),
-                "speaker.count": len(speakers)
-            })
+                # OpenInference output - the complete analysis result
+                span.set_attribute("output.value", json.dumps({
+                    "call_summary": result.call_summary,
+                    "top_insights": [
+                        {
+                            "category": insight.category,
+                            "severity": insight.severity,
+                            "timestamp": insight.timestamp,
+                            "conversation_snippet": insight.conversation_snippet,
+                            "what_happened": insight.what_happened,
+                            "why_it_matters": insight.why_it_matters,
+                            "better_approach": insight.better_approach
+                        }
+                        for insight in result.top_insights
+                    ],
+                    "strengths": result.strengths,
+                    "improvement_areas": result.improvement_areas,
+                    "key_moments": result.key_moments
+                }, indent=2))
+                span.set_attribute("output.mime_type", "application/json")
 
-            # Perform analysis
-            result = analyzer.analyze_call(
-                transcript=formatted_transcript,
-                speakers=speakers,
-                transcript_data=transcript_data,  # Pass raw data for hybrid sampling if available
-                call_date=call_date,  # Pass call date for recap generation (from Gong metadata)
-                model=request.model  # Pass selected model from UI
-            )
+                span.set_status(Status(StatusCode.OK))
+                span.add_event("analysis_complete", {
+                    "insight_count": len(result.top_insights)
+                })
 
-            span.set_attribute("analysis.insight_count", len(result.top_insights))
-            span.set_attribute("analysis.strength_count", len(result.strengths))
-            span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
+                # Force flush spans to ensure they're sent to Arize immediately
+                from observability import force_flush_spans
+                force_flush_spans()
 
-            # OpenInference output - the complete analysis result
-            span.set_attribute("output.value", json.dumps({
-                "call_summary": result.call_summary,
-                "top_insights": [
-                    {
-                        "category": insight.category,
-                        "severity": insight.severity,
-                        "timestamp": insight.timestamp,
-                        "conversation_snippet": insight.conversation_snippet,
-                        "what_happened": insight.what_happened,
-                        "why_it_matters": insight.why_it_matters,
-                        "better_approach": insight.better_approach
-                    }
-                    for insight in result.top_insights
-                ],
-                "strengths": result.strengths,
-                "improvement_areas": result.improvement_areas,
-                "key_moments": result.key_moments
-            }, indent=2))
-            span.set_attribute("output.mime_type", "application/json")
+                return result
 
-            span.set_status(Status(StatusCode.OK))
-            span.add_event("analysis_complete", {
-                "insight_count": len(result.top_insights)
-            })
-
-            return result
-
-        except HTTPException:
-            raise
-        except json.JSONDecodeError as e:
-            span.set_status(Status(StatusCode.ERROR, f"JSON parse error: {str(e)}"))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to parse AI response: {str(e)}"
-            )
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Analysis failed: {str(e)}"
-            )
+            except HTTPException:
+                raise
+            except json.JSONDecodeError as e:
+                span.set_status(Status(StatusCode.ERROR, f"JSON parse error: {str(e)}"))
+                span.record_exception(e)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to parse AI response: {str(e)}"
+                )
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Analysis failed: {str(e)}"
+                )
 
 
 @app.post("/api/generate-recap-slide")
