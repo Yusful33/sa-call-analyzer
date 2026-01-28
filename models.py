@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Literal
+from typing import Optional, List, Dict, Literal, Any
 from enum import Enum
 
 
@@ -396,3 +396,455 @@ class AnalysisResult(BaseModel):
     
     # Recap slide data for next call
     recap_data: Optional[RecapSlideData] = None
+
+
+# ============================================================================
+# PROSPECT TIMELINE MODELS
+# ============================================================================
+
+class AggregatedActionableInsight(BaseModel):
+    """An actionable insight aggregated across multiple calls"""
+    category: str  # e.g., "Problem Identification", "Differentiation", etc.
+    severity: str  # "critical", "important", "minor"
+    call_date: Optional[str] = None  # Which call this came from
+    call_title: Optional[str] = None  # Title of the call
+    timestamp: Optional[str] = None
+    conversation_snippet: Optional[str] = None
+    what_happened: str
+    why_it_matters: str
+    better_approach: str
+    example_phrasing: Optional[str] = None
+
+
+class AccountAnalysisSummary(BaseModel):
+    """Aggregated analysis summary across all calls for an account - similar to AnalysisResult but for multiple calls"""
+
+    # Summary
+    account_summary: str = ""  # 2-3 paragraph overview of engagement across all calls
+    total_calls_analyzed: int = 0
+    date_range: str = ""  # e.g., "December 15, 2025 - December 23, 2025"
+
+    # Aggregated Scores (averages across all calls)
+    average_overall_score: Optional[float] = None  # 1-10 average
+    command_scores: CommandOfMessageScore = Field(default_factory=CommandOfMessageScore)  # Averaged
+    sa_metrics: SAPerformanceMetrics = Field(default_factory=SAPerformanceMetrics)  # Averaged
+
+    # Aggregated Insights (top insights across all calls, with call context)
+    top_insights: List[AggregatedActionableInsight] = Field(default_factory=list)  # Top 10 across all calls
+
+    # Aggregated Strengths & Improvements (unique across all calls)
+    strengths: List[str] = Field(default_factory=list)
+    improvement_areas: List[str] = Field(default_factory=list)
+
+    # Key Moments across all calls
+    key_moments: List[Dict[str, str]] = Field(default_factory=list)  # With call_date added
+
+    # Discovery criteria completion (aggregated - highest values across calls)
+    discovery_completion: Dict[str, float] = Field(default_factory=dict)  # Section -> score
+
+    # PoC Scoping criteria completion (aggregated - highest values across calls)
+    poc_scoping_completion: Dict[str, float] = Field(default_factory=dict)  # Section -> score
+
+    # All missed opportunities across calls (for coaching)
+    all_missed_opportunities: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Aggregated recap data for next call
+    recap_data: Optional[RecapSlideData] = None
+
+
+class QuickCallSummary(BaseModel):
+    """Fast call summary from single LLM call (vs full multi-agent analysis)"""
+    call_type: str = "other"  # discovery, poc_scoping, check_in, demo, follow_up, other
+    one_liner: str = ""  # Single sentence summary
+    key_points: List[str] = Field(default_factory=list)  # 3-5 bullet points
+    participants_mentioned: List[str] = Field(default_factory=list)  # Key people mentioned
+    sentiment: str = "neutral"  # positive, neutral, negative, mixed
+
+
+class CallTimelineEntry(BaseModel):
+    """A single call entry in the prospect timeline"""
+    call_id: str
+    call_date: Optional[str] = None  # Formatted date string
+    call_title: Optional[str] = None
+    call_type: Optional[str] = None  # discovery, poc_scoping, poc_sync, etc.
+    call_url: Optional[str] = None
+    analysis: Optional[AnalysisResult] = None  # Full analysis result (slow mode)
+    quick_summary: Optional[QuickCallSummary] = None  # Fast summary (fast mode)
+    key_insights: List[str] = Field(default_factory=list)  # Extracted key insights
+    progression_indicators: Dict[str, str] = Field(default_factory=dict)  # What's new vs carried forward
+
+
+class ProspectTimeline(BaseModel):
+    """Complete timeline of calls for a prospect"""
+    prospect_name: str  # Name as searched
+    matched_participant_names: List[str] = Field(default_factory=list)  # Actual names found in Gong
+    calls: List[CallTimelineEntry] = Field(default_factory=list)  # Calls in chronological order
+    cumulative_insights: Dict[str, Any] = Field(default_factory=dict)  # Cumulative insights across all calls
+    progression_summary: str = ""  # Summary of progression across calls
+    overall_account_health: Optional[str] = None  # Overall assessment
+    key_themes: List[str] = Field(default_factory=list)  # Key themes across all calls
+    next_steps: List[str] = Field(default_factory=list)  # Recommended next steps
+
+    # NEW: Aggregated analysis summary across all calls (similar to single-call AnalysisResult)
+    account_analysis: Optional[AccountAnalysisSummary] = None
+
+
+# ============================================================================
+# PROSPECT OVERVIEW MODELS (BigQuery Integration)
+# ============================================================================
+
+class SalesforceAccountData(BaseModel):
+    """Salesforce account data from BigQuery"""
+    id: str
+    name: str
+    website: Optional[str] = None
+    industry: Optional[str] = None
+    annual_revenue: Optional[float] = None
+    number_of_employees: Optional[int] = None
+    total_active_arr: Optional[float] = None
+    lifecycle_stage: Optional[str] = None
+    product_tier: Optional[str] = None
+    status: Optional[str] = None
+    customer_success_tier: Optional[str] = None
+    # Team assignments
+    assigned_sa: Optional[str] = None
+    assigned_cse: Optional[str] = None
+    assigned_csm: Optional[str] = None
+    assigned_ai_se: Optional[str] = None
+    owner_name: Optional[str] = None  # Account owner
+    # Pendo linkage
+    pendo_account_id: Optional[str] = None
+    pendo_time_on_site: Optional[float] = None
+    # Product usage
+    num_models: Optional[float] = None
+    is_using_llms: Optional[str] = None
+    deployment_types: Optional[str] = None
+    # Dates
+    created_date: Optional[str] = None
+    last_activity_date: Optional[str] = None
+    # Notes
+    next_steps: Optional[str] = None
+    customer_notes: Optional[str] = None
+    description: Optional[str] = None
+
+
+class OpportunityData(BaseModel):
+    """Salesforce opportunity data from BigQuery"""
+    id: str
+    name: str
+    stage_name: str
+    amount: Optional[float] = None
+    close_date: Optional[str] = None
+    probability: Optional[float] = None
+    is_closed: bool = False
+    is_won: bool = False
+    forecast_category: Optional[str] = None
+    created_date: Optional[str] = None
+    last_modified_date: Optional[str] = None
+    age_in_days: Optional[int] = None
+    next_step: Optional[str] = None
+    description: Optional[str] = None
+    lead_source: Optional[str] = None
+    type: Optional[str] = None
+    owner_name: Optional[str] = None
+
+
+class SalesforceTaskData(BaseModel):
+    """Salesforce task/activity data from BigQuery"""
+    id: str
+    subject: Optional[str] = None
+    type: Optional[str] = None  # Call, Email, Meeting, etc.
+    status: str
+    activity_date: Optional[str] = None
+    description: Optional[str] = None
+    owner_name: Optional[str] = None
+    is_closed: bool = False
+    created_date: Optional[str] = None
+
+
+class GongParticipant(BaseModel):
+    """Gong call participant"""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    affiliation: Optional[str] = None  # "internal" or "external"
+    speaker_id: Optional[str] = None
+
+
+class GongCallData(BaseModel):
+    """Individual Gong call data from BigQuery"""
+    conversation_key: Optional[str] = None
+    call_url: Optional[str] = None
+    call_title: Optional[str] = None
+    call_date: Optional[str] = None
+    duration_minutes: Optional[float] = None
+    # Call Spotlight AI summary
+    spotlight_brief: Optional[str] = None
+    spotlight_key_points: Optional[List[str]] = None
+    spotlight_next_steps: Optional[str] = None
+    spotlight_outcome: Optional[str] = None
+    spotlight_type: Optional[str] = None
+    # Interaction metrics
+    talk_ratio: Optional[float] = None
+    interactivity: Optional[float] = None
+    patience: Optional[float] = None
+    question_rate: Optional[float] = None
+    longest_monologue: Optional[float] = None
+    longest_customer_story: Optional[float] = None
+    # Participants
+    participants: List[GongParticipant] = Field(default_factory=list)
+    # Transcript snippets
+    transcript_snippet: Optional[str] = None  # First few exchanges
+
+
+class GongSummaryData(BaseModel):
+    """Aggregated Gong analytics from BigQuery"""
+    total_calls: int = 0
+    total_duration_minutes: float = 0
+    avg_talk_ratio: Optional[float] = None
+    avg_interactivity: Optional[float] = None
+    avg_patience: Optional[float] = None
+    avg_question_rate: Optional[float] = None
+    # Engagement timeline
+    first_call_date: Optional[str] = None
+    last_call_date: Optional[str] = None
+    days_since_last_call: Optional[int] = None
+    # Key themes from spotlight briefs
+    key_themes: List[str] = Field(default_factory=list)
+    # Recent calls with full details
+    recent_calls: List[GongCallData] = Field(default_factory=list)
+
+
+class PendoVisitorActivity(BaseModel):
+    """Individual Pendo visitor activity"""
+    visitor_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    total_events: int = 0
+    total_minutes: int = 0
+    last_visit: Optional[str] = None
+    first_visit: Optional[str] = None
+    visit_count: int = 0
+
+
+class PendoFeatureUsage(BaseModel):
+    """Feature usage data from Pendo"""
+    feature_id: str
+    feature_name: Optional[str] = None
+    event_count: int = 0
+    unique_users: int = 0
+    last_used: Optional[str] = None
+
+
+class PendoPageUsage(BaseModel):
+    """Page usage data from Pendo"""
+    page_id: str
+    page_name: Optional[str] = None
+    view_count: int = 0
+    unique_viewers: int = 0
+    total_minutes: int = 0
+
+
+class PendoUsageData(BaseModel):
+    """Enhanced Pendo product usage data from BigQuery"""
+    # Overall metrics
+    total_events: int = 0
+    total_minutes: int = 0
+    unique_visitors: int = 0
+    
+    # Timeline
+    first_activity: Optional[str] = None
+    last_activity: Optional[str] = None
+    days_since_last_activity: Optional[int] = None
+    
+    # Usage frequency
+    active_days_last_30: int = 0
+    active_days_last_7: int = 0
+    avg_daily_minutes: Optional[float] = None
+    avg_session_duration_minutes: Optional[float] = None
+    
+    # Most recent visitors (who last used it)
+    recent_visitors: List[PendoVisitorActivity] = Field(default_factory=list)
+    
+    # Feature-level data
+    top_features: List[PendoFeatureUsage] = Field(default_factory=list)
+    
+    # Page-level data
+    top_pages: List[PendoPageUsage] = Field(default_factory=list)
+    
+    # Weekly trend (events per week for last 12 weeks)
+    weekly_trend: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class FullStoryUserData(BaseModel):
+    """FullStory user data from BigQuery"""
+    id: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    app_url: Optional[str] = None  # Link to FullStory user
+
+
+class DealSummary(BaseModel):
+    """AI-generated summary of deal status from Gong calls"""
+    current_state: str = ""  # High-level summary of where the deal stands
+    key_topics_discussed: List[str] = Field(default_factory=list)
+    blockers_identified: List[str] = Field(default_factory=list)
+    next_steps_from_calls: List[str] = Field(default_factory=list)
+    champion_sentiment: Optional[str] = None  # positive, neutral, concerned
+    risk_factors: List[str] = Field(default_factory=list)
+
+
+class UserIssueEvent(BaseModel):
+    """Individual issue event from FullStory (errors, dead clicks, frustrated moments)"""
+    issue_type: str  # e.g., "dead_click", "error", "frustrated", "rage_click"
+    error_kind: Optional[str] = None  # e.g., "rateLimit", "TypeError"
+    page_url: Optional[str] = None
+    page_context: Optional[str] = None  # Extracted context from URL (e.g., "template_evaluation", "models")
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    session_id: Optional[str] = None
+    recording_url: Optional[str] = None  # Direct link to FullStory recording
+    timestamp: Optional[str] = None
+    count: int = 1
+
+
+class UserErrorEvent(BaseModel):
+    """Deprecated - use UserIssueEvent instead"""
+    error_type: str
+    error_kind: Optional[str] = None
+    page_url: Optional[str] = None
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    timestamp: Optional[str] = None
+    count: int = 1
+
+
+class AdoptionMilestone(BaseModel):
+    """Tracks whether a user/account has completed a key adoption milestone"""
+    name: str  # e.g., "created_project", "sent_traces"
+    completed: bool = False
+    count: int = 0  # How many times (e.g., 3 projects created)
+    first_date: Optional[str] = None  # When first completed
+    last_date: Optional[str] = None  # Most recent activity
+
+
+class UserBehaviorAnalysis(BaseModel):
+    """Analysis of user behavior from Pendo/FullStory data"""
+    summary: str = ""  # What users are doing in the application
+    hypothesis: str = ""  # What they're likely trying to accomplish
+    key_workflows_used: List[str] = Field(default_factory=list)
+    
+    # Adoption milestones - key product activities
+    adoption_milestones: List[AdoptionMilestone] = Field(default_factory=list)
+    
+    critical_issues: List[Dict[str, str]] = Field(default_factory=list)  # Issues/errors encountered
+    user_issues: List[UserIssueEvent] = Field(default_factory=list)  # Detailed issue events from FullStory
+    issues_summary: Optional[str] = None  # High-level summary of issues with context
+    engagement_level: str = "unknown"  # high, medium, low, unknown
+    # Prescriptive recommendations with competitive insights, next steps, and internal contacts
+    recommendations: List[Any] = Field(default_factory=list)
+
+
+class SalesEngagementSummary(BaseModel):
+    """Summary of sales engagement journey"""
+    # Journey timeline
+    first_touch_date: Optional[str] = None
+    days_in_sales_cycle: Optional[int] = None
+    current_stage: Optional[str] = None
+    
+    # Activity summary
+    total_calls: int = 0
+    total_emails: int = 0
+    total_meetings: int = 0
+    total_tasks: int = 0
+    
+    # Recent activity
+    last_sales_activity_date: Optional[str] = None
+    days_since_last_activity: Optional[int] = None
+    
+    # Deal analysis from Gong
+    deal_summary: Optional[DealSummary] = None
+
+
+class ProductUsageSummary(BaseModel):
+    """Summary of product usage patterns"""
+    # Adoption status
+    adoption_status: str = "not_started"  # not_started, exploring, active, power_user, churning
+    
+    # Usage metrics
+    total_users: int = 0
+    active_users_last_7_days: int = 0
+    active_users_last_30_days: int = 0
+    
+    # Time on platform
+    total_time_minutes: int = 0
+    avg_session_minutes: Optional[float] = None
+    
+    # Last activity
+    last_platform_activity: Optional[str] = None
+    last_active_user: Optional[str] = None
+    days_since_last_activity: Optional[int] = None
+    
+    # Usage trend
+    trend: str = "stable"  # growing, stable, declining
+
+
+class ProspectOverviewRequest(BaseModel):
+    """Request to get prospect overview from BigQuery"""
+    # Support multiple lookup methods
+    account_name: Optional[str] = None  # Fuzzy match on account name
+    domain: Optional[str] = None  # Match on website domain
+    sfdc_account_id: Optional[str] = None  # Exact match on Salesforce ID
+
+    def model_post_init(self, __context):
+        """Validate that at least one lookup method is provided."""
+        if not self.account_name and not self.domain and not self.sfdc_account_id:
+            raise ValueError("At least one of 'account_name', 'domain', or 'sfdc_account_id' must be provided")
+
+
+class ProspectOverview(BaseModel):
+    """Complete prospect overview aggregating data from BigQuery"""
+    # Lookup info
+    lookup_method: str  # "name", "domain", or "sfdc_id"
+    lookup_value: str
+    
+    # ============================================================================
+    # SALES ENGAGEMENT CONTEXT
+    # ============================================================================
+    
+    # Salesforce Account
+    salesforce: Optional[SalesforceAccountData] = None
+    
+    # Latest open opportunity (primary focus)
+    latest_opportunity: Optional[OpportunityData] = None
+    
+    # All opportunities (for context)
+    all_opportunities: List[OpportunityData] = Field(default_factory=list)
+    
+    # Gong Call Analytics with transcripts and themes
+    gong_summary: Optional[GongSummaryData] = None
+    
+    # Sales engagement summary with deal analysis
+    sales_engagement: Optional[SalesEngagementSummary] = None
+    
+    # ============================================================================
+    # PRODUCT USAGE PATTERNS
+    # ============================================================================
+    
+    # Pendo Product Usage - detailed
+    pendo_usage: Optional[PendoUsageData] = None
+    
+    # User behavior analysis (from Pendo + FullStory)
+    user_behavior: Optional[UserBehaviorAnalysis] = None
+    
+    # Product usage summary
+    product_usage: Optional[ProductUsageSummary] = None
+    
+    # ============================================================================
+    # METADATA
+    # ============================================================================
+    
+    # Which data sources returned data
+    data_sources_available: List[str] = Field(default_factory=list)
+    
+    # Any errors during data fetch
+    errors: List[str] = Field(default_factory=list)

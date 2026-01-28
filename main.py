@@ -50,13 +50,19 @@ tracer_provider = setup_observability(project_name="sa-call-analyzer")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, Response
-from models import AnalyzeRequest, AnalysisResult, RecapSlideData
+from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
+from models import (
+    AnalyzeRequest, AnalysisResult, RecapSlideData, ProspectTimeline,
+    ProspectOverviewRequest, ProspectOverview
+)
 from transcript_parser import TranscriptParser
 from crew_analyzer import SACallAnalysisCrew
 from gong_mcp_client import GongMCPClient
+from prospect_timeline_analyzer import ProspectTimelineAnalyzer
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from pydantic import BaseModel
+from typing import Optional
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -95,6 +101,15 @@ try:
 except Exception as e:
     gong_client = None
     print(f"⚠️  Gong MCP client not available: {e}")
+
+# Initialize BigQuery client for Prospect Overview
+try:
+    from bigquery_client import BigQueryClient
+    bq_client = BigQueryClient()
+    print("✅ BigQuery client initialized")
+except Exception as e:
+    bq_client = None
+    print(f"⚠️  BigQuery client not available: {e}")
 
 print("🤖 Using CrewAI Multi-Agent System (4 specialized agents)")
 print("   1. 🔍 Call Classifier")
@@ -401,6 +416,375 @@ Yeah, we don't have any technical questions. So, I think we want to hear more ab
 Okay, perfect. Yeah. So the POC essentially would have our team guiding you through the platform."""
 
     return {"transcript": example}
+
+
+class CallsByAccountRequest(BaseModel):
+    """Request to list calls for an account (lightweight, no analysis)"""
+    account_name: str  # Account/company name to search for
+    fuzzy_threshold: Optional[float] = 0.85  # Similarity threshold for name matching (0-1)
+    from_date: Optional[str] = None  # ISO format start date (e.g., "2024-03-01T00:00:00Z")
+    to_date: Optional[str] = None  # ISO format end date
+
+
+class CallMetadata(BaseModel):
+    """Metadata for a single call"""
+    call_id: str
+    title: Optional[str] = None
+    scheduled: Optional[str] = None
+    url: Optional[str] = None
+    account_name: Optional[str] = None
+    participants: Optional[list] = None
+
+
+class CallsByAccountResponse(BaseModel):
+    """Response containing list of calls for an account"""
+    account_name_searched: str
+    matched_account_names: list[str]
+    total_calls: int
+    calls: list[CallMetadata]
+
+
+@app.post("/api/calls-by-account", response_model=CallsByAccountResponse)
+async def get_calls_by_account(request: CallsByAccountRequest):
+    """
+    List all calls for an account/company name (lightweight, no analysis).
+
+    This is a fast endpoint to discover what calls exist for an account
+    before running the full analysis. Use /api/analyze-prospect to run
+    the full CrewAI analysis on all matching calls.
+
+    Uses fuzzy matching to handle variations like "Acme" vs "Acme Corp".
+    """
+    with tracer.start_as_current_span(
+        "get_calls_by_account",
+        attributes={
+            "account.name": request.account_name,
+            "fuzzy.threshold": request.fuzzy_threshold or 0.85,
+            "openinference.span.kind": "tool",
+        }
+    ) as span:
+        try:
+            if not gong_client:
+                span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="Gong MCP client not available. Check that Gong MCP server is running."
+                )
+
+            # Get matching calls using fuzzy matching
+            matching_calls = gong_client.get_calls_by_prospect_name(
+                prospect_name=request.account_name,
+                from_date=request.from_date,
+                to_date=request.to_date,
+                fuzzy_threshold=request.fuzzy_threshold or 0.85
+            )
+
+            # Extract unique account names that matched
+            matched_names = set()
+            call_metadata_list = []
+
+            for call in matching_calls:
+                call_id = call.get("id")
+                if not call_id:
+                    continue
+
+                # Get detailed call info for metadata
+                try:
+                    call_info = gong_client.get_call_info(call_id)
+
+                    # Extract account name
+                    account_name = call_info.get("accountName") or ""
+                    if not account_name and call_info.get("account"):
+                        account_name = call_info.get("account", {}).get("name", "")
+
+                    if account_name:
+                        matched_names.add(account_name)
+
+                    # Extract participants
+                    participants = []
+                    for party in call_info.get("parties", []):
+                        if isinstance(party, dict):
+                            participants.append({
+                                "name": party.get("name"),
+                                "title": party.get("title"),
+                                "email": party.get("emailAddress"),
+                                "company": party.get("companyName")
+                            })
+
+                    call_metadata_list.append(CallMetadata(
+                        call_id=call_id,
+                        title=call_info.get("title") or call.get("title"),
+                        scheduled=call_info.get("scheduled") or call.get("scheduled"),
+                        url=call_info.get("url") or call.get("url"),
+                        account_name=account_name,
+                        participants=participants
+                    ))
+                except Exception as e:
+                    # If we can't get call info, still include basic metadata
+                    call_metadata_list.append(CallMetadata(
+                        call_id=call_id,
+                        title=call.get("title"),
+                        scheduled=call.get("scheduled"),
+                        url=call.get("url")
+                    ))
+
+            span.set_attribute("calls.total", len(call_metadata_list))
+            span.set_attribute("accounts.matched", ", ".join(sorted(matched_names)))
+            span.set_status(Status(StatusCode.OK))
+
+            return CallsByAccountResponse(
+                account_name_searched=request.account_name,
+                matched_account_names=sorted(list(matched_names)),
+                total_calls=len(call_metadata_list),
+                calls=call_metadata_list
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch calls for account: {str(e)}"
+            )
+
+
+class AnalyzeProspectRequest(BaseModel):
+    """Request to analyze all calls for a prospect"""
+    prospect_name: str  # Name to search for (e.g., "John Smith" or "Gong")
+    fuzzy_threshold: Optional[float] = 0.85  # Similarity threshold for name matching
+    from_date: Optional[str] = None  # ISO format start date
+    to_date: Optional[str] = None  # ISO format end date
+    model: Optional[str] = None  # LLM model to use
+
+
+@app.post("/api/analyze-prospect", response_model=ProspectTimeline)
+async def analyze_prospect(request: AnalyzeProspectRequest):
+    """
+    Analyze all calls for a prospect and build a cumulative timeline.
+    
+    Searches Gong for all calls where the prospect name matches any participant,
+    analyzes each call with context from prior calls, and returns a timeline view.
+    """
+    with tracer.start_as_current_span(
+        "analyze_prospect_request",
+        attributes={
+            "prospect.name": request.prospect_name,
+            "fuzzy.threshold": request.fuzzy_threshold or 0.85,
+            "openinference.span.kind": "chain",
+        }
+    ) as span:
+        try:
+            if not gong_client:
+                span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="Gong MCP client not available. Check that Gong MCP server is running."
+                )
+            
+            # Initialize timeline analyzer
+            timeline_analyzer = ProspectTimelineAnalyzer(
+                gong_client=gong_client,
+                analyzer=analyzer
+            )
+            
+            span.add_event("analyzing_prospect_timeline", {
+                "prospect_name": request.prospect_name,
+                "date_range": f"{request.from_date} to {request.to_date}" if request.from_date or request.to_date else "all"
+            })
+            
+            # Analyze prospect timeline
+            timeline = timeline_analyzer.analyze_prospect_timeline(
+                prospect_name=request.prospect_name,
+                from_date=request.from_date,
+                to_date=request.to_date,
+                fuzzy_threshold=request.fuzzy_threshold or 0.85,
+                model=request.model
+            )
+            
+            span.set_attribute("timeline.calls_count", len(timeline.calls))
+            span.set_attribute("timeline.matched_names", ", ".join(timeline.matched_participant_names))
+            span.set_status(Status(StatusCode.OK))
+            
+            # Force flush spans
+            from observability import force_flush_spans
+            force_flush_spans()
+            
+            return timeline
+            
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to analyze prospect timeline: {str(e)}"
+            )
+
+
+@app.post("/api/analyze-prospect-stream")
+async def analyze_prospect_stream(request: AnalyzeProspectRequest):
+    """
+    Analyze all calls for a prospect with real-time progress updates via SSE.
+
+    Returns a Server-Sent Events stream with progress updates as each call is analyzed.
+    Progress events include stage, message, and percentage completion.
+
+    Final event contains the complete ProspectTimeline result.
+    """
+    with tracer.start_as_current_span(
+        "analyze_prospect_stream_request",
+        attributes={
+            "prospect.name": request.prospect_name,
+            "fuzzy.threshold": request.fuzzy_threshold or 0.85,
+            "openinference.span.kind": "chain",
+            "streaming": True,
+        }
+    ) as span:
+        if not gong_client:
+            span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
+            raise HTTPException(
+                status_code=503,
+                detail="Gong MCP client not available. Check that Gong MCP server is running."
+            )
+
+        # Initialize timeline analyzer
+        timeline_analyzer = ProspectTimelineAnalyzer(
+            gong_client=gong_client,
+            analyzer=analyzer
+        )
+
+        def generate_events():
+            """Generator that yields SSE-formatted events."""
+            try:
+                # Use fast mode for quick timeline summaries (1 LLM call per call vs 5)
+                for event in timeline_analyzer.analyze_with_progress_fast(
+                    prospect_name=request.prospect_name,
+                    from_date=request.from_date,
+                    to_date=request.to_date,
+                    fuzzy_threshold=request.fuzzy_threshold or 0.85,
+                    model=request.model
+                ):
+                    # Handle the final complete event specially - serialize the result
+                    if event.get("type") == "complete" and "result" in event:
+                        result = event["result"]
+                        # Convert ProspectTimeline to dict for JSON serialization
+                        event_data = {
+                            "type": "complete",
+                            "message": event.get("message", "Analysis complete"),
+                            "progress": 100,
+                            "result": result.model_dump() if hasattr(result, 'model_dump') else result.dict()
+                        }
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                    else:
+                        # Regular progress event
+                        yield f"data: {json.dumps(event)}\n\n"
+
+            except Exception as e:
+                # Yield error event
+                error_event = {
+                    "type": "error",
+                    "message": f"Analysis failed: {str(e)}"
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+
+        span.add_event("starting_sse_stream", {
+            "prospect_name": request.prospect_name
+        })
+
+        return StreamingResponse(
+            generate_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            }
+        )
+
+
+@app.post("/api/prospect-overview", response_model=ProspectOverview)
+async def get_prospect_overview(request: ProspectOverviewRequest):
+    """
+    Get comprehensive prospect overview from BigQuery.
+    
+    Aggregates data from multiple sources:
+    - Salesforce: Account details, ARR, lifecycle stage, team assignments
+    - Salesforce Opportunities: Active deals, stages, amounts
+    - Gong: Call analytics, spotlight summaries, engagement metrics
+    - Pendo: Product usage, feature adoption, active users
+    - FullStory: User session data
+    
+    Supports multiple lookup methods:
+    - account_name: Fuzzy match on account name
+    - domain: Match on email/website domain
+    - sfdc_account_id: Exact match on Salesforce Account ID
+    """
+    with tracer.start_as_current_span(
+        "get_prospect_overview",
+        attributes={
+            "lookup.account_name": request.account_name or "",
+            "lookup.domain": request.domain or "",
+            "lookup.sfdc_id": request.sfdc_account_id or "",
+            "openinference.span.kind": "chain",
+        }
+    ) as span:
+        try:
+            if not bq_client:
+                span.set_status(Status(StatusCode.ERROR, "BigQuery client not available"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login"
+                )
+            
+            span.add_event("fetching_prospect_overview", {
+                "account_name": request.account_name or "",
+                "domain": request.domain or "",
+                "sfdc_id": request.sfdc_account_id or ""
+            })
+            
+            # Fetch prospect overview from BigQuery
+            overview = bq_client.get_prospect_overview(
+                account_name=request.account_name,
+                domain=request.domain,
+                sfdc_account_id=request.sfdc_account_id
+            )
+            
+            # Log results
+            span.set_attribute("result.data_sources", ", ".join(overview.data_sources_available))
+            span.set_attribute("result.has_salesforce", overview.salesforce is not None)
+            span.set_attribute("result.opportunity_count", len(overview.all_opportunities))
+            span.set_attribute("result.gong_call_count", overview.gong_summary.total_calls if overview.gong_summary else 0)
+            
+            if overview.errors:
+                span.add_event("partial_errors", {"errors": ", ".join(overview.errors)})
+            
+            span.set_status(Status(StatusCode.OK))
+            
+            return overview
+            
+        except HTTPException:
+            raise
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(
+                status_code=400,
+                detail=str(e)
+            )
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch prospect overview: {str(e)}"
+            )
 
 
 if __name__ == "__main__":

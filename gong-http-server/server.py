@@ -75,12 +75,13 @@ class MCPClient:
         requests_json = json.dumps(init_request) + "\n" + json.dumps(tool_request) + "\n"
         
         # Run MCP server and send requests via stdin
+        # Increased timeout to handle pagination of large datasets
         result = subprocess.run(
             MCP_SERVER_CMD.split(),
             input=requests_json,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=300
         )
         
         if result.returncode != 0:

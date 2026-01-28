@@ -146,16 +146,148 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "list_calls": {
         const parsed = ListCallsSchema.parse(args);
-        const body: any = { filter: {} };
         
-        if (parsed.fromDateTime) {
-          body.filter.fromDateTime = parsed.fromDateTime;
-        }
-        if (parsed.toDateTime) {
-          body.filter.toDateTime = parsed.toDateTime;
+        // If no dates provided, default to last 90 days
+        let fromDateTime = parsed.fromDateTime;
+        let toDateTime = parsed.toDateTime;
+        
+        if (!fromDateTime || !toDateTime) {
+          const now = new Date();
+          const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          
+          if (!fromDateTime) {
+            fromDateTime = ninetyDaysAgo.toISOString();
+          }
+          if (!toDateTime) {
+            toDateTime = now.toISOString();
+          }
         }
         
-        const result = await gongRequest("/calls", "POST", body);
+        // Strategy: Use /calls endpoint with GET to list calls, then get full details with /calls/extensive
+        let callIds: string[] = [];
+
+        try {
+          // Step 1: Get call IDs using the /calls endpoint (GET with query parameters)
+          // Gong API v2 /calls uses GET method with fromDateTime and toDateTime as query params
+          // IMPORTANT: Gong API returns max 100 records per page - must handle pagination via cursor
+          let cursor: string | undefined = undefined;
+
+          do {
+            const queryParams = new URLSearchParams();
+            queryParams.set("fromDateTime", fromDateTime);
+            queryParams.set("toDateTime", toDateTime);
+            if (cursor) {
+              queryParams.set("cursor", cursor);
+            }
+
+            const listResult = await gongRequest(`/calls?${queryParams.toString()}`, "GET");
+
+            // Extract call IDs from this page
+            // Response format: { calls: [...], records: { totalRecords, currentPageSize, currentPageNumber, cursor? } }
+            if (listResult.calls && Array.isArray(listResult.calls)) {
+              const pageIds = listResult.calls.map((call: any) => call.id).filter(Boolean);
+              callIds.push(...pageIds);
+            }
+
+            // Check for next page - cursor exists when there are more results
+            cursor = listResult.records?.cursor;
+
+            console.error(`Gong API: Fetched ${callIds.length} calls so far (page cursor: ${cursor ? 'yes' : 'no'})`);
+
+          } while (cursor);
+
+          console.error(`Gong API: Total calls fetched: ${callIds.length}`);
+
+        } catch (listError: any) {
+          console.error("Error listing calls:", listError);
+          const errorMessage = listError instanceof Error ? listError.message : String(listError);
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  calls: [],
+                  error: errorMessage,
+                  attemptedEndpoint: "/calls (GET)"
+                }),
+              },
+            ],
+          };
+        }
+        
+        if (callIds.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ calls: [], total: 0 }),
+              },
+            ],
+          };
+        }
+        
+        // Step 2: Get full call details using /calls/extensive (same endpoint as get_call_info)
+        // This gives us account names and all metadata
+        // Process in batches to avoid hitting API limits
+        const batchSize = 50;
+        const allCalls: any[] = [];
+        
+        for (let i = 0; i < callIds.length; i += batchSize) {
+          const batch = callIds.slice(i, i + batchSize);
+          
+          try {
+            const extensiveBody = {
+              filter: {
+                callIds: batch
+              },
+              contentSelector: {
+                exposedFields: {
+                  parties: true,
+                  content: {
+                    structure: true
+                  }
+                }
+              }
+            };
+
+            const extensiveResult = await gongRequest("/calls/extensive", "POST", extensiveBody);
+            
+            if (extensiveResult.calls && Array.isArray(extensiveResult.calls)) {
+              // Format calls similar to get_call_info
+              const formattedCalls = extensiveResult.calls.map((call: any) => {
+                const meta = call.metaData || call;
+                const accountName = 
+                  call.accountName || 
+                  call.account?.name || 
+                  meta.accountName ||
+                  meta.account?.name ||
+                  null;
+                
+                return {
+                  id: meta.id,
+                  title: meta.title,
+                  scheduled: meta.scheduled,
+                  started: meta.started,
+                  duration: meta.duration,
+                  url: meta.url,
+                  direction: meta.direction,
+                  accountName: accountName,
+                  parties: call.parties || [],
+                };
+              });
+              
+              allCalls.push(...formattedCalls);
+            }
+          } catch (extensiveError: any) {
+            console.error(`Error getting extensive call details for batch:`, extensiveError);
+            // Continue with other batches
+          }
+        }
+        
+        const result = {
+          calls: allCalls,
+          total: allCalls.length
+        };
         
         return {
           content: [
@@ -190,13 +322,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_call_info": {
         const parsed = GetCallInfoSchema.parse(args);
-        
+
         const body = {
           filter: {
             callIds: [parsed.callId],
           },
+          contentSelector: {
+            exposedFields: {
+              parties: true,
+              content: {
+                structure: true
+              }
+            }
+          }
         };
-        
+
         const result = await gongRequest("/calls/extensive", "POST", body);
         
         // Extract and format call metadata
@@ -215,6 +355,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const call = calls[0];
         const meta = call.metaData || call;
         
+        // Extract account name from various possible fields
+        // Gong API may store account name in different places
+        const accountName = 
+          call.accountName || 
+          call.account?.name || 
+          call.accountName || 
+          meta.accountName ||
+          meta.account?.name ||
+          null;
+        
         // Return structured call info
         const callInfo = {
           id: meta.id,
@@ -229,6 +379,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           language: meta.language,
           workspaceId: meta.workspaceId,
           parties: call.parties || [],
+          accountName: accountName,
+          // Include full call object for debugging
+          _raw: call,
         };
         
         return {
@@ -269,3 +422,4 @@ main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });
+

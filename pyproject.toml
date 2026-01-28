@@ -23,6 +23,8 @@ dependencies = [
     "arize-otel>=0.1.0",
     "requests>=2.31.0",
     "python-pptx>=0.6.21",
+    "rapidfuzz>=3.0.0",
+    "google-cloud-bigquery>=3.0.0",
 ]
 
 [project.optional-dependencies]

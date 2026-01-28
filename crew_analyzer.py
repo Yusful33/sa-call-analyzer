@@ -339,6 +339,123 @@ class SACallAnalysisCrew:
                     insight['conversation_snippet'] = None
         return insights
 
+    def quick_summarize_call(
+        self,
+        transcript: str,
+        call_date: str = "",
+        model: str = None
+    ) -> dict:
+        """
+        Generate a quick summary of a call with a single LLM call.
+
+        Much faster than full analyze_call() which uses 4 CrewAI agents.
+        Ideal for getting someone up to speed quickly on an account.
+
+        Args:
+            transcript: The call transcript text
+            call_date: Optional date of the call
+            model: Optional model to use (defaults to configured model)
+
+        Returns:
+            Dict with call_type, one_liner, key_points, participants, sentiment
+        """
+        from langchain_core.messages import HumanMessage
+
+        tracer = trace.get_tracer("quick-summarize")
+
+        with tracer.start_as_current_span("quick_summarize_call") as span:
+            try:
+                # Configure model if specified
+                if model and model != self.model_name:
+                    self._configure_llm(model)
+
+                # Limit transcript size for speed (first ~15000 chars is usually enough)
+                truncated_transcript = transcript[:15000]
+                if len(transcript) > 15000:
+                    truncated_transcript += "\n\n[... transcript truncated for speed ...]"
+
+                prompt = f"""Summarize this sales call transcript in a brief, scannable format.
+
+CALL DATE: {call_date or "Unknown"}
+
+TRANSCRIPT:
+{truncated_transcript}
+
+Analyze this transcript and respond with ONLY a JSON object (no other text) in this exact format:
+{{
+    "call_type": "discovery|poc_scoping|check_in|demo|follow_up|other",
+    "one_liner": "Single sentence summary of what this call was about",
+    "key_points": [
+        "Key point 1 - most important thing discussed or decided",
+        "Key point 2 - another important topic or outcome",
+        "Key point 3 - relevant detail, next step, or action item",
+        "Key point 4 - additional context if needed",
+        "Key point 5 - optional additional point"
+    ],
+    "participants_mentioned": ["Name 1", "Name 2"],
+    "sentiment": "positive|neutral|negative|mixed"
+}}
+
+Guidelines:
+- call_type: "discovery" for initial exploration calls, "poc_scoping" for proof-of-concept planning, "check_in" for status updates, "demo" for product demonstrations, "follow_up" for continuing discussions
+- key_points: 3-5 bullet points capturing what happened, decisions made, and next steps
+- participants_mentioned: Names of key people mentioned (customer contacts, stakeholders)
+- sentiment: Overall tone of the conversation
+
+Return ONLY the JSON object, no additional text."""
+
+                span.set_attribute("input.transcript_length", len(transcript))
+                span.set_attribute("input.truncated", len(transcript) > 15000)
+
+                # Make single LLM call
+                response = self.llm.invoke([HumanMessage(content=prompt)])
+                result_text = response.content if hasattr(response, 'content') else str(response)
+
+                span.set_attribute("output.raw_length", len(result_text))
+
+                # Parse JSON from response
+                # Try to find JSON in the response
+                json_start = result_text.find('{')
+                json_end = result_text.rfind('}') + 1
+
+                if json_start >= 0 and json_end > json_start:
+                    json_str = result_text[json_start:json_end]
+                    summary = json.loads(json_str)
+
+                    # Validate required fields
+                    summary.setdefault("call_type", "other")
+                    summary.setdefault("one_liner", "Call summary unavailable")
+                    summary.setdefault("key_points", [])
+                    summary.setdefault("participants_mentioned", [])
+                    summary.setdefault("sentiment", "neutral")
+
+                    span.set_attribute("output.call_type", summary["call_type"])
+                    span.set_attribute("output.key_points_count", len(summary["key_points"]))
+                    span.set_status(Status(StatusCode.OK))
+
+                    return summary
+                else:
+                    # Fallback if JSON parsing fails
+                    span.set_status(Status(StatusCode.ERROR, "Failed to parse JSON"))
+                    return {
+                        "call_type": "other",
+                        "one_liner": "Summary generation failed - could not parse response",
+                        "key_points": [result_text[:200] if result_text else "No response"],
+                        "participants_mentioned": [],
+                        "sentiment": "neutral"
+                    }
+
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                return {
+                    "call_type": "other",
+                    "one_liner": f"Summary generation failed: {str(e)}",
+                    "key_points": [],
+                    "participants_mentioned": [],
+                    "sentiment": "neutral"
+                }
+
     def create_agents(self):
         """Create all specialized agents"""
 
@@ -436,13 +553,49 @@ class SACallAnalysisCrew:
             'call_classifier': call_classifier
         }
 
+    def _format_prior_insights(self, prior_call_insights: Optional[List[Dict]]) -> str:
+        """
+        Format prior call insights into a context string for prompts.
+        
+        Args:
+            prior_call_insights: List of insights from prior calls
+            
+        Returns:
+            Formatted context string
+        """
+        if not prior_call_insights:
+            return ""
+        
+        context_parts = ["\n=== CONTEXT FROM PRIOR CALLS ===\n"]
+        
+        for idx, prior in enumerate(prior_call_insights, 1):
+            call_date = prior.get("call_date", "Unknown date")
+            call_type = prior.get("call_type", "Unknown type")
+            summary = prior.get("summary", "")
+            insights = prior.get("insights", [])
+            
+            context_parts.append(f"\nPrior Call #{idx} ({call_date}, {call_type}):")
+            if summary:
+                context_parts.append(f"Summary: {summary}")
+            if insights:
+                context_parts.append("Key Insights:")
+                for insight in insights[:5]:  # Top 5 insights per call
+                    context_parts.append(f"  - {insight}")
+        
+        context_parts.append("\n=== END PRIOR CALL CONTEXT ===\n")
+        context_parts.append("\nWhen analyzing the current call, reference information from prior calls when relevant.")
+        context_parts.append("For example: 'As discussed in the discovery call...' or 'Building on the previous PoC scoping call...'")
+        
+        return "\n".join(context_parts)
+
     def analyze_call(
         self,
         transcript: str,
         speakers: List[str],
         transcript_data: Optional[dict] = None,
         call_date: str = "",
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        prior_call_insights: Optional[List[Dict]] = None
     ) -> AnalysisResult:
         """
         Analyze a call transcript using the crew of specialized agents.
@@ -453,6 +606,7 @@ class SACallAnalysisCrew:
             transcript_data: Raw transcript data from Gong (optional, for hybrid sampling)
             call_date: The date of the call (optional, from Gong metadata)
             model: LLM model to use (optional, defaults to environment config)
+            prior_call_insights: Optional list of insights from prior calls for cumulative context
 
         Returns:
             AnalysisResult with structured analysis
@@ -464,6 +618,9 @@ class SACallAnalysisCrew:
             self._configure_llm(model)
             # Recreate agents with new LLM
             self.agents = self.create_agents()
+
+        # Format prior call insights for context
+        prior_context = self._format_prior_insights(prior_call_insights)
 
         # Get tracer (must be obtained after setup_observability is called)
         tracer = trace.get_tracer("sa-call-analyzer")
@@ -546,7 +703,7 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
 
                         classification_task = Task(
                         description=f"""Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
-
+{prior_context}
                     Transcript:
                     {transcript}
 
@@ -837,7 +994,7 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                 # Task 3-5: Parallel analysis by different experts
                 technical_task = Task(
                     description=f"""Analyze the technical performance of the sales rep in this call.
-
+{prior_context}
                     Transcript:
                     {transcript}
 
@@ -869,7 +1026,7 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
 
                 sales_methodology_task = Task(
                     description=f"""Analyze the sales rep's sales methodology and discovery performance in this call.
-
+{prior_context}
                     Transcript:
                     {transcript}
 
@@ -922,7 +1079,7 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                 # Task 4: Compile report (depends on all previous tasks)
                 compile_task = Task(
                     description=f"""Compile a comprehensive, actionable performance report for the sales rep.
-
+{prior_context}
                     Based on all the analysis from technical and sales methodology experts,
                     create a final report with:
 

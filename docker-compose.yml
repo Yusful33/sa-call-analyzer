@@ -7,6 +7,8 @@ services:
     build: .
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
+    env_file:
+      - .env  # Load .env file for Docker (for local runs with uv, use system environment variables)
     environment:
       - PORT=${PORT:-8080}
       - USE_LITELLM=true
@@ -14,12 +16,22 @@ services:
       - LITELLM_API_KEY=dummy
       - MODEL_NAME=${MODEL_NAME:-claude-3-5-haiku-20241022}
       - GONG_MCP_URL=http://gong-mcp:8080
-      - GONG_ACCESS_KEY
-      - GONG_SECRET_KEY
-      - ANTHROPIC_API_KEY
-      - OPENAI_API_KEY
-      - ARIZE_API_KEY
-      - ARIZE_SPACE_ID
+      # Note: ARIZE_API_KEY and ARIZE_SPACE_ID are loaded from .env via env_file above
+      # For local development with uv: Set these as system environment variables
+      # The .env file should match your actual environment variables for documentation
+      - GONG_ACCESS_KEY=${GONG_ACCESS_KEY}
+      - GONG_SECRET_KEY=${GONG_SECRET_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # BigQuery / GCP credentials - uses ADC mounted from host for local dev
+      # For production with service account, set GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
+      - GOOGLE_CLOUD_PROJECT=mkt-analytics-268801
+    volumes:
+      # Mount GCP credentials for BigQuery access
+      # Option 1: For local development with ADC (gcloud auth application-default login)
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      # Option 2: For production, use a service account key file
+      # - ${GCP_CREDENTIALS_PATH:-./gcp-credentials.json}:/app/gcp-credentials.json:ro
     depends_on:
       - litellm
       - gong-mcp
@@ -29,15 +41,38 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    develop:
+      watch:
+        # Sync Python files and restart for code changes
+        - action: sync+restart
+          path: .
+          target: /app
+          ignore:
+            - .venv/
+            - __pycache__/
+            - .git/
+            - .env
+            - "*.md"
+            - docs/
+            - frontend/
+            - gong-http-server/
+            - litellm/
+        # Rebuild on dependency changes
+        - action: rebuild
+          path: pyproject.toml
+        - action: rebuild
+          path: uv.lock
 
   # LiteLLM Proxy - Routes LLM requests to various providers
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     ports:
       - "4000:4000"
+    env_file:
+      - .env  # Explicitly load .env file from project root
     environment:
-      - ANTHROPIC_API_KEY
-      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
@@ -47,14 +82,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    develop:
+      watch:
+        # Restart on config changes (config is volume-mounted)
+        - action: sync+restart
+          path: ./litellm_config.yaml
+          target: /app/config.yaml
 
   # Gong MCP Server - Fetches call transcripts from Gong via MCP protocol
   gong-mcp:
-    image: yusufarize/gong-mcp:latest
+    build: ./gong-http-server
+    # image: yusufarize/gong-mcp:latest  # Use for production (from Docker Hub)
     ports:
       - "8081:8080"
+    env_file:
+      - .env  # Explicitly load .env file from project root
     environment:
-      - GONG_ACCESS_KEY
+      - GONG_ACCESS_KEY=${GONG_ACCESS_KEY}
       - GONG_ACCESS_SECRET=${GONG_SECRET_KEY}
     restart: unless-stopped
     healthcheck:
@@ -62,6 +106,18 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    develop:
+      watch:
+        # Sync Python HTTP wrapper and restart
+        - action: sync+restart
+          path: ./gong-http-server/server.py
+          target: /app/http_server.py
+        # Rebuild on TypeScript source changes (requires recompilation)
+        - action: rebuild
+          path: ./gong-http-server/mcp-server/src
+        # Rebuild on package.json changes
+        - action: rebuild
+          path: ./gong-http-server/mcp-server/package.json
 
 networks:
   default:

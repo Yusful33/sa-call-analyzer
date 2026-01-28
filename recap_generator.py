@@ -234,3 +234,4 @@ def generate_recap_slide(data: RecapSlideData) -> bytes:
         Bytes of the PowerPoint file
     """
     return create_recap_presentation(data)
+
