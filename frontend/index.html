@@ -1725,7 +1725,7 @@ The tool will auto-detect the format and identify the SA."
                                     let content = '';
                                     
                                     if (rec.category === 'Competitive' && rec.competitive_messaging) {
-                                        content = rec.competitive_messaging.map(cm => {
+                                        content = rec.competitive_messaging.map((cm, idx) => {
                                             const mentionedIn = cm.mentioned_in && cm.mentioned_in.length > 0
                                                 ? `<div style="font-size: 0.8em; color: #888; margin-bottom: 8px;">
                                                     📞 Mentioned in: ${cm.mentioned_in.slice(0, 3).join(', ')}${cm.mention_count > 3 ? ` (+${cm.mention_count - 3} more)` : ''}
@@ -1737,15 +1737,55 @@ The tool will auto-detect the format and identify the SA."
                                                     ${cm.note}
                                                    </div>`
                                                 : '';
+                                            
+                                            // What they said section (new targeted analysis)
+                                            const whatTheySaidSection = cm.what_they_said && cm.what_they_said !== 'No specific mentions captured' && cm.what_they_said !== 'See context below'
+                                                ? `<div style="background: #e3f2fd; border-left: 3px solid #1976d2; padding: 10px; border-radius: 0 6px 6px 0; margin-bottom: 12px;">
+                                                    <div style="font-weight: 600; color: #1565c0; font-size: 0.85em; margin-bottom: 4px;">🎯 What They're Interested In:</div>
+                                                    <div style="color: #333; font-size: 0.9em;">${cm.what_they_said}</div>
+                                                   </div>`
+                                                : '';
+                                            
+                                            // Targeted response section (main actionable content)
+                                            const targetedResponseSection = cm.targeted_response
+                                                ? `<div style="background: #e8f5e9; border: 1px solid #4caf50; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                                                    <div style="font-weight: 600; color: #2e7d32; font-size: 0.85em; margin-bottom: 6px;">💬 Recommended Response:</div>
+                                                    <div style="color: #1b5e20; font-size: 0.95em; line-height: 1.5;">${cm.targeted_response}</div>
+                                                   </div>`
+                                                : '';
+                                            
+                                            // Raw context section (expandable for transparency)
+                                            const rawContextsSection = cm.raw_contexts && cm.raw_contexts.length > 0
+                                                ? `<details style="margin-bottom: 10px;">
+                                                    <summary style="cursor: pointer; font-size: 0.8em; color: #666; padding: 4px;">📝 See exact quotes from calls (${cm.raw_contexts.length})</summary>
+                                                    <div style="background: #fafafa; padding: 10px; border-radius: 4px; margin-top: 6px; font-size: 0.8em; color: #555;">
+                                                        ${cm.raw_contexts.map(ctx => `<div style="margin-bottom: 8px; padding-left: 8px; border-left: 2px solid #ddd;">${ctx}</div>`).join('')}
+                                                    </div>
+                                                   </details>`
+                                                : '';
+                                            
+                                            // Generic differentiator as fallback (collapsible)
+                                            const genericFallbackSection = cm.differentiator
+                                                ? `<details style="margin-top: 8px;">
+                                                    <summary style="cursor: pointer; font-size: 0.8em; color: #888; padding: 4px;">📚 Generic positioning (backup)</summary>
+                                                    <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; margin-top: 6px;">
+                                                        <div style="font-size: 0.85em; color: #555; margin-bottom: 8px;">${cm.differentiator}</div>
+                                                        <div style="background: #fff8e1; padding: 8px; border-radius: 4px; font-size: 0.8em;">
+                                                            <strong>Generic Talking Point:</strong> ${cm.talking_point}
+                                                        </div>
+                                                    </div>
+                                                   </details>`
+                                                : '';
+                                            
                                             return `
-                                            <div style="background: white; border-radius: 6px; padding: 12px; margin-top: 10px; border: 1px solid #e0e0e0;">
-                                                <div style="font-weight: 600; color: #c62828; margin-bottom: 4px;">vs ${cm.competitor}</div>
+                                            <div style="background: white; border-radius: 6px; padding: 14px; margin-top: 10px; border: 1px solid #e0e0e0; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+                                                <div style="font-weight: 600; color: #c62828; margin-bottom: 6px; font-size: 1.05em;">⚔️ vs ${cm.competitor}</div>
                                                 ${mentionedIn}
                                                 ${noteSection}
-                                                <div style="font-size: 0.9em; color: #555; margin-bottom: 8px;">${cm.differentiator}</div>
-                                                <div style="background: #fff8e1; padding: 8px; border-radius: 4px; font-size: 0.85em;">
-                                                    <strong>Talking Point:</strong> ${cm.talking_point}
-                                                </div>
+                                                ${whatTheySaidSection}
+                                                ${targetedResponseSection}
+                                                ${rawContextsSection}
+                                                ${genericFallbackSection}
                                             </div>
                                         `}).join('');
                                     } else if (rec.category === 'Internal Resources' && rec.contacts) {

@@ -4,12 +4,14 @@ BigQuery Client for Prospect Overview
 Fetches comprehensive organization data from BigQuery's Market Analytics project,
 including Salesforce, Gong, Pendo, and FullStory data.
 """
+import os
 import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError
+import litellm
 
 from models import (
     SalesforceAccountData,
@@ -1786,6 +1788,114 @@ class BigQueryClient:
         
         return mentioned
     
+    def _generate_targeted_competitive_response(
+        self,
+        competitor: str,
+        contexts: List[Dict],
+        focus_areas: List[str],
+        base_differentiator: str,
+        base_talking_point: str
+    ) -> Dict[str, str]:
+        """
+        Use LLM to generate a targeted competitive response based on what the prospect
+        actually said about the competitor.
+        
+        Args:
+            competitor: Name of the competitor
+            contexts: List of dicts with 'call' and 'context' keys showing what was said
+            focus_areas: List of focus areas the prospect cares about (tracing, evaluation, etc.)
+            base_differentiator: The generic differentiator to use as baseline
+            base_talking_point: The generic talking point to use as baseline
+            
+        Returns:
+            Dict with 'targeted_response' and 'what_they_said' keys
+        """
+        # Extract the actual context snippets
+        context_snippets = []
+        for ctx in contexts[:5]:  # Limit to 5 most relevant contexts
+            if isinstance(ctx, dict) and ctx.get("context"):
+                context_snippets.append(f"- From {ctx.get('call', 'unknown call')}: \"{ctx['context']}\"")
+        
+        if not context_snippets:
+            # No context available, return base messaging
+            return {
+                "what_they_said": "No specific mentions captured",
+                "targeted_response": base_talking_point
+            }
+        
+        what_they_said = "\n".join(context_snippets)
+        
+        # Build the prompt for targeted response generation
+        prompt = f"""You are a sales enablement expert for Arize AI, an AI/LLM observability platform.
+
+A prospect has mentioned {competitor} in their conversations. Based on what they specifically said, generate a targeted competitive response that directly addresses their comments.
+
+## What the prospect said about {competitor}:
+{what_they_said}
+
+## Prospect's focus areas:
+{', '.join(focus_areas) if focus_areas else 'General LLM observability'}
+
+## Arize's baseline differentiator vs {competitor}:
+{base_differentiator}
+
+## Instructions:
+1. Analyze what the prospect specifically said or implied about {competitor}
+2. Identify what features, capabilities, or benefits they seem to value in {competitor}
+3. Generate a targeted response that:
+   - Acknowledges the specific capability they mentioned (don't dismiss it)
+   - Positions how Arize addresses that same need, ideally better
+   - Highlights a unique Arize capability that {competitor} lacks and is relevant to their use case
+   - Is conversational and actionable (something an SA can actually say)
+
+## Response format:
+Return ONLY a JSON object with these fields:
+- "summary_of_interest": A brief 1-sentence summary of what they seem interested in regarding {competitor}
+- "targeted_response": A 2-3 sentence response the SA can use that directly addresses their interest while positioning Arize
+
+Example response:
+{{"summary_of_interest": "They're interested in Braintrust's evaluation scoring capabilities for testing prompts before production.", "targeted_response": "Arize absolutely supports evaluation scoring for pre-production testing—we have built-in LLM judges for relevance, toxicity, and custom criteria. Where we go further is tying those same evaluators to your production traffic, so you can see if your test scores hold up with real users. That production feedback loop is something Braintrust doesn't offer today."}}
+
+Return only valid JSON, no markdown formatting or code blocks."""
+
+        try:
+            # Use Claude Haiku for fast, cost-effective responses
+            model = os.environ.get("COMPETITIVE_ANALYSIS_MODEL", "claude-3-5-haiku-20241022")
+            
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.3  # Lower temperature for more consistent responses
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Parse the JSON response
+            # Handle potential markdown code blocks
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+            
+            result = json.loads(response_text)
+            
+            return {
+                "what_they_said": result.get("summary_of_interest", "See context below"),
+                "targeted_response": result.get("targeted_response", base_talking_point),
+                "contexts": context_snippets[:3]  # Include raw contexts for reference
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Failed to generate targeted competitive response: {e}")
+            # Fall back to base messaging
+            return {
+                "what_they_said": "See context below",
+                "targeted_response": base_talking_point,
+                "contexts": context_snippets[:3]
+            }
+    
     def _build_competitive_messaging(
         self,
         mentioned_competitors: Dict[str, List[str]],
@@ -1933,11 +2043,23 @@ class BigQueryClient:
                         break
                 
                 if messaging:
+                    # Generate targeted response based on what they actually said
+                    targeted = self._generate_targeted_competitive_response(
+                        competitor="LangSmith",
+                        contexts=mentions,
+                        focus_areas=focus_areas,
+                        base_differentiator=messaging.get("differentiator", ""),
+                        base_talking_point=messaging.get("talking_point", "")
+                    )
+                    
                     competitive_messaging.append({
                         "competitor": "LangSmith (prospect mentioned 'LangChain')",
                         "mention_count": len(mentions),
                         "mentioned_in": [m["call"] for m in mentions[:3]],
                         "note": "⚠️ Prospect mentioned 'LangChain' which is an orchestration framework. They likely mean 'LangSmith' - LangChain's observability platform. Position Arize vs LangSmith:",
+                        "what_they_said": targeted.get("what_they_said", ""),
+                        "targeted_response": targeted.get("targeted_response", ""),
+                        "raw_contexts": targeted.get("contexts", []),
                         "differentiator": messaging.get("differentiator", ""),
                         "talking_point": messaging.get("talking_point", "")
                     })
@@ -1952,13 +2074,45 @@ class BigQueryClient:
                         break
                 
                 if messaging:
+                    # Generate targeted response based on what they actually said
+                    targeted = self._generate_targeted_competitive_response(
+                        competitor=competitor,
+                        contexts=mentions,
+                        focus_areas=focus_areas,
+                        base_differentiator=messaging.get("differentiator", ""),
+                        base_talking_point=messaging.get("talking_point", "")
+                    )
+                    
                     competitive_messaging.append({
                         "competitor": competitor,
                         "mention_count": len(mentions),
                         "mentioned_in": [m["call"] for m in mentions[:3]],  # First 3 calls
+                        "what_they_said": targeted.get("what_they_said", ""),
+                        "targeted_response": targeted.get("targeted_response", ""),
+                        "raw_contexts": targeted.get("contexts", []),
                         "differentiator": messaging.get("differentiator", ""),
                         "talking_point": messaging.get("talking_point", "")
                     })
+            else:
+                # Unknown competitor - still try to generate a response
+                targeted = self._generate_targeted_competitive_response(
+                    competitor=competitor,
+                    contexts=mentions,
+                    focus_areas=focus_areas,
+                    base_differentiator=f"Arize provides comprehensive AI/LLM observability that may offer capabilities beyond {competitor}.",
+                    base_talking_point=f"Let's discuss what specific capabilities you're looking for in {competitor} - Arize may provide those plus additional value."
+                )
+                
+                competitive_messaging.append({
+                    "competitor": competitor,
+                    "mention_count": len(mentions),
+                    "mentioned_in": [m["call"] for m in mentions[:3]],
+                    "what_they_said": targeted.get("what_they_said", ""),
+                    "targeted_response": targeted.get("targeted_response", ""),
+                    "raw_contexts": targeted.get("contexts", []),
+                    "differentiator": f"Unknown competitor - research recommended for {competitor}",
+                    "talking_point": f"Ask the prospect what specific capabilities they're evaluating in {competitor}."
+                })
         
         return competitive_messaging
     
