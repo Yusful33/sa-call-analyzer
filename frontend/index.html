@@ -842,18 +842,6 @@ The tool will auto-detect the format and identify the SA."
                         Exact match on Salesforce Account ID (most precise).
                     </p>
                 </div>
-                <div class="input-section" style="margin-top: 15px;">
-                    <label for="manualCompetitors">Known Competitors (Optional)</label>
-                    <input
-                        type="text"
-                        id="manualCompetitors"
-                        placeholder="e.g., BrainTrust, LangSmith, Datadog"
-                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
-                    >
-                    <p class="help-text">
-                        🎯 Add known competitors in this deal (comma-separated). Competitive positioning will be included even if not mentioned in calls.
-                    </p>
-                </div>
                 <p class="help-text" style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 8px;">
                     📊 <strong>Prospect Overview</strong> pulls data from BigQuery including Salesforce account details, 
                     opportunities, Gong call analytics, Pendo product usage, and FullStory user data.
@@ -1026,7 +1014,6 @@ The tool will auto-detect the format and identify the SA."
             const accountName = document.getElementById('accountName').value;
             const accountDomain = document.getElementById('accountDomain').value;
             const sfdcAccountId = document.getElementById('sfdcAccountId').value;
-            const manualCompetitors = document.getElementById('manualCompetitors').value;
             const analyzeBtn = document.getElementById('analyzeBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -1053,12 +1040,6 @@ The tool will auto-detect the format and identify the SA."
             }
             if (sfdcAccountId.trim()) {
                 requestBody.sfdc_account_id = sfdcAccountId.trim();
-            }
-            // Parse manual competitors (comma-separated)
-            if (manualCompetitors.trim()) {
-                requestBody.manual_competitors = manualCompetitors.split(',')
-                    .map(c => c.trim())
-                    .filter(c => c.length > 0);
             }
 
             try {
@@ -1566,6 +1547,34 @@ The tool will auto-detect the format and identify the SA."
                 `;
             }
             
+            // ============================================================================
+            // NEXT STEPS - Extracted to show prominently at the top
+            // ============================================================================
+            let nextStepsHtml = '';
+            const ub_for_next_steps = overview.user_behavior;
+            if (ub_for_next_steps && ub_for_next_steps.recommendations) {
+                const nextStepsRec = ub_for_next_steps.recommendations.find(r => r.category === 'Next Steps');
+                if (nextStepsRec && nextStepsRec.steps && nextStepsRec.steps.length > 0) {
+                    nextStepsHtml = `
+                        <div style="background: linear-gradient(135deg, #00bcd4 0%, #00acc1 100%); border-radius: 16px; padding: 25px; margin-bottom: 30px; box-shadow: 0 4px 20px rgba(0,188,212,0.3);">
+                            <h3 style="margin: 0 0 15px 0; color: white; display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 1.4em;">✅</span>
+                                <span>Recommended Actions</span>
+                            </h3>
+                            <div style="background: rgba(255,255,255,0.95); border-radius: 12px; padding: 20px;">
+                                <ol style="margin: 0; padding-left: 25px;">
+                                    ${nextStepsRec.steps.map(step => `
+                                        <li style="margin-bottom: 12px; color: #00695c; font-size: 1.05em; line-height: 1.5;">
+                                            ${step}
+                                        </li>
+                                    `).join('')}
+                                </ol>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
             // User Behavior Analysis section
             let userBehaviorHtml = '';
             const ub = overview.user_behavior;
@@ -1700,10 +1709,10 @@ The tool will auto-detect the format and identify the SA."
                             </div>
                         ` : ''}
                         
-                        ${ub.recommendations && ub.recommendations.length > 0 ? `
+                        ${ub.recommendations && ub.recommendations.filter(r => r.category !== 'Next Steps').length > 0 ? `
                             <div style="margin-top: 20px;">
                                 <h4 style="margin: 0 0 15px 0; color: #333; font-size: 1.1em;">📋 Actionable Recommendations</h4>
-                                ${ub.recommendations.map(rec => {
+                                ${ub.recommendations.filter(r => r.category !== 'Next Steps').map(rec => {
                                     if (typeof rec === 'string') {
                                         // Legacy string format
                                         return `<div style="background: #e8f5e9; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #27ae60;">
@@ -1844,6 +1853,7 @@ The tool will auto-detect the format and identify the SA."
                     <span style="margin-left: 20px; color: #666;">Sources: </span>${sourcesHtml}
                 </div>
                 ${errorsHtml}
+                ${nextStepsHtml}
                 ${summaryHtml}
                 ${salesEngagementHtml}
                 ${productUsageHtml}
