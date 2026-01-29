@@ -1,11 +1,60 @@
 import os
 import json
 import time
+import base64
 from pathlib import Path
 from contextlib import nullcontext
 
 # Get the directory where this file is located
 BASE_DIR = Path(__file__).parent
+
+# ============================================================
+# GCP Credentials Setup (for Railway deployment)
+# Decode base64 credentials if GCP_CREDENTIALS_BASE64 is set
+# ============================================================
+def setup_gcp_credentials():
+    """Decode GCP credentials from base64 environment variable."""
+    gcp_creds_b64 = os.getenv("GCP_CREDENTIALS_BASE64")
+    
+    print(f"\n🔐 GCP Credentials Setup:")
+    print(f"   GCP_CREDENTIALS_BASE64: {'SET' if gcp_creds_b64 else 'NOT SET'} ({len(gcp_creds_b64) if gcp_creds_b64 else 0} chars)")
+    
+    if gcp_creds_b64:
+        try:
+            # Decode the base64 credentials
+            creds_json = base64.b64decode(gcp_creds_b64).decode('utf-8')
+            
+            # Write to file
+            creds_path = BASE_DIR / "gcp-credentials.json"
+            with open(creds_path, 'w') as f:
+                f.write(creds_json)
+            
+            # Set the environment variable to point to the file
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+            
+            print(f"   ✅ Credentials decoded and written to {creds_path}")
+            print(f"   GOOGLE_APPLICATION_CREDENTIALS={os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+            
+            # Verify the JSON is valid
+            creds_dict = json.loads(creds_json)
+            print(f"   Credential type: {creds_dict.get('type', 'unknown')}")
+            
+            return True
+        except Exception as e:
+            print(f"   ❌ Failed to decode credentials: {e}")
+            return False
+    else:
+        # Check if GOOGLE_APPLICATION_CREDENTIALS is already set
+        existing_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if existing_creds and Path(existing_creds).exists():
+            print(f"   Using existing credentials: {existing_creds}")
+            return True
+        else:
+            print(f"   ⚠️  No GCP credentials available")
+            return False
+
+# Run credential setup before anything else
+setup_gcp_credentials()
 
 # Use environment variables directly (not .env file)
 # This allows uv/venv to manage environment variables
