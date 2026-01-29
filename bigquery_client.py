@@ -888,22 +888,42 @@ class BigQueryClient:
     def _get_recent_pendo_visitors(self, pendo_account_id: str) -> List[PendoVisitorActivity]:
         """Get most recent visitors to the platform with their details."""
         
+        # Use subquery to aggregate events first, then join with deduplicated visitor info
+        # This prevents row multiplication from visitor_history having multiple rows per visitor
         query = f"""
+        WITH visitor_stats AS (
+            SELECT 
+                visitor_id,
+                SUM(num_events) as total_events,
+                SUM(num_minutes) as total_minutes,
+                MAX(timestamp) as last_visit,
+                MIN(timestamp) as first_visit,
+                COUNT(DISTINCT DATE(timestamp)) as visit_count
+            FROM `{self.PROJECT_ID}.pendo.event`
+            WHERE account_id = @account_id
+              AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+            GROUP BY visitor_id
+        ),
+        visitor_info AS (
+            SELECT 
+                id,
+                agent_email,
+                agent_full_name,
+                ROW_NUMBER() OVER (PARTITION BY id ORDER BY last_updated_at DESC) as rn
+            FROM `{self.PROJECT_ID}.pendo.visitor_history`
+        )
         SELECT 
-            e.visitor_id,
-            vh.agent_email as email,
-            vh.agent_full_name as display_name,
-            SUM(e.num_events) as total_events,
-            SUM(e.num_minutes) as total_minutes,
-            MAX(e.timestamp) as last_visit,
-            MIN(e.timestamp) as first_visit,
-            COUNT(DISTINCT DATE(e.timestamp)) as visit_count
-        FROM `{self.PROJECT_ID}.pendo.event` e
-        LEFT JOIN `{self.PROJECT_ID}.pendo.visitor_history` vh ON e.visitor_id = vh.id
-        WHERE e.account_id = @account_id
-          AND e.timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
-        GROUP BY e.visitor_id, vh.agent_email, vh.agent_full_name
-        ORDER BY last_visit DESC
+            vs.visitor_id,
+            vi.agent_email as email,
+            vi.agent_full_name as display_name,
+            vs.total_events,
+            vs.total_minutes,
+            vs.last_visit,
+            vs.first_visit,
+            vs.visit_count
+        FROM visitor_stats vs
+        LEFT JOIN visitor_info vi ON vs.visitor_id = vi.id AND vi.rn = 1
+        ORDER BY vs.last_visit DESC
         LIMIT 10
         """
         
