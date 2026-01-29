@@ -1806,9 +1806,14 @@ The tool will auto-detect the format and identify the SA."
                 return;
             }
 
-            // Show loading
+            // Show loading with appropriate message
             analyzeBtn.disabled = true;
             loading.style.display = 'block';
+            if (currentTab === 'gong') {
+                document.getElementById('loading-message').textContent = 'Fetching transcript from Gong API...';
+            } else {
+                document.getElementById('loading-message').textContent = 'Analyzing transcript...';
+            }
             results.classList.remove('show');
 
             // Get selected model
