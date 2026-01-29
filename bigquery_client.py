@@ -1857,12 +1857,8 @@ class BigQueryClient:
                     "talking_point": "Open-source is great for getting started. For production at scale, you need enterprise observability with guaranteed support."
                 }
             },
-            "LangChain (Framework)": {
-                "default": {
-                    "differentiator": "⚠️ NOTE: LangChain is an orchestration FRAMEWORK, not a competitor. Arize provides observability that works WITH LangChain. If the prospect mentioned LangChain in a competitive context, they may actually be referring to LangSmith (LangChain's observability platform).",
-                    "talking_point": "LangChain builds your app; Arize monitors it. They're complementary - use LangChain for development, Arize for production visibility. If you're evaluating observability specifically, you may be thinking of LangSmith?"
-                }
-            },
+            # NOTE: LangChain (Framework) is handled specially in the loop below - 
+            # it shows LangSmith messaging with a clarifying note
             "MLflow": {
                 "default": {
                     "differentiator": "MLflow tracks experiments and models. Arize adds production-grade LLM observability with real-time evaluation, drift detection, and quality monitoring.",
@@ -1884,7 +1880,28 @@ class BigQueryClient:
         }
         
         for competitor, mentions in mentioned_competitors.items():
-            if competitor in competitor_differentiators:
+            # Special handling: If LangChain (Framework) is mentioned, show LangSmith messaging
+            # since prospects often say "LangChain" when they mean "LangSmith" (the observability platform)
+            if competitor == "LangChain (Framework)":
+                # Use LangSmith messaging with a clarifying note
+                comp_data = competitor_differentiators.get("LangSmith", {})
+                
+                messaging = comp_data.get("default", {})
+                for focus in focus_areas:
+                    if focus in comp_data:
+                        messaging = comp_data[focus]
+                        break
+                
+                if messaging:
+                    competitive_messaging.append({
+                        "competitor": "LangSmith (prospect mentioned 'LangChain')",
+                        "mention_count": len(mentions),
+                        "mentioned_in": [m["call"] for m in mentions[:3]],
+                        "note": "⚠️ Prospect mentioned 'LangChain' which is an orchestration framework. They likely mean 'LangSmith' - LangChain's observability platform. Position Arize vs LangSmith:",
+                        "differentiator": messaging.get("differentiator", ""),
+                        "talking_point": messaging.get("talking_point", "")
+                    })
+            elif competitor in competitor_differentiators:
                 comp_data = competitor_differentiators[competitor]
                 
                 # Find the best messaging based on prospect's focus

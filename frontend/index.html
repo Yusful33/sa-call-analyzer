@@ -1712,10 +1712,17 @@ The tool will auto-detect the format and identify the SA."
                                                     📞 Mentioned in: ${cm.mentioned_in.slice(0, 3).join(', ')}${cm.mention_count > 3 ? ` (+${cm.mention_count - 3} more)` : ''}
                                                    </div>`
                                                 : '';
+                                            // Show note if present (e.g., for LangChain -> LangSmith clarification)
+                                            const noteSection = cm.note
+                                                ? `<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9em;">
+                                                    ${cm.note}
+                                                   </div>`
+                                                : '';
                                             return `
                                             <div style="background: white; border-radius: 6px; padding: 12px; margin-top: 10px; border: 1px solid #e0e0e0;">
                                                 <div style="font-weight: 600; color: #c62828; margin-bottom: 4px;">vs ${cm.competitor}</div>
                                                 ${mentionedIn}
+                                                ${noteSection}
                                                 <div style="font-size: 0.9em; color: #555; margin-bottom: 8px;">${cm.differentiator}</div>
                                                 <div style="background: #fff8e1; padding: 8px; border-radius: 4px; font-size: 0.85em;">
                                                     <strong>Talking Point:</strong> ${cm.talking_point}
