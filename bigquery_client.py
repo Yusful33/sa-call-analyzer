@@ -1695,11 +1695,14 @@ class BigQueryClient:
             return {}
         
         # Known competitors in the LLM observability/ML monitoring space
+        # NOTE: LangChain/LangGraph are frameworks, not competitors - but prospects often
+        # say "LangChain" when they mean "LangSmith" (the observability platform)
         competitor_patterns = {
             "Datadog": ["datadog", "data dog", "dd-trace"],
             "Weights & Biases": ["weights and biases", "weights & biases", "wandb", "w&b"],
-            "LangSmith": ["langsmith", "lang smith", "langchain smith"],
-            "LangChain": ["langchain", "lang chain"],
+            "LangSmith": ["langsmith", "lang smith"],
+            "LangFuse": ["langfuse", "lang fuse"],  # Recently acquired by ClickHouse
+            "LangChain (Framework)": ["langchain", "lang chain", "langgraph", "lang graph"],  # Framework, not competitor - but may indicate LangSmith
             "MLflow": ["mlflow", "ml flow", "databricks mlflow"],
             "Neptune": ["neptune.ai", "neptune ai"],
             "Comet": ["comet ml", "comet.ml", "cometml"],
@@ -1844,10 +1847,20 @@ class BigQueryClient:
                     "talking_point": "Build your evaluation suite once and use it everywhere - not tied to a single framework's ecosystem."
                 }
             },
-            "LangChain": {
+            "LangFuse": {
                 "default": {
-                    "differentiator": "LangChain is an orchestration framework. Arize provides observability that works with LangChain and any other framework you use.",
-                    "talking_point": "LangChain builds your app; Arize monitors it. They're complementary - use LangChain for development, Arize for production visibility."
+                    "differentiator": "LangFuse was recently acquired by ClickHouse. Arize is an independent, well-funded company 100% focused on AI observability with enterprise-grade support and roadmap stability.",
+                    "talking_point": "With ClickHouse acquiring LangFuse, their roadmap priority may shift. Arize is dedicated to AI observability with no competing priorities."
+                },
+                "tracing": {
+                    "differentiator": "LangFuse provides basic open-source tracing. Arize offers enterprise-grade tracing with automatic quality evaluation, production SLAs, and dedicated support.",
+                    "talking_point": "Open-source is great for getting started. For production at scale, you need enterprise observability with guaranteed support."
+                }
+            },
+            "LangChain (Framework)": {
+                "default": {
+                    "differentiator": "⚠️ NOTE: LangChain is an orchestration FRAMEWORK, not a competitor. Arize provides observability that works WITH LangChain. If the prospect mentioned LangChain in a competitive context, they may actually be referring to LangSmith (LangChain's observability platform).",
+                    "talking_point": "LangChain builds your app; Arize monitors it. They're complementary - use LangChain for development, Arize for production visibility. If you're evaluating observability specifically, you may be thinking of LangSmith?"
                 }
             },
             "MLflow": {
