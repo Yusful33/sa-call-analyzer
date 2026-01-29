@@ -803,7 +803,8 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
             overview = bq_client.get_prospect_overview(
                 account_name=request.account_name,
                 domain=request.domain,
-                sfdc_account_id=request.sfdc_account_id
+                sfdc_account_id=request.sfdc_account_id,
+                manual_competitors=request.manual_competitors
             )
             
             # Log results

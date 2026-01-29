@@ -794,6 +794,9 @@ class ProspectOverviewRequest(BaseModel):
     account_name: Optional[str] = None  # Fuzzy match on account name
     domain: Optional[str] = None  # Match on website domain
     sfdc_account_id: Optional[str] = None  # Exact match on Salesforce ID
+    
+    # Manual competitor input - known competitors for this deal
+    manual_competitors: Optional[List[str]] = None  # e.g., ["BrainTrust", "LangSmith"]
 
     def model_post_init(self, __context):
         """Validate that at least one lookup method is provided."""

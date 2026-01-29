@@ -67,7 +67,8 @@ class BigQueryClient:
         self,
         account_name: Optional[str] = None,
         domain: Optional[str] = None,
-        sfdc_account_id: Optional[str] = None
+        sfdc_account_id: Optional[str] = None,
+        manual_competitors: Optional[List[str]] = None
     ) -> ProspectOverview:
         """
         Get comprehensive prospect overview from all data sources.
@@ -76,6 +77,8 @@ class BigQueryClient:
             account_name: Account name to search (fuzzy match)
             domain: Email domain to search (e.g., "acme.com")
             sfdc_account_id: Salesforce Account ID (exact match)
+            manual_competitors: List of known competitors to include in recommendations
+                               (e.g., ["BrainTrust", "LangSmith"])
             
         Returns:
             ProspectOverview with data from all available sources
@@ -199,7 +202,8 @@ class BigQueryClient:
                     fullstory_issues=fullstory_issues, 
                     adoption_milestones=adoption_milestones,
                     gong=gong_summary,
-                    account=salesforce_account
+                    account=salesforce_account,
+                    manual_competitors=manual_competitors
                 )
                 if user_behavior:
                     data_sources.append("user_behavior_analysis")
@@ -1425,7 +1429,8 @@ class BigQueryClient:
         fullstory_issues: List[UserIssueEvent] = None,
         adoption_milestones: List[AdoptionMilestone] = None,
         gong: Optional[GongSummaryData] = None,
-        account: Optional[SalesforceAccountData] = None
+        account: Optional[SalesforceAccountData] = None,
+        manual_competitors: Optional[List[str]] = None
     ) -> Optional[UserBehaviorAnalysis]:
         """Analyze user behavior patterns from Pendo data and FullStory issues."""
         
@@ -1486,7 +1491,8 @@ class BigQueryClient:
             gong=gong,
             account=account,
             fullstory_issues=fullstory_issues,
-            key_workflows=key_workflows
+            key_workflows=key_workflows,
+            manual_competitors=manual_competitors
         )
         
         # Process user issues (errors, dead clicks, frustrated moments)
@@ -1576,7 +1582,8 @@ class BigQueryClient:
         gong: Optional[GongSummaryData],
         account: Optional[SalesforceAccountData],
         fullstory_issues: List[UserIssueEvent],
-        key_workflows: List[str]
+        key_workflows: List[str],
+        manual_competitors: Optional[List[str]] = None
     ) -> List[str]:
         """Build prescriptive recommendations with competitive insights, next steps, and internal contacts."""
         
@@ -1620,12 +1627,23 @@ class BigQueryClient:
                     "description": "Users are monitoring dashboards. Set up custom monitors and alerts to catch issues before they impact production."
                 })
         
-        # --- COMPETITIVE DIFFERENTIATORS (only if competitors mentioned in calls) ---
+        # --- COMPETITIVE DIFFERENTIATORS (from call mentions + manual input) ---
         # Analyze Gong call content for actual competitor mentions
         mentioned_competitors = self._detect_competitors_in_calls(gong)
         
+        # Add manual competitors (user-specified known competitors for this deal)
+        if manual_competitors:
+            for comp in manual_competitors:
+                # Normalize competitor name to match our known competitors
+                comp_normalized = comp.strip()
+                if comp_normalized and comp_normalized not in mentioned_competitors:
+                    mentioned_competitors[comp_normalized] = [{
+                        "call": "Manually flagged",
+                        "context": "Known competitor in this deal (manually added)"
+                    }]
+        
         if mentioned_competitors:
-            # Build competitive messaging only for actually mentioned competitors
+            # Build competitive messaging for all competitors (detected + manual)
             competitive_messaging = self._build_competitive_messaging(
                 mentioned_competitors=mentioned_competitors,
                 key_workflows=key_workflows,
@@ -1633,9 +1651,12 @@ class BigQueryClient:
             )
             
             if competitive_messaging:
+                title = "Competitive positioning"
+                if manual_competitors:
+                    title += " (includes manually flagged competitors)"
                 recommendations.append({
                     "category": "Competitive",
-                    "title": "Competitive positioning (based on call mentions)",
+                    "title": title,
                     "competitive_messaging": competitive_messaging
                 })
         
@@ -1703,7 +1724,7 @@ class BigQueryClient:
             "LangSmith": ["langsmith", "lang smith"],
             "LangFuse": ["langfuse", "lang fuse"],  # Recently acquired by ClickHouse
             "LangChain (Framework)": ["langchain", "lang chain", "langgraph", "lang graph"],  # Framework, not competitor - but may indicate LangSmith
-            "BrainTrust": ["braintrust", "brain trust", "braintrust.dev"],
+            "BrainTrust": ["braintrust", "brain trust", "braintrust.dev", "brain-trust", "braintrust ai", "braintrustdata"],
             "MLflow": ["mlflow", "ml flow", "databricks mlflow"],
             "Neptune": ["neptune.ai", "neptune ai"],
             "Comet": ["comet ml", "comet.ml", "cometml"],

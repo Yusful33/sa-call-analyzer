@@ -842,6 +842,18 @@ The tool will auto-detect the format and identify the SA."
                         Exact match on Salesforce Account ID (most precise).
                     </p>
                 </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="manualCompetitors">Known Competitors (Optional)</label>
+                    <input
+                        type="text"
+                        id="manualCompetitors"
+                        placeholder="e.g., BrainTrust, LangSmith, Datadog"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
+                    >
+                    <p class="help-text">
+                        🎯 Add known competitors in this deal (comma-separated). Competitive positioning will be included even if not mentioned in calls.
+                    </p>
+                </div>
                 <p class="help-text" style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 8px;">
                     📊 <strong>Prospect Overview</strong> pulls data from BigQuery including Salesforce account details, 
                     opportunities, Gong call analytics, Pendo product usage, and FullStory user data.
@@ -1014,6 +1026,7 @@ The tool will auto-detect the format and identify the SA."
             const accountName = document.getElementById('accountName').value;
             const accountDomain = document.getElementById('accountDomain').value;
             const sfdcAccountId = document.getElementById('sfdcAccountId').value;
+            const manualCompetitors = document.getElementById('manualCompetitors').value;
             const analyzeBtn = document.getElementById('analyzeBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -1040,6 +1053,12 @@ The tool will auto-detect the format and identify the SA."
             }
             if (sfdcAccountId.trim()) {
                 requestBody.sfdc_account_id = sfdcAccountId.trim();
+            }
+            // Parse manual competitors (comma-separated)
+            if (manualCompetitors.trim()) {
+                requestBody.manual_competitors = manualCompetitors.split(',')
+                    .map(c => c.trim())
+                    .filter(c => c.length > 0);
             }
 
             try {
