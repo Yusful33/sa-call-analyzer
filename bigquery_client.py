@@ -1703,6 +1703,7 @@ class BigQueryClient:
             "LangSmith": ["langsmith", "lang smith"],
             "LangFuse": ["langfuse", "lang fuse"],  # Recently acquired by ClickHouse
             "LangChain (Framework)": ["langchain", "lang chain", "langgraph", "lang graph"],  # Framework, not competitor - but may indicate LangSmith
+            "BrainTrust": ["braintrust", "brain trust", "braintrust.dev"],
             "MLflow": ["mlflow", "ml flow", "databricks mlflow"],
             "Neptune": ["neptune.ai", "neptune ai"],
             "Comet": ["comet ml", "comet.ml", "cometml"],
@@ -1859,6 +1860,24 @@ class BigQueryClient:
             },
             # NOTE: LangChain (Framework) is handled specially in the loop below - 
             # it shows LangSmith messaging with a clarifying note
+            "BrainTrust": {
+                "default": {
+                    "differentiator": "BrainTrust focuses primarily on evaluation/evals. Arize provides end-to-end LLM observability including tracing, evaluation, monitoring, and production debugging - a complete platform vs. point solution.",
+                    "talking_point": "Evals are critical, but they're just one piece. Arize gives you the full picture - from traces to evals to production monitoring - in one platform."
+                },
+                "evaluation": {
+                    "differentiator": "BrainTrust is strong on offline evals. Arize provides both offline evaluation AND production evaluation with real user traffic, plus automatic quality scoring on every trace.",
+                    "talking_point": "Pre-production evals are important, but what happens when real users interact differently than your test cases? Arize evaluates in production too."
+                },
+                "tracing": {
+                    "differentiator": "BrainTrust has limited tracing capabilities. Arize provides full distributed tracing with automatic span detection, latency analysis, and cost tracking across your entire LLM pipeline.",
+                    "talking_point": "To debug production issues, you need deep tracing - not just eval scores. Arize shows you exactly what happened in each request."
+                },
+                "monitoring": {
+                    "differentiator": "BrainTrust lacks production monitoring. Arize provides real-time dashboards, alerting, drift detection, and SLA tracking for production LLM applications.",
+                    "talking_point": "Evaluations tell you quality at a point in time. Monitoring tells you when quality degrades - before your users notice."
+                }
+            },
             "MLflow": {
                 "default": {
                     "differentiator": "MLflow tracks experiments and models. Arize adds production-grade LLM observability with real-time evaluation, drift detection, and quality monitoring.",
