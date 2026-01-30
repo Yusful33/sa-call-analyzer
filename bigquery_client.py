@@ -1076,6 +1076,11 @@ class BigQueryClient:
         # FullStory org ID for constructing recording URLs
         FULLSTORY_ORG_ID = "o-1HS6XF-na1"
         
+        # FullStory session recording retention is typically 14-30 days depending on plan.
+        # We use 14 days to ensure "View Recording" links actually work.
+        # Older sessions may still have event data but the recordings are no longer available.
+        FULLSTORY_RECORDING_RETENTION_DAYS = 14
+        
         # FullStory URL format: https://app.fullstory.com/ui/ORG_ID/session/DEVICE_ID:SESSION_ID
         # indv_id is the individual/device identifier, session_id is the session
         # Target event types that indicate issues:
@@ -1099,7 +1104,7 @@ class BigQueryClient:
             COUNT(*) as issue_count
         FROM `{self.PROJECT_ID}.fullstory.segment_event` se
         WHERE se.event_type IN ('exception', 'thrash', 'highlight_error', 'abandon', 'change_error', 'console_message_error')
-          AND se.event_start > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+          AND se.event_start > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {FULLSTORY_RECORDING_RETENTION_DAYS} DAY)
           AND LOWER(se.user_email) LIKE @domain_pattern
         GROUP BY se.session_id, se.user_id, se.indv_id, se.user_email, se.user_display_name, 
                  se.event_type, se.event_var_error_kind, page_url, se.event_start
