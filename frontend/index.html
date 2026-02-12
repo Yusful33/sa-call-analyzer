@@ -711,31 +711,50 @@
             margin-top: 5px;
         }
 
+        .tabs-container {
+            display: flex;
+            gap: 0;
+            min-height: 500px;
+        }
+
         .tabs {
             display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #e0e0e0;
+            flex-direction: column;
+            gap: 5px;
+            width: 220px;
+            min-width: 220px;
+            padding-right: 20px;
+            border-right: 2px solid #e0e0e0;
+            margin-right: 20px;
         }
 
         .tab {
-            padding: 12px 24px;
+            padding: 15px 20px;
             background: none;
             border: none;
-            border-bottom: 3px solid transparent;
+            border-left: 3px solid transparent;
             color: #666;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
+            text-align: left;
+            border-radius: 0 8px 8px 0;
         }
 
         .tab:hover {
             color: #667eea;
+            background: #f5f5f5;
         }
 
         .tab.active {
             color: #667eea;
-            border-bottom-color: #667eea;
+            border-left-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .tab-content-wrapper {
+            flex: 1;
+            min-width: 0;
         }
 
         .tab-content {
@@ -752,20 +771,20 @@
         <div class="header">
             <h1>🧘 Stillness</h1>
             <p class="app-summary">
-                Find clarity amidst the noise. Get a comprehensive <strong>360° view of any prospect</strong> 
-                by combining Salesforce CRM data, Gong call insights, Pendo product usage analytics, and FullStory 
-                user behavior. Analyze sales calls to identify gaps and get actionable recommendations. 
-                Everything you need to prepare for your next customer conversation in one place.
+                <strong>360° prospect intelligence:</strong> CRM data, call insights, product usage, and user behavior—unified in one place to prepare for your next customer conversation.
             </p>
         </div>
 
         <div class="card">
-            <div class="tabs">
-                <button class="tab active" onclick="switchTab('prospect')">📊 Prospect Overview</button>
-                <button class="tab" onclick="switchTab('gong')">🔗 Gong URL</button>
-                <button class="tab" onclick="switchTab('manual')">📝 Manual Transcript</button>
-            </div>
+            <div class="tabs-container">
+                <div class="tabs">
+                    <button class="tab" onclick="switchTab('hypothesis')">🔬 Hypothesis Research</button>
+                    <button class="tab active" onclick="switchTab('prospect')">📊 Prospect Overview</button>
+                    <button class="tab" onclick="switchTab('demo')">🎯 Custom Demo Builder</button>
+                    <button class="tab" onclick="switchTab('gong')">🔗 Gong URL</button>
+                </div>
 
+                <div class="tab-content-wrapper">
             <div id="gong-tab" class="tab-content">
                 <div class="input-section">
                     <label for="gongUrl">Gong Call URL</label>
@@ -776,32 +795,6 @@
                     >
                     <p class="help-text">
                         🚀 Paste a Gong call URL and we'll automatically fetch and analyze the transcript.
-                    </p>
-                </div>
-            </div>
-
-            <div id="manual-tab" class="tab-content">
-                <div class="input-section">
-                    <label for="transcript">Call Transcript</label>
-                    <textarea
-                        id="transcript"
-                        placeholder="Paste your call transcript here...
-
-Example format with labels:
-0:16 | Hakan
-Yeah, they're so wealthy.
-
-0:17 | Juan
-Yeah.
-
-Or without labels:
-Yeah, they're so wealthy.
-Yeah.
-
-The tool will auto-detect the format and identify the SA."
-                    ></textarea>
-                    <p class="help-text">
-                        Paste your transcript with or without speaker labels. The AI will analyze it automatically.
                     </p>
                 </div>
             </div>
@@ -848,6 +841,83 @@ The tool will auto-detect the format and identify the SA."
                 </p>
             </div>
 
+            <div id="demo-tab" class="tab-content">
+                <div class="input-section">
+                    <label for="demoAccountName">Prospect / Account Name</label>
+                    <input
+                        type="text"
+                        id="demoAccountName"
+                        placeholder="e.g., Acme Corp, Stripe, Datadog"
+                    >
+                    <p class="help-text">
+                        Enter a prospect name. We'll pull their profile from BigQuery and generate a tailored demo with real traces sent to Arize.
+                    </p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="demoModelSelect">LLM Model for Demo Traces</label>
+                    <select id="demoModelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
+                        <option value="claude-opus-4-6" selected>Claude Opus 4.6</option>
+                        <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                        <option value="gpt-4.1">GPT-4.1</option>
+                        <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    </select>
+                    <p class="help-text">
+                        The LLM model used inside the generated demo traces. Appears in Arize as the model powering the pipeline.
+                    </p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="demoProjectName">Arize Project Name (optional)</label>
+                    <input
+                        type="text"
+                        id="demoProjectName"
+                        placeholder="e.g., acme-demo"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
+                    >
+                    <p class="help-text">
+                        Name of the Arize project where traces will land. Defaults to the prospect name.
+                    </p>
+                </div>
+                <p class="help-text" style="margin-top: 15px; padding: 12px; background: #fff3e0; border-radius: 8px;">
+                    🎯 <strong>Custom Demo Builder</strong> fetches the prospect's full profile from BigQuery,
+                    analyzes Gong call data and key discussion points to identify what they're building,
+                    then runs a matching AI application (RAG, text-to-SQL, chatbot, or agent) instrumented with OpenTelemetry.
+                    Traces are sent to Arize automatically so you can walk through a tailored demo.
+                </p>
+            </div>
+
+            <div id="hypothesis-tab" class="tab-content">
+                <div class="input-section">
+                    <label for="hypCompanyName">Company Name</label>
+                    <input
+                        type="text"
+                        id="hypCompanyName"
+                        placeholder="e.g., Stripe, Datadog, Snowflake"
+                    >
+                    <p class="help-text">
+                        Enter a company name to research their AI/ML signals and generate data-driven hypotheses.
+                    </p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="hypDomain">Domain (Optional)</label>
+                    <input
+                        type="text"
+                        id="hypDomain"
+                        placeholder="e.g., stripe.com"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
+                    >
+                    <p class="help-text">
+                        Company domain for more precise web research.
+                    </p>
+                </div>
+                <p class="help-text" style="margin-top: 15px; padding: 12px; background: #ede7f6; border-radius: 8px;">
+                    🔬 <strong>Hypothesis Research</strong> uses an AI agent to research companies via web search and CRM data,
+                    then generates ranked hypotheses with discovery questions, competitive context, and similar customer proof points.
+                </p>
+            </div>
+
             <div class="input-section" style="margin-bottom: 20px;">
                 <label for="modelSelect">AI Model</label>
                 <select id="modelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
@@ -865,6 +935,8 @@ The tool will auto-detect the format and identify the SA."
                 <button class="btn-primary" onclick="handleAnalyze()" id="analyzeBtn">
                     Analyze
                 </button>
+            </div>
+                </div>
             </div>
         </div>
 
@@ -918,15 +990,22 @@ The tool will auto-detect the format and identify the SA."
 
             // Update tab content
             document.getElementById('gong-tab').classList.toggle('active', tab === 'gong');
-            document.getElementById('manual-tab').classList.toggle('active', tab === 'manual');
             document.getElementById('prospect-tab').classList.toggle('active', tab === 'prospect');
+            document.getElementById('demo-tab').classList.toggle('active', tab === 'demo');
+            document.getElementById('hypothesis-tab').classList.toggle('active', tab === 'hypothesis');
             
-            // Update button text and hide model selector for prospect overview
+            // Update button text and hide model selector for prospect overview / demo / hypothesis
             const analyzeBtn = document.getElementById('analyzeBtn');
             const modelSection = document.getElementById('modelSelect').parentElement;
             if (tab === 'prospect') {
                 analyzeBtn.textContent = 'Get Prospect Overview';
-                modelSection.style.display = 'none';  // Hide model selector for BigQuery queries
+                modelSection.style.display = 'none';
+            } else if (tab === 'demo') {
+                analyzeBtn.textContent = 'Generate Demo Traces';
+                modelSection.style.display = 'none';
+            } else if (tab === 'hypothesis') {
+                analyzeBtn.textContent = 'Research Company';
+                modelSection.style.display = 'none';
             } else {
                 analyzeBtn.textContent = 'Analyze Call';
                 modelSection.style.display = 'block';
@@ -936,9 +1015,337 @@ The tool will auto-detect the format and identify the SA."
         function handleAnalyze() {
             if (currentTab === 'prospect') {
                 analyzeProspect();
+            } else if (currentTab === 'demo') {
+                generateDemo();
+            } else if (currentTab === 'hypothesis') {
+                researchHypothesis();
             } else {
                 analyzeTranscript();
             }
+        }
+
+        async function generateDemo() {
+            const accountName = document.getElementById('demoAccountName').value.trim();
+            if (!accountName) {
+                alert('Please enter a prospect/account name.');
+                return;
+            }
+
+            const projectName = document.getElementById('demoProjectName').value.trim() || accountName.toLowerCase().replace(/\s+/g, '-') + '-demo';
+            const demoModel = document.getElementById('demoModelSelect').value;
+
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const loadingMsg = document.getElementById('loading-message');
+
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            loadingMsg.textContent = 'Starting...';
+
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 600000);
+                const res = await fetch('/api/generate-demo-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_name: accountName,
+                        project_name: projectName,
+                        model: demoModel,
+                    }),
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || `Request failed: ${res.status}`);
+                }
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let data = null;
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const events = buffer.split(/\n\n+/);
+                    buffer = events.pop() || '';
+                    for (const chunk of events) {
+                        const eventLine = chunk.match(/^event: (\w+)/m);
+                        const dataLine = chunk.match(/^data: (.+)/m);
+                        if (!eventLine || !dataLine) continue;
+                        const event = eventLine[1];
+                        const rawData = dataLine[1].trim();
+                        try {
+                            const parsed = JSON.parse(rawData);
+                            if (event === 'progress' && parsed.message) {
+                                loadingMsg.textContent = parsed.message;
+                            } else if (event === 'done') {
+                                data = parsed;
+                                break;
+                            } else if (event === 'error') {
+                                throw new Error(parsed.detail || 'Pipeline failed');
+                            }
+                        } catch (e) {
+                            if (e instanceof SyntaxError) continue;
+                            throw e;
+                        }
+                    }
+                    if (data) break;
+                }
+
+                loading.style.display = 'none';
+                if (!data) {
+                    results.style.display = 'block';
+                    results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> No response received from server.</div>`;
+                    return;
+                }
+
+                results.style.display = 'block';
+                let html = '<h2>🎯 Demo Traces Generated</h2>';
+                html += `<div style="padding: 15px; background: #e8f5e9; border-radius: 8px; margin-bottom: 15px;">`;
+                html += `<p><strong>Prospect:</strong> ${data.prospect_name}</p>`;
+                html += `<p><strong>Industry:</strong> ${data.industry || 'N/A'}</p>`;
+                html += `<p><strong>Use Case:</strong> ${data.use_case}</p>`;
+                if (data.framework) {
+                    html += `<p><strong>Framework:</strong> ${data.framework}</p>`;
+                }
+                if (data.use_case_reasoning) {
+                    html += `<p><strong>Why:</strong> ${data.use_case_reasoning}</p>`;
+                }
+                html += `<p><strong>Model:</strong> ${data.model_used}</p>`;
+                html += `<p><strong>LLM Calls:</strong> ${data.llm_calls_made}</p>`;
+                html += `<p><strong>Arize Project:</strong> ${data.project_name}</p>`;
+                if (data.arize_url) {
+                    html += `<p><a href="${data.arize_url}" target="_blank" rel="noreferrer" style="color: #1976d2; font-weight: bold;">Open in Arize →</a></p>`;
+                }
+                html += `</div>`;
+
+                if (data.result) {
+                    html += `<h3>Pipeline Result</h3>`;
+                    html += `<pre style="background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px;">${JSON.stringify(data.result, null, 2)}</pre>`;
+                }
+
+                html += `<p style="color: #666; margin-top: 15px;">Traces were sent to Arize automatically. Open the link above to walk through the demo.</p>`;
+                results.innerHTML = html;
+            } catch (err) {
+                loading.style.display = 'none';
+                results.style.display = 'block';
+                const isTimeout = err.name === 'AbortError';
+                const msg = isTimeout
+                    ? 'Request timed out after 10 minutes. The demo pipeline can take several minutes. Please try again.'
+                    : (err.message || 'Network error. Please check your connection and try again.');
+                results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${msg}</div>`;
+            }
+        }
+
+        async function researchHypothesis() {
+            const companyName = document.getElementById('hypCompanyName').value.trim();
+            if (!companyName) {
+                alert('Please enter a company name.');
+                return;
+            }
+            const domain = document.getElementById('hypDomain').value.trim() || undefined;
+
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const loadingMsg = document.getElementById('loading-message');
+
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            loadingMsg.textContent = `AI agent researching ${companyName}... This may take 30-60 seconds.`;
+
+            try {
+                const res = await fetch('/api/hypothesis-research', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        company_name: companyName,
+                        company_domain: domain || null,
+                    }),
+                });
+
+                const data = await res.json();
+                loading.style.display = 'none';
+
+                if (!res.ok) {
+                    results.style.display = 'block';
+                    results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${data.detail || JSON.stringify(data)}</div>`;
+                    return;
+                }
+
+                results.style.display = 'block';
+                results.innerHTML = renderHypothesisResults(data);
+            } catch (err) {
+                loading.style.display = 'none';
+                results.style.display = 'block';
+                results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${err.message}</div>`;
+            }
+        }
+
+        function renderHypothesisResults(data) {
+            const r = data.result;
+            const research = r.research || {};
+            const hypotheses = r.hypotheses || [];
+            const competitive = r.competitive_context || {};
+            const reasoning = data.agent_reasoning || [];
+
+            let html = '<h2>🔬 Hypothesis Research Results</h2>';
+
+            // Quality badge
+            const qualityColors = { high: '#4caf50', medium: '#ff9800', low: '#f44336', insufficient: '#9e9e9e' };
+            const quality = r.research_quality || 'unknown';
+            html += `<div style="margin-bottom: 15px;"><span style="background: ${qualityColors[quality] || '#9e9e9e'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600;">Research Quality: ${quality.toUpperCase()}</span></div>`;
+
+            // Warnings
+            if (r.warnings && r.warnings.length > 0) {
+                html += `<div style="padding: 12px; background: #fff3e0; border-radius: 8px; margin-bottom: 15px;">`;
+                r.warnings.forEach(w => { html += `<p style="margin: 4px 0;">⚠️ ${w}</p>`; });
+                html += `</div>`;
+            }
+
+            // Company overview
+            html += `<div style="padding: 15px; background: #e3f2fd; border-radius: 8px; margin-bottom: 15px;">`;
+            html += `<h3 style="margin-top: 0;">Company Overview</h3>`;
+            html += `<p><strong>Company:</strong> ${research.company_name || r.company_name || ''}</p>`;
+            if (research.industry) html += `<p><strong>Industry:</strong> ${research.industry}</p>`;
+            if (research.employee_count) html += `<p><strong>Employees:</strong> ${research.employee_count.toLocaleString()}</p>`;
+            if (research.ai_ml_confidence) html += `<p><strong>AI/ML Confidence:</strong> ${research.ai_ml_confidence}</p>`;
+            if (research.competitive_situation) html += `<p><strong>Competitive Situation:</strong> ${research.competitive_situation}</p>`;
+            if (research.company_summary) html += `<p>${research.company_summary}</p>`;
+            if (research.ai_ml_signals && research.ai_ml_signals.length > 0) {
+                html += `<p style="font-weight: 600; margin-bottom: 8px;">Top Signals:</p>`;
+                research.ai_ml_signals.slice(0, 5).forEach(s => {
+                    const confColor = { high: '#4caf50', medium: '#ff9800', low: '#f44336' }[s.confidence] || '#9e9e9e';
+                    const typeLabel = (s.signal_type || 'signal').replace(/_/g, ' ');
+                    const sourceLink = s.source_url ? ` <a href="${s.source_url}" target="_blank" rel="noopener" style="color: #1565c0; font-size: 12px;">View source &rarr;</a>` : '';
+                    html += `<div style="padding: 10px 14px; background: white; border-left: 4px solid ${confColor}; border-radius: 0 6px 6px 0; margin-bottom: 8px;">`;
+                    html += `<div style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">`;
+                    html += `<span style="background: #e8eaf6; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; text-transform: uppercase;">${typeLabel}</span>`;
+                    html += `<span style="background: ${confColor}; color: white; padding: 2px 8px; border-radius: 8px; font-size: 11px;">${s.confidence}</span>`;
+                    html += `</div>`;
+                    html += `<span style="font-size: 14px; color: #333;">${s.evidence || ''}</span>${sourceLink}`;
+                    html += `</div>`;
+                });
+            }
+            html += `</div>`;
+
+            // Hypotheses
+            if (hypotheses.length > 0) {
+                html += `<h3>Hypotheses (${hypotheses.length})</h3>`;
+                hypotheses.forEach((h, i) => {
+                    const confColor = { high: '#4caf50', medium: '#ff9800', low: '#f44336' }[h.confidence] || '#9e9e9e';
+                    const valueIcons = { reduce_risk: '🛡️', increase_efficiency: '⚡', increase_revenue: '📈', reduce_cost: '💰' };
+                    const valueIcon = valueIcons[h.value_category] || '📋';
+
+                    html += `<div style="padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 12px;">`;
+                    html += `<div style="display: flex; gap: 8px; margin-bottom: 8px;">`;
+                    html += `<span style="background: ${confColor}; color: white; padding: 2px 10px; border-radius: 10px; font-size: 12px;">${h.confidence}</span>`;
+                    html += `<span style="background: #e8eaf6; padding: 2px 10px; border-radius: 10px; font-size: 12px;">${valueIcon} ${(h.value_category || '').replace(/_/g, ' ')}</span>`;
+                    html += `</div>`;
+                    html += `<p style="font-weight: 600; font-size: 15px;">${h.hypothesis}</p>`;
+
+                    // Command of the Message
+                    if (h.current_state) html += `<p><strong>Current State:</strong> ${h.current_state}</p>`;
+                    if (h.future_state) html += `<p><strong>Future State:</strong> ${h.future_state}</p>`;
+                    if (h.required_capabilities && h.required_capabilities.length > 0) {
+                        html += `<p><strong>Required Capabilities:</strong> ${h.required_capabilities.join(', ')}</p>`;
+                    }
+                    if (h.negative_consequences) html += `<p><strong>Risk of Inaction:</strong> ${h.negative_consequences}</p>`;
+
+                    // Supporting signals with links
+                    if (h.supporting_signals && h.supporting_signals.length > 0) {
+                        html += `<div style="margin-top: 10px;"><strong>Supporting Evidence:</strong></div>`;
+                        h.supporting_signals.forEach(sig => {
+                            const sigConf = { high: '#4caf50', medium: '#ff9800', low: '#f44336' }[sig.confidence] || '#9e9e9e';
+                            const sigDesc = sig.description || '';
+                            const sigLink = sig.source_url ? ` <a href="${sig.source_url}" target="_blank" rel="noopener" style="color: #1565c0; font-size: 12px;">View source &rarr;</a>` : '';
+                            html += `<div style="padding: 6px 10px; background: #f5f5f5; border-left: 3px solid ${sigConf}; border-radius: 0 4px 4px 0; margin: 4px 0; font-size: 13px;">`;
+                            html += `${sigDesc}${sigLink}`;
+                            html += `</div>`;
+                        });
+                    }
+
+                    // Discovery questions
+                    if (h.discovery_questions && h.discovery_questions.length > 0) {
+                        html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; font-weight: 600;">Discovery Questions (${h.discovery_questions.length})</summary>`;
+                        html += `<div style="margin-top: 8px;">`;
+                        h.discovery_questions.forEach(q => {
+                            if (typeof q === 'string') {
+                                html += `<div style="padding: 8px 12px; background: #f5f5f5; border-radius: 6px; margin-bottom: 6px;">${q}</div>`;
+                            } else {
+                                html += `<div style="padding: 8px 12px; background: #f5f5f5; border-radius: 6px; margin-bottom: 6px;">`;
+                                html += `<div style="font-weight: 500;">${q.question || JSON.stringify(q)}</div>`;
+                                if (q.rationale) html += `<div style="font-size: 12px; color: #666; margin-top: 4px;">${q.rationale}</div>`;
+                                html += `</div>`;
+                            }
+                        });
+                        html += `</div></details>`;
+                    }
+
+                    // Similar customers
+                    if (h.similar_customers && h.similar_customers.length > 0) {
+                        html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; font-weight: 600;">Similar Customers (${h.similar_customers.length})</summary>`;
+                        html += `<div style="margin-top: 8px;">`;
+                        h.similar_customers.forEach(c => {
+                            if (typeof c === 'string') {
+                                html += `<div style="padding: 8px 12px; background: #f5f5f5; border-radius: 6px; margin-bottom: 6px;">${c}</div>`;
+                            } else {
+                                html += `<div style="padding: 8px 12px; background: #f5f5f5; border-radius: 6px; margin-bottom: 6px;">`;
+                                html += `<div style="font-weight: 500;">${c.customer_name || c.name || c.company || 'Unknown'}</div>`;
+                                const details = [c.industry, c.use_case].filter(Boolean).join(' &middot; ');
+                                if (details) html += `<div style="font-size: 12px; color: #666; margin-top: 2px;">${details}</div>`;
+                                if (c.outcome) html += `<div style="font-size: 12px; color: #4caf50; margin-top: 2px;">${c.outcome}</div>`;
+                                html += `</div>`;
+                            }
+                        });
+                        html += `</div></details>`;
+                    }
+
+                    html += `</div>`;
+                });
+            }
+
+            // Competitive context
+            if (competitive && competitive.situation) {
+                html += `<div style="padding: 15px; background: #fce4ec; border-radius: 8px; margin-bottom: 15px;">`;
+                html += `<h3 style="margin-top: 0;">Competitive Context</h3>`;
+                html += `<p><strong>Situation:</strong> ${competitive.situation.replace(/_/g, ' ')}</p>`;
+                if (competitive.detected_competitor) html += `<p><strong>Detected Competitor:</strong> ${competitive.detected_competitor}</p>`;
+                if (competitive.positioning) html += `<p style="margin: 10px 0;">${competitive.positioning}</p>`;
+                if (competitive.advantages && competitive.advantages.length > 0) {
+                    html += `<p style="font-weight: 600; margin-top: 10px;">Advantages:</p><ul style="margin: 4px 0 8px 20px;">`;
+                    competitive.advantages.forEach(a => { html += `<li style="margin-bottom: 4px;">${a}</li>`; });
+                    html += `</ul>`;
+                }
+                if (competitive.watch_outs && competitive.watch_outs.length > 0) {
+                    html += `<p style="font-weight: 600;">Watch Outs:</p><ul style="margin: 4px 0 8px 20px;">`;
+                    competitive.watch_outs.forEach(w => { html += `<li style="margin-bottom: 4px;">${w}</li>`; });
+                    html += `</ul>`;
+                }
+                if (competitive.key_questions && competitive.key_questions.length > 0) {
+                    html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; font-weight: 600;">Key Questions (${competitive.key_questions.length})</summary><ul style="margin-top: 6px;">`;
+                    competitive.key_questions.forEach(q => { html += `<li style="margin-bottom: 4px;">${q}</li>`; });
+                    html += `</ul></details>`;
+                }
+                html += `</div>`;
+            }
+
+            // Agent reasoning
+            if (reasoning.length > 0) {
+                html += `<details style="margin-top: 15px;"><summary style="cursor: pointer; font-weight: 600;">Agent Reasoning (${reasoning.length} steps)</summary><ol style="margin-top: 8px;">`;
+                reasoning.forEach(step => { html += `<li style="margin-bottom: 4px; color: #555;">${step}</li>`; });
+                html += `</ol></details>`;
+            }
+
+            if (r.processing_time_seconds) {
+                html += `<p style="color: #999; margin-top: 15px; font-size: 13px;">Research completed in ${r.processing_time_seconds.toFixed(1)}s</p>`;
+            }
+
+            return html;
         }
 
         // Progress update helper functions

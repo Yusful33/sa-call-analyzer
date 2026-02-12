@@ -24,6 +24,7 @@ from arize.otel import register
 # from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from openinference.instrumentation.litellm import LiteLLMInstrumentor
+from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
 from span_processor_fixed import CleaningSpanProcessor
 
@@ -122,6 +123,14 @@ def setup_observability(
                 tracer_provider=tracer_provider,
                 skip_dep_check=True
             )
+
+        # Instrument OpenAI (for direct OpenAI SDK calls)
+        openai_instrumentor = OpenAIInstrumentor()
+        openai_instrumentor.instrument(
+            tracer_provider=tracer_provider,
+            skip_dep_check=True
+        )
+        print("   ✅ OpenAI instrumentor initialized")
 
         # Instrument LangChain (AFTER processor registered)
         langchain_instrumentor = LangChainInstrumentor()

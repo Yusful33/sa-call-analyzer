@@ -29,7 +29,6 @@ from models import (
 from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
-from opentelemetry import context as trace_context
 from observability import force_flush_spans
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
@@ -41,133 +40,60 @@ load_dotenv()
 
 class TokenTrackingCallback(BaseCallbackHandler):
     """
-    LangChain callback that captures token usage and creates LLM spans with cost tracking.
-    This ensures LLM calls are visible in Arize even if LangChainInstrumentor doesn't create spans.
+    LangChain callback that enriches the current span with token usage and cost data.
+
+    IMPORTANT: This callback does NOT create its own spans or manipulate the OTel
+    context. Span creation is handled by the auto-instrumentors (LangChain, LiteLLM,
+    OpenAI). Creating competing spans here was the root cause of broken parent-span
+    propagation (multiple traces per interaction).
     """
-    
+
     def __init__(self):
-        self.tracer = trace.get_tracer("llm-tracking")
-        self.active_spans = {}  # Track spans by run_id: {span, start_time}
-    
+        pass
+
     def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], *, run_id: UUID, **kwargs: Any) -> None:
-        """Create LLM span when LLM call starts."""
-        current_span = trace.get_current_span()
-        
-        # Extract model name from serialized config if available
+        """Log LLM call start for debugging."""
         model_name = "unknown"
         if serialized:
             model_name = serialized.get("id", serialized.get("_type", ["unknown"])[-1] if isinstance(serialized.get("_type"), list) else "unknown")
-        
-        # Create LLM span as child of current span
-        if current_span and current_span.is_recording():
-            llm_span = self.tracer.start_span(
-                f"llm.{model_name}",
-                attributes={
-                    "openinference.span.kind": "llm",
-                    "llm.model_name": model_name,
-                    "llm.system": "litellm",  # Will be updated if we detect otherwise
-                    "input.value": json.dumps(prompts) if prompts else "",
-                    "input.mime_type": "application/json",
-                }
-            )
-            
-            # Make it the current span
-            context = trace.set_span_in_context(llm_span)
-            token = trace_context.attach(context)
-            
-            from opentelemetry.util.types import time_ns
-            self.active_spans[run_id] = {
-                "span": llm_span,
-                "context_token": token,
-                "start_time": time_ns(),
-            }
-            
-            print(f"🔵 LLM call started: {model_name} (run_id={run_id})")
-    
+        print(f"🔵 LLM call started: {model_name} (run_id={run_id})")
+
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
-        """Capture token usage when LLM call completes and update LLM span."""
-        span_info = self.active_spans.pop(run_id, None)
-        
-        if response.llm_output:
-            token_usage = response.llm_output.get("token_usage", {})
-            model_name = response.llm_output.get("model_name", "unknown")
-            
-            # Also check for usage in different formats
-            if not token_usage and "usage" in response.llm_output:
-                token_usage = response.llm_output["usage"]
-            
-            prompt_tokens = token_usage.get("prompt_tokens", 0)
-            completion_tokens = token_usage.get("completion_tokens", 0)
-            total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
-            
-            if span_info:
-                # Update the span we created in on_llm_start
-                llm_span = span_info["span"]
-                
-                # Update model name if we got it from response
-                llm_span.set_attribute("llm.model_name", model_name)
-                llm_span.set_attribute("llm.token_count.prompt", prompt_tokens)
-                llm_span.set_attribute("llm.token_count.completion", completion_tokens)
-                llm_span.set_attribute("llm.token_count.total", total_tokens)
-                
-                # Add output if available
-                if response.generations and len(response.generations) > 0:
-                    output_text = str(response.generations[0][0].text) if response.generations[0] else ""
-                    llm_span.set_attribute("output.value", output_text[:5000] + "..." if len(output_text) > 5000 else output_text)
-                    llm_span.set_attribute("output.mime_type", "text/plain")
-                
-                # Add cost tracking using OpenInference semantic conventions
-                try:
-                    from tracing_enhancements import add_cost_attributes_to_span
-                    add_cost_attributes_to_span(
-                        llm_span,
-                        model_name,
-                        prompt_tokens,
-                        completion_tokens,
-                        total_tokens
-                    )
-                    cost = llm_span._attributes.get('llm.cost.total', 0) if hasattr(llm_span, '_attributes') else 0
-                    print(f"✅ LLM span completed: {model_name} ({total_tokens} tokens, ${cost:.6f})")
-                except Exception as e:
-                    print(f"⚠️  Error adding cost attributes: {e}")
-                
-                # Add event for visibility
-                llm_span.add_event("llm_token_usage", {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "model": model_name
-                })
-                
-                llm_span.set_status(Status(StatusCode.OK))
-                
-                # End the span and detach context
-                llm_span.end()
-                trace_context.detach(span_info["context_token"])
-            else:
-                # No span was created in on_llm_start, try to add to current span
-                current_span = trace.get_current_span()
-                if current_span and current_span.is_recording():
-                    current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
-                    current_span.set_attribute("llm.token_count.completion", completion_tokens)
-                    current_span.set_attribute("llm.token_count.total", total_tokens)
-                    current_span.set_attribute("llm.model_name", model_name)
-                    
-                    try:
-                        from tracing_enhancements import add_cost_attributes_to_span
-                        add_cost_attributes_to_span(
-                            current_span,
-                            model_name,
-                            prompt_tokens,
-                            completion_tokens,
-                            total_tokens
-                        )
-                    except Exception as e:
-                        print(f"⚠️  Error adding cost attributes: {e}")
-            
-            print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total ({model_name})")
-        else:
-            print(f"⚠️  on_llm_end called but no span_info found for run_id={run_id}")
+        """Enrich the current span with token usage and cost attributes."""
+        if not response.llm_output:
+            return
+
+        token_usage = response.llm_output.get("token_usage", {})
+        model_name = response.llm_output.get("model_name", "unknown")
+
+        if not token_usage and "usage" in response.llm_output:
+            token_usage = response.llm_output["usage"]
+
+        prompt_tokens = token_usage.get("prompt_tokens", 0)
+        completion_tokens = token_usage.get("completion_tokens", 0)
+        total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+        # Enrich the current span (created by auto-instrumentor) with cost data
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
+            current_span.set_attribute("llm.token_count.completion", completion_tokens)
+            current_span.set_attribute("llm.token_count.total", total_tokens)
+            current_span.set_attribute("llm.model_name", model_name)
+
+            try:
+                from tracing_enhancements import add_cost_attributes_to_span
+                add_cost_attributes_to_span(
+                    current_span,
+                    model_name,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens
+                )
+            except Exception as e:
+                print(f"⚠️  Error adding cost attributes: {e}")
+
+        print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total ({model_name})")
 
 
 class SACallAnalysisCrew:
@@ -1152,72 +1078,84 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                     context=[technical_task, sales_methodology_task]
                 )
 
-                # Create and run the analysis crew
-                with tracer.start_as_current_span("crew_analysis_execution") as crew_span:
-                    crew_span.set_attribute("openinference.span.kind", "agent")
-                    crew_span.set_attribute("crew.agent_count", 3)
-                    crew_span.set_attribute("crew.task_count", 3)
+                # ============================================================
+                # Run each agent as its own Crew so each gets a distinct span
+                # ============================================================
 
-                    # OpenInference input - structured and readable format
-                    # Extract first few exchanges for preview
-                    all_lines = transcript.split('\n')
-                    transcript_lines = all_lines[:10]  # First 10 lines
-                    transcript_preview = '\n'.join(transcript_lines)
-                    remaining_lines = len(all_lines) - 10
-                    if remaining_lines > 0:
-                        transcript_preview += f"\n\n... ({remaining_lines} more lines)"
+                # --- Agent 1: Technical Evaluator ---
+                with tracer.start_as_current_span("agent.technical_evaluator") as tech_span:
+                    tech_span.set_attribute("openinference.span.kind", "agent")
+                    tech_span.set_attribute("agent.name", "technical_evaluator")
+                    tech_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                    tech_span.set_attribute("input.mime_type", "text/plain")
 
-                    crew_span.set_attribute("input.value", json.dumps({
-                        "transcript_stats": {
-                            "total_length": len(transcript),
-                            "line_count": len(all_lines),
-                            "speaker_count": len(speakers)
-                        },
-                        "transcript_preview": transcript_preview
-                    }, indent=2))
-                    crew_span.set_attribute("input.mime_type", "application/json")
-
-                    # Add detailed task information as events
-                    crew_span.add_event("task_1_technical_evaluation", {
-                        "agent": "Senior Technical Architect & Evaluator",
-                        "objective": "Assess technical depth and accuracy"
-                    })
-                    crew_span.add_event("task_2_sales_methodology", {
-                        "agent": "Sales Methodology & Discovery Expert",
-                        "objective": "Evaluate discovery and Command of Message"
-                    })
-                    crew_span.add_event("task_3_report_compilation", {
-                        "agent": "Executive Performance Coach & Report Writer",
-                        "objective": "Synthesize feedback into actionable report"
-                    })
-
-                    crew_span.add_event("creating_analysis_crew")
-
-                    analysis_crew = Crew(
-                        agents=[
-                            agents['technical_evaluator'],
-                            agents['sales_methodology_expert'],
-                            agents['report_compiler']
-                        ],
-                        tasks=[
-                            technical_task,
-                            sales_methodology_task,
-                            compile_task
-                        ],
+                    tech_crew = Crew(
+                        agents=[agents['technical_evaluator']],
+                        tasks=[technical_task],
                         process=Process.sequential,
-                        verbose=True
+                        verbose=True,
                     )
+                    tech_result = tech_crew.kickoff()
+                    tech_output = tech_result.raw if hasattr(tech_result, 'raw') else str(tech_result)
+                    tech_span.set_attribute("output.value", tech_output[:5000])
+                    tech_span.set_attribute("output.mime_type", "text/plain")
+                    tech_span.set_status(Status(StatusCode.OK))
+                    print(f"✅ Technical evaluation complete ({len(tech_output)} chars)")
 
-                    # Execute the crew with detailed progress tracking
-                    crew_span.add_event("starting_crew_kickoff")
-                    crew_span.set_attribute("execution.status", "in_progress")
+                # --- Agent 2: Sales Methodology Expert ---
+                with tracer.start_as_current_span("agent.sales_methodology_expert") as sales_span:
+                    sales_span.set_attribute("openinference.span.kind", "agent")
+                    sales_span.set_attribute("agent.name", "sales_methodology_expert")
+                    sales_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                    sales_span.set_attribute("input.mime_type", "text/plain")
 
-                    final_report = analysis_crew.kickoff()
-                    
-                    # Use .raw to get clean output without terminal formatting
-                    # str(final_report) includes box-drawing characters that break JSON parsing
+                    sales_crew = Crew(
+                        agents=[agents['sales_methodology_expert']],
+                        tasks=[sales_methodology_task],
+                        process=Process.sequential,
+                        verbose=True,
+                    )
+                    sales_result = sales_crew.kickoff()
+                    sales_output = sales_result.raw if hasattr(sales_result, 'raw') else str(sales_result)
+                    sales_span.set_attribute("output.value", sales_output[:5000])
+                    sales_span.set_attribute("output.mime_type", "text/plain")
+                    sales_span.set_status(Status(StatusCode.OK))
+                    print(f"✅ Sales methodology evaluation complete ({len(sales_output)} chars)")
+
+                # --- Agent 3: Report Compiler ---
+                # Inject the prior agent outputs into the task description
+                # so the compiler has full context (replaces CrewAI's context= param)
+                compile_task_with_context = Task(
+                    description=f"""{compile_task.description}
+
+                    ===== TECHNICAL EVALUATION OUTPUT =====
+                    {tech_output}
+
+                    ===== SALES METHODOLOGY OUTPUT =====
+                    {sales_output}
+                    """,
+                    agent=agents['report_compiler'],
+                    expected_output=compile_task.expected_output,
+                )
+
+                with tracer.start_as_current_span("agent.report_compiler") as compile_span:
+                    compile_span.set_attribute("openinference.span.kind", "agent")
+                    compile_span.set_attribute("agent.name", "report_compiler")
+                    compile_span.set_attribute("input.value", json.dumps({
+                        "technical_output_length": len(tech_output),
+                        "sales_output_length": len(sales_output),
+                    }))
+                    compile_span.set_attribute("input.mime_type", "application/json")
+
+                    compile_crew = Crew(
+                        agents=[agents['report_compiler']],
+                        tasks=[compile_task_with_context],
+                        process=Process.sequential,
+                        verbose=True,
+                    )
+                    final_report = compile_crew.kickoff()
                     final_report_text = final_report.raw if hasattr(final_report, 'raw') else str(final_report)
-                    
+
                     # Check if CrewAI already parsed the JSON for us
                     if hasattr(final_report, 'json_dict') and final_report.json_dict:
                         print(f"✅ Using pre-parsed json_dict from CrewOutput")
@@ -1225,54 +1163,10 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                     else:
                         analysis_data_from_crew = None
 
-                    crew_span.add_event("crew_kickoff_completed", {
-                        "report.length": len(final_report_text),
-                        "tasks_completed": 3
-                    })
-                    crew_span.set_attribute("execution.status", "completed")
-
-                    # OpenInference output - formatted structured report
-                    # Create a summary-first format for better readability
-                    try:
-                        # Try to parse the report as JSON for structured output
-                        json_start = final_report_text.find('{')
-                        json_end = final_report_text.rfind('}') + 1
-                        if json_start >= 0 and json_end > json_start:
-                            parsed_report = json.loads(final_report_text[json_start:json_end])
-
-                            # Create a readable summary format
-                            formatted_output = {
-                                "summary": {
-                                    "call_summary": parsed_report.get("call_summary", "N/A"),
-                                    "insight_count": len(parsed_report.get("top_insights", [])),
-                                    "strength_count": len(parsed_report.get("strengths", [])),
-                                    "improvement_count": len(parsed_report.get("improvement_areas", []))
-                                },
-                                "top_insights": [
-                                    {
-                                        "category": insight.get("category"),
-                                        "severity": insight.get("severity"),
-                                        "timestamp": insight.get("timestamp"),
-                                        "what_happened": insight.get("what_happened", "")[:200] + "..." if len(insight.get("what_happened", "")) > 200 else insight.get("what_happened", ""),
-                                        "why_it_matters": insight.get("why_it_matters", "")[:200] + "..." if len(insight.get("why_it_matters", "")) > 200 else insight.get("why_it_matters", ""),
-                                        "better_approach": insight.get("better_approach", "")[:200] + "..." if len(insight.get("better_approach", "")) > 200 else insight.get("better_approach", ""),
-                                    }
-                                    for insight in parsed_report.get("top_insights", [])
-                                ],
-                                "strengths": parsed_report.get("strengths", []),
-                                "improvement_areas": parsed_report.get("improvement_areas", []),
-                                "key_moments_count": len(parsed_report.get("key_moments", []))
-                            }
-
-                            crew_span.set_attribute("output.value", json.dumps(formatted_output, indent=2))
-                        else:
-                            # Fallback to raw text if JSON parsing fails
-                            crew_span.set_attribute("output.value", final_report_text[:5000] + "..." if len(final_report_text) > 5000 else final_report_text)
-                    except (json.JSONDecodeError, Exception):
-                        # If parsing fails, use truncated raw text
-                        crew_span.set_attribute("output.value", final_report_text[:5000] + "..." if len(final_report_text) > 5000 else final_report_text)
-
-                    crew_span.set_attribute("output.mime_type", "application/json")
+                    compile_span.set_attribute("output.value", final_report_text[:5000])
+                    compile_span.set_attribute("output.mime_type", "application/json")
+                    compile_span.set_status(Status(StatusCode.OK))
+                    print(f"✅ Report compilation complete ({len(final_report_text)} chars)")
 
                     # Parse JSON from the final report (inside crew_analysis_execution)
                     with tracer.start_as_current_span("parse_crew_report") as parse_span:
@@ -1454,7 +1348,7 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                         parse_span.set_attribute("output.mime_type", "application/json")
                         parse_span.set_status(Status(StatusCode.OK))
 
-                    # Create separate child spans for each insight (inside crew_span)
+                    # Create separate child spans for each insight
                 for idx, insight in enumerate(result.top_insights):
                     with tracer.start_as_current_span(
                         f"insight_{idx+1}_{insight.category.lower().replace(' ', '_')}",
@@ -1464,7 +1358,6 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                             "insight.category": insight.category,
                             "insight.severity": insight.severity,
                             "insight.timestamp": insight.timestamp or "unknown",
-                            # Full insight as output
                             "output.value": json.dumps({
                                 "category": insight.category,
                                 "severity": insight.severity,
@@ -1482,9 +1375,6 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                             "category": insight.category,
                             "timestamp": insight.timestamp or "unknown"
                         })
-
-                    # Mark crew_analysis_execution as complete
-                    crew_span.set_status(Status(StatusCode.OK))
 
                 # Add result metadata to analysis_span (parent span)
                 analysis_span.set_attributes({

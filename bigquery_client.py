@@ -128,10 +128,18 @@ class BigQueryClient:
                 errors.append(f"Opportunities error: {str(e)}")
         
         # 3. Fetch Gong call data with transcripts and participants
+        # Use ALL matching SFDC account IDs since Gong calls may be linked
+        # to different account records for the same company (e.g. duplicates)
         gong_summary = None
         if salesforce_account:
             try:
-                gong_summary = self._get_gong_summary(salesforce_account.id)
+                all_sfdc_ids = self._get_all_matching_sfdc_ids(
+                    account_name=account_name,
+                    domain=domain,
+                    sfdc_account_id=sfdc_account_id,
+                    primary_id=salesforce_account.id,
+                )
+                gong_summary = self._get_gong_summary(all_sfdc_ids)
                 if gong_summary and gong_summary.total_calls > 0:
                     data_sources.append("gong")
             except Exception as e:
@@ -235,6 +243,50 @@ class BigQueryClient:
             errors=errors
         )
     
+    def _get_all_matching_sfdc_ids(
+        self,
+        account_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        sfdc_account_id: Optional[str] = None,
+        primary_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return all SFDC account IDs that match the lookup criteria.
+
+        Companies often have duplicate Salesforce records. Gong calls may be
+        linked to any of them, so we need all IDs to avoid missing call data.
+        """
+        conditions = []
+        params = []
+
+        if sfdc_account_id:
+            conditions.append("a.id = @sfdc_id")
+            params.append(bigquery.ScalarQueryParameter("sfdc_id", "STRING", sfdc_account_id))
+        if domain:
+            conditions.append("LOWER(a.website) LIKE @domain_pattern")
+            params.append(bigquery.ScalarQueryParameter("domain_pattern", "STRING", f"%{domain.lower()}%"))
+        if account_name:
+            conditions.append("LOWER(a.name) LIKE @name_pattern")
+            params.append(bigquery.ScalarQueryParameter("name_pattern", "STRING", f"%{account_name.lower()}%"))
+
+        if not conditions:
+            return [primary_id] if primary_id else []
+
+        query = f"""
+        SELECT DISTINCT a.id
+        FROM `{self.PROJECT_ID}.salesforce.account` a
+        WHERE ({" OR ".join(conditions)})
+          AND a.is_deleted = FALSE
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        results = self.client.query(query, job_config=job_config).result()
+        ids = [row.id for row in results]
+
+        # Ensure primary_id is always included
+        if primary_id and primary_id not in ids:
+            ids.append(primary_id)
+
+        return ids if ids else ([primary_id] if primary_id else [])
+
     def _get_salesforce_account(
         self,
         account_name: Optional[str] = None,
@@ -405,13 +457,20 @@ class BigQueryClient:
         
         return opportunities
     
-    def _get_gong_summary(self, sfdc_account_id: str) -> Optional[GongSummaryData]:
-        """Fetch comprehensive Gong call analytics with transcripts and participants."""
-        
+    def _get_gong_summary(self, sfdc_account_ids: str | List[str]) -> Optional[GongSummaryData]:
+        """Fetch comprehensive Gong call analytics with transcripts and participants.
+
+        Accepts a single SFDC account ID or a list of IDs to handle duplicate
+        Salesforce records where Gong calls may be linked to different accounts.
+        """
+        # Normalize to list
+        if isinstance(sfdc_account_ids, str):
+            sfdc_account_ids = [sfdc_account_ids]
+
         # Get recent calls with full details (deduplicated by conversation_key)
         calls_query = f"""
         WITH ranked_calls AS (
-            SELECT 
+            SELECT
                 c.CONVERSATION_KEY as conversation_key,
                 c.CALL_URL as call_url,
                 c.TITLE as call_title,
@@ -430,12 +489,12 @@ class BigQueryClient:
                 s.LONGEST_CUSTOMER_STORY as longest_customer_story,
                 ROW_NUMBER() OVER (PARTITION BY c.CONVERSATION_KEY ORDER BY c.EFFECTIVE_START_DATETIME DESC) as rn
             FROM `{self.PROJECT_ID}.gong.CALLS` c
-            JOIN `{self.PROJECT_ID}.gong.CONVERSATION_CONTEXTS` ctx 
+            JOIN `{self.PROJECT_ID}.gong.CONVERSATION_CONTEXTS` ctx
                 ON c.CONVERSATION_KEY = ctx.CONVERSATION_KEY
-            LEFT JOIN `{self.PROJECT_ID}.gong.INTERACTION_STATS` s 
+            LEFT JOIN `{self.PROJECT_ID}.gong.INTERACTION_STATS` s
                 ON c.CONVERSATION_KEY = s.CONVERSATION_KEY
-            WHERE LOWER(ctx.OBJECT_TYPE) = 'account' 
-              AND ctx.OBJECT_ID = @account_id
+            WHERE LOWER(ctx.OBJECT_TYPE) = 'account'
+              AND ctx.OBJECT_ID IN UNNEST(@account_ids)
               AND (c.IS_DELETED = false OR c.IS_DELETED IS NULL)
         )
         SELECT * EXCEPT(rn)
@@ -444,10 +503,10 @@ class BigQueryClient:
         ORDER BY call_date DESC
         LIMIT 20
         """
-        
+
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
-                bigquery.ScalarQueryParameter("account_id", "STRING", sfdc_account_id)
+                bigquery.ArrayQueryParameter("account_ids", "STRING", sfdc_account_ids)
             ]
         )
         

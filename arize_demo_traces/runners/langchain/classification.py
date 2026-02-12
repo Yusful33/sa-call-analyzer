@@ -1,0 +1,145 @@
+"""
+LangChain LCEL classification pipeline with guardrails.
+Uses manual OTel spans with LCEL chains (prompt | llm | StrOutputParser) for each step.
+Auto-instrumented by LangChainInstrumentor for authentic LangChain trace patterns.
+"""
+
+import random
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+from ...cost_guard import CostGuard
+from ...llm import get_chat_llm
+from ...trace_enrichment import run_guardrail
+from ...use_cases.classification import (
+    QUERIES,
+    GUARDRAILS,
+    SYSTEM_PROMPT_CLASSIFY,
+    SYSTEM_PROMPT_SENTIMENT,
+    SYSTEM_PROMPT_EXTRACT,
+    SYSTEM_PROMPT_RESPONSE,
+)
+
+
+def run_classification(
+    query: str | None = None,
+    model: str = "gpt-4o-mini",
+    guard: CostGuard | None = None,
+    tracer_provider=None,
+) -> dict:
+    """Execute a LangChain LCEL classification pipeline with guardrails."""
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
+
+    provider = tracer_provider or trace.get_tracer_provider()
+    tracer = provider.get_tracer("demo.classification")
+
+    if not query:
+        query = random.choice(QUERIES)
+
+    llm = get_chat_llm(model, temperature=0)
+
+    with tracer.start_as_current_span(
+        "classification_pipeline",
+        attributes={
+            "openinference.span.kind": "CHAIN",
+            "input.value": query,
+            "input.mime_type": "text/plain",
+        },
+    ) as pipeline_span:
+
+        # === GUARDRAILS ===
+        with tracer.start_as_current_span(
+            "validate_input",
+            attributes={"openinference.span.kind": "GUARDRAIL", "input.value": query},
+        ) as guard_span:
+            for g in GUARDRAILS:
+                run_guardrail(
+                    tracer, g["name"], query, llm, guard,
+                    system_prompt=g["system_prompt"],
+                )
+            guard_span.set_attribute("output.value", "All checks passed")
+            guard_span.set_attribute("guardrail.passed", True)
+            guard_span.set_status(Status(StatusCode.OK))
+
+        # === CLASSIFY TICKET ===
+        with tracer.start_as_current_span(
+            "classify_ticket",
+            attributes={"openinference.span.kind": "CHAIN", "input.value": query},
+        ) as step:
+            classify_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT_CLASSIFY),
+                ("human", "{query}"),
+            ])
+            classify_chain = classify_prompt | llm | StrOutputParser()
+            if guard:
+                guard.check()
+            category = classify_chain.invoke({"query": query})
+            step.set_attribute("output.value", category)
+            step.set_status(Status(StatusCode.OK))
+
+        # === ANALYZE SENTIMENT ===
+        with tracer.start_as_current_span(
+            "analyze_sentiment",
+            attributes={"openinference.span.kind": "CHAIN", "input.value": query},
+        ) as step:
+            sentiment_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT_SENTIMENT),
+                ("human", "{query}"),
+            ])
+            sentiment_chain = sentiment_prompt | llm | StrOutputParser()
+            if guard:
+                guard.check()
+            sentiment = sentiment_chain.invoke({"query": query})
+            step.set_attribute("output.value", sentiment)
+            step.set_status(Status(StatusCode.OK))
+
+        # === EXTRACT ENTITIES ===
+        with tracer.start_as_current_span(
+            "extract_entities",
+            attributes={"openinference.span.kind": "CHAIN", "input.value": query},
+        ) as step:
+            extract_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT_EXTRACT),
+                ("human", "{query}"),
+            ])
+            extract_chain = extract_prompt | llm | StrOutputParser()
+            if guard:
+                guard.check()
+            entities = extract_chain.invoke({"query": query})
+            step.set_attribute("output.value", entities)
+            step.set_status(Status(StatusCode.OK))
+
+        # === GENERATE RESPONSE ===
+        with tracer.start_as_current_span(
+            "generate_response",
+            attributes={"openinference.span.kind": "CHAIN", "input.value": query},
+        ) as step:
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT_RESPONSE),
+                ("human", "{query}"),
+            ])
+            response_chain = response_prompt | llm | StrOutputParser()
+            if guard:
+                guard.check()
+            response = response_chain.invoke({
+                "query": query,
+                "classification": category,
+                "sentiment": sentiment,
+                "entities": entities,
+            })
+            step.set_attribute("output.value", response)
+            step.set_status(Status(StatusCode.OK))
+
+        pipeline_span.set_attribute("output.value", response)
+        pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_status(Status(StatusCode.OK))
+
+    return {
+        "query": query,
+        "category": category,
+        "sentiment": sentiment,
+        "entities": entities,
+        "response": response,
+    }
