@@ -16,6 +16,7 @@ services:
       - LITELLM_API_KEY=dummy
       - MODEL_NAME=${MODEL_NAME:-claude-3-5-haiku-20241022}
       - GONG_MCP_URL=http://gong-mcp:8080
+      - CREWAI_TRACING_ENABLED=false
       # Note: ARIZE_API_KEY and ARIZE_SPACE_ID are loaded from .env via env_file above
       # For local development with uv: Set these as system environment variables
       # The .env file should match your actual environment variables for documentation
@@ -23,6 +24,7 @@ services:
       - GONG_SECRET_KEY=${GONG_SECRET_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # OPENAI_BASE_URL removed — calls go direct to OpenAI/Anthropic
       # Hypothesis Research tool
       - BRAVE_API_KEY=${BRAVE_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-20250514}
@@ -71,8 +73,8 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     ports:
       - "4000:4000"
-    env_file:
-      - .env  # Explicitly load .env file from project root
+    # Note: do NOT use env_file here — .env contains OPENAI_BASE_URL which
+    # would make LiteLLM proxy OpenAI calls to itself (infinite loop)
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -81,7 +83,7 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /health HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/4000'"]
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /health/liveness HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/4000'"]
       interval: 30s
       timeout: 10s
       retries: 3

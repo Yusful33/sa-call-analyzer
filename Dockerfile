@@ -14,6 +14,10 @@ COPY . .
 # Install uv for faster installs, then install dependencies
 RUN pip install uv && uv pip install --system .
 
+# Disable CrewAI's interactive tracing prompt (adds 20s delay per crew)
+RUN mkdir -p /root/.config/crewai && \
+    echo '{"tracing_enabled": false, "traces_viewed": true}' > /root/.config/crewai/settings.json
+
 # Default port
 EXPOSE 8080
 
@@ -52,6 +56,8 @@ else\n\
 fi\n\
 \n\
 echo "=== Starting uvicorn ===" \n\
+# Unset proxy base URLs so LLM calls go direct to providers\n\
+unset OPENAI_BASE_URL\n\
 exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 

@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import contextvars
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
 from crewai import Agent, Task, Crew, Process
 from models import (
@@ -119,37 +121,34 @@ class SACallAnalysisCrew:
         self._configure_llm(self.default_model)
     
     def _configure_llm(self, model_name: str):
-        """Configure the LLM with the specified model."""
-        # Create callback manager explicitly to ensure instrumentation hooks in
-        # This ensures LangChainInstrumentor can properly track calls
+        """Configure the LLM via LiteLLM proxy (OpenAI-compatible API)."""
         from langchain_core.callbacks import CallbackManager
-        
+        from langchain_openai import ChatOpenAI
+
         callback_manager = CallbackManager([self.token_callback])
-        
+
         if self.use_litellm:
-            # Use LiteLLM proxy for LLM calls
-            from langchain_litellm import ChatLiteLLM
             litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
-            print(f"🔧 LiteLLM Config: model={model_name}, base_url={litellm_base_url}")
-            self.llm = ChatLiteLLM(
+            print(f"🔧 LiteLLM proxy: model={model_name}, base_url={litellm_base_url}")
+            self.llm = ChatOpenAI(
                 model=model_name,
-                api_base=litellm_base_url,
                 api_key=os.getenv("LITELLM_API_KEY", "dummy"),
+                base_url=f"{litellm_base_url}/v1",
                 temperature=0.7,
-                max_tokens=4096,
-                callbacks=callback_manager  # Use callback manager instead of list
+                max_tokens=2048,
+                callbacks=callback_manager,
             )
         else:
-            # Use Anthropic directly
-            from langchain_anthropic import ChatAnthropic
-            self.llm = ChatAnthropic(
+            print(f"🔧 OpenAI direct: model={model_name}")
+            self.llm = ChatOpenAI(
                 model=model_name,
-                anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+                api_key=os.getenv("OPENAI_API_KEY"),
+                base_url="https://api.openai.com/v1",
                 temperature=0.7,
-                callbacks=callback_manager  # Use callback manager instead of list
+                max_tokens=2048,
+                callbacks=callback_manager,
             )
-        
-        # Store model name for cost calculations
+
         self.model_name = model_name
 
     def _extract_snippet_from_transcript(self, transcript: str, timestamp: str, max_chars: int = 500) -> Optional[str]:
@@ -1079,48 +1078,61 @@ POC SCOPING CALL CRITERIA - Look for evidence of:
                 )
 
                 # ============================================================
-                # Run each agent as its own Crew so each gets a distinct span
+                # Run technical + sales agents IN PARALLEL (they're independent)
                 # ============================================================
 
-                # --- Agent 1: Technical Evaluator ---
-                with tracer.start_as_current_span("agent.technical_evaluator") as tech_span:
-                    tech_span.set_attribute("openinference.span.kind", "agent")
-                    tech_span.set_attribute("agent.name", "technical_evaluator")
-                    tech_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                    tech_span.set_attribute("input.mime_type", "text/plain")
-
+                def _run_tech_crew():
                     tech_crew = Crew(
                         agents=[agents['technical_evaluator']],
                         tasks=[technical_task],
                         process=Process.sequential,
                         verbose=True,
                     )
-                    tech_result = tech_crew.kickoff()
-                    tech_output = tech_result.raw if hasattr(tech_result, 'raw') else str(tech_result)
-                    tech_span.set_attribute("output.value", tech_output[:5000])
-                    tech_span.set_attribute("output.mime_type", "text/plain")
-                    tech_span.set_status(Status(StatusCode.OK))
-                    print(f"✅ Technical evaluation complete ({len(tech_output)} chars)")
+                    result = tech_crew.kickoff()
+                    return result.raw if hasattr(result, 'raw') else str(result)
 
-                # --- Agent 2: Sales Methodology Expert ---
-                with tracer.start_as_current_span("agent.sales_methodology_expert") as sales_span:
-                    sales_span.set_attribute("openinference.span.kind", "agent")
-                    sales_span.set_attribute("agent.name", "sales_methodology_expert")
-                    sales_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                    sales_span.set_attribute("input.mime_type", "text/plain")
-
+                def _run_sales_crew():
                     sales_crew = Crew(
                         agents=[agents['sales_methodology_expert']],
                         tasks=[sales_methodology_task],
                         process=Process.sequential,
                         verbose=True,
                     )
-                    sales_result = sales_crew.kickoff()
-                    sales_output = sales_result.raw if hasattr(sales_result, 'raw') else str(sales_result)
+                    result = sales_crew.kickoff()
+                    return result.raw if hasattr(result, 'raw') else str(result)
+
+                print("⚡ Running technical + sales methodology analysis in parallel...")
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    # Propagate OTel context into worker threads so spans attach
+                    # to the current request trace instead of becoming orphan roots.
+                    tech_ctx = contextvars.copy_context()
+                    sales_ctx = contextvars.copy_context()
+                    tech_future = executor.submit(tech_ctx.run, _run_tech_crew)
+                    sales_future = executor.submit(sales_ctx.run, _run_sales_crew)
+
+                    tech_output = tech_future.result()
+                    sales_output = sales_future.result()
+
+                # Record spans for the parallel results
+                with tracer.start_as_current_span("agent.technical_evaluator") as tech_span:
+                    tech_span.set_attribute("openinference.span.kind", "agent")
+                    tech_span.set_attribute("agent.name", "technical_evaluator")
+                    tech_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                    tech_span.set_attribute("input.mime_type", "text/plain")
+                    tech_span.set_attribute("output.value", tech_output[:5000])
+                    tech_span.set_attribute("output.mime_type", "text/plain")
+                    tech_span.set_status(Status(StatusCode.OK))
+                print(f"✅ Technical evaluation complete ({len(tech_output)} chars)")
+
+                with tracer.start_as_current_span("agent.sales_methodology_expert") as sales_span:
+                    sales_span.set_attribute("openinference.span.kind", "agent")
+                    sales_span.set_attribute("agent.name", "sales_methodology_expert")
+                    sales_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
+                    sales_span.set_attribute("input.mime_type", "text/plain")
                     sales_span.set_attribute("output.value", sales_output[:5000])
                     sales_span.set_attribute("output.mime_type", "text/plain")
                     sales_span.set_status(Status(StatusCode.OK))
-                    print(f"✅ Sales methodology evaluation complete ({len(sales_output)} chars)")
+                print(f"✅ Sales methodology evaluation complete ({len(sales_output)} chars)")
 
                 # --- Agent 3: Report Compiler ---
                 # Inject the prior agent outputs into the task description

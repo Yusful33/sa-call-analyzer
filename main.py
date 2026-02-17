@@ -3,6 +3,7 @@ import json
 import time
 import base64
 import asyncio
+import contextvars
 from pathlib import Path
 from contextlib import nullcontext
 
@@ -172,7 +173,11 @@ print("   4. 📝 Report Compiler")
 async def root():
     """Serve the frontend HTML"""
     try:
-        return FileResponse("frontend/index.html")
+        response = FileResponse("frontend/index.html")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     except FileNotFoundError:
         return HTMLResponse("""
         <html>
@@ -325,14 +330,26 @@ async def analyze_transcript(request: AnalyzeRequest):
                     "speaker.count": len(speakers)
                 })
 
-                # Perform analysis
-                result = analyzer.analyze_call(
-                    transcript=formatted_transcript,
-                    speakers=speakers,
-                    transcript_data=transcript_data,  # Pass raw data for hybrid sampling if available
-                    call_date=call_date,  # Pass call date for recap generation (from Gong metadata)
-                    model=request.model  # Pass selected model from UI
-                )
+                # Perform analysis (run in thread with 5min timeout - LLM calls can be slow,
+                # but technical + sales crews now run in parallel for ~2x speedup)
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            analyzer.analyze_call,
+                            transcript=formatted_transcript,
+                            speakers=speakers,
+                            transcript_data=transcript_data,
+                            call_date=call_date,
+                            model=request.model
+                        ),
+                        timeout=300.0
+                    )
+                except asyncio.TimeoutError:
+                    span.set_status(Status(StatusCode.ERROR, "Analysis timed out after 5 minutes"))
+                    raise HTTPException(
+                        status_code=504,
+                        detail="Analysis timed out after 5 minutes. Try a shorter transcript or a faster model (e.g. GPT-4o Mini)."
+                    )
 
                 span.set_attribute("analysis.insight_count", len(result.top_insights))
                 span.set_attribute("analysis.strength_count", len(result.strengths))
@@ -857,11 +874,49 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
 # Custom Demo Builder
 # ============================================================
 
+AVAILABLE_USE_CASES = [
+    {"value": "text-to-sql-bi-agent", "label": "Text-to-SQL / BI Agent"},
+    {"value": "retrieval-augmented-search", "label": "RAG / Retrieval Search"},
+    {"value": "multi-agent-orchestration", "label": "Multi-Agent Orchestration"},
+    {"value": "classification-routing", "label": "Classification / Routing"},
+    {"value": "multimodal-ai", "label": "Multimodal / Vision AI"},
+    {"value": "mcp-tool-use", "label": "MCP Tool Use"},
+    {"value": "multiturn-chatbot-with-tools", "label": "Chatbot with Tools"},
+    {"value": "generic", "label": "Generic LLM Pipeline"},
+]
+
+AVAILABLE_FRAMEWORKS = [
+    {"value": "langgraph", "label": "LangGraph"},
+    {"value": "langchain", "label": "LangChain"},
+    {"value": "crewai", "label": "CrewAI"},
+    {"value": "adk", "label": "Google ADK"},
+]
+
+
+class ClassifyDemoRequest(BaseModel):
+    """Request to classify a prospect's use case before demo generation."""
+    account_name: str
+
+
+class ClassifyDemoResponse(BaseModel):
+    """Response from use-case classification."""
+    use_case: str
+    framework: str
+    reasoning: Optional[str] = None
+    industry: Optional[str] = None
+    available_use_cases: list[dict]
+    available_frameworks: list[dict]
+    gong_calls_used: Optional[int] = None
+    data_sources_note: Optional[str] = None
+
+
 class GenerateDemoRequest(BaseModel):
     """Request to generate demo traces for a prospect."""
     account_name: str
     project_name: Optional[str] = None
     model: Optional[str] = None
+    use_case: Optional[str] = None
+    framework: Optional[str] = None
 
 
 class GenerateDemoResponse(BaseModel):
@@ -876,6 +931,7 @@ class GenerateDemoResponse(BaseModel):
     project_name: str
     arize_url: Optional[str] = None
     result: Optional[dict] = None
+    error_message: Optional[str] = None
 
 
 def _infer_use_case(overview) -> tuple[str, str, str | None]:
@@ -892,29 +948,40 @@ def _infer_use_case(overview) -> tuple[str, str, str | None]:
     signals: list[str] = []
 
     if overview:
-        # Spotlight briefs and key points from recent Gong calls
+        # Gong signals (from BigQuery Gong datasets): spotlight + snippets + metadata
         if overview.gong_summary and overview.gong_summary.recent_calls:
             for call in overview.gong_summary.recent_calls:
+                if getattr(call, "call_title", None):
+                    signals.append(f"Gong call title: {call.call_title}")
                 if call.spotlight_brief:
-                    signals.append(call.spotlight_brief)
+                    signals.append(f"Gong spotlight brief: {call.spotlight_brief}")
                 if call.spotlight_key_points:
                     for kp in call.spotlight_key_points:
                         if isinstance(kp, str):
-                            signals.append(kp)
+                            signals.append(f"Gong key point: {kp}")
                         elif isinstance(kp, list):
-                            signals.extend([str(item) for item in kp if item])
+                            signals.extend([f"Gong key point: {str(item)}" for item in kp if item])
+                if getattr(call, "spotlight_next_steps", None):
+                    signals.append(f"Gong next steps: {call.spotlight_next_steps}")
+                if getattr(call, "spotlight_outcome", None):
+                    signals.append(f"Gong outcome: {call.spotlight_outcome}")
+                if getattr(call, "spotlight_type", None):
+                    signals.append(f"Gong spotlight type: {call.spotlight_type}")
+                # Transcript snippet is often the most concrete signal for SQL/ADK mentions
+                if getattr(call, "transcript_snippet", None):
+                    signals.append(f"Gong transcript snippet: {call.transcript_snippet}")
 
         # Aggregated key themes
         if overview.gong_summary and overview.gong_summary.key_themes:
-            signals.extend(overview.gong_summary.key_themes)
+            signals.extend([f"Gong theme: {t}" for t in overview.gong_summary.key_themes])
 
         # Deal summary topics and current state
         if overview.sales_engagement and overview.sales_engagement.deal_summary:
             ds = overview.sales_engagement.deal_summary
             if ds.key_topics_discussed:
-                signals.extend(ds.key_topics_discussed)
+                signals.extend([f"Deal topic: {t}" for t in ds.key_topics_discussed])
             if ds.current_state:
-                signals.append(ds.current_state)
+                signals.append(f"Deal current state: {ds.current_state}")
 
         # Customer notes from Salesforce
         if overview.salesforce and overview.salesforce.customer_notes:
@@ -935,9 +1002,18 @@ def _infer_use_case(overview) -> tuple[str, str, str | None]:
             if account_info:
                 signals.append(" | ".join(account_info))
 
+    # Keyword hints (general, not account-specific): make sure SQL/ADK mentions win.
+    hint_use_case, hint_framework = _extract_use_case_framework_hints("\n".join(signals)) if signals else (None, None)
+    if hint_use_case and hint_framework:
+        return hint_use_case, hint_framework, "Detected explicit keywords for use case and framework in Gong/CRM signals."
+
     # Always try LLM classification when we have any signals
     if signals:
-        use_case, framework, reasoning = _classify_use_case_with_llm(signals)
+        use_case, framework, reasoning = _classify_use_case_with_llm(
+            signals,
+            hint_use_case=hint_use_case,
+            hint_framework=hint_framework,
+        )
         if use_case:
             return use_case, framework or "langgraph", reasoning
 
@@ -946,11 +1022,49 @@ def _infer_use_case(overview) -> tuple[str, str, str | None]:
     return _industry_heuristic(industry), "langgraph", None
 
 
-def _classify_use_case_with_llm(signals: list[str]) -> tuple[str | None, str | None, str | None]:
+def _extract_use_case_framework_hints(text: str) -> tuple[str | None, str | None]:
+    """Lightweight keyword hints from Gong/CRM text (not account-specific)."""
+    t = (text or "").lower()
+
+    use_case = None
+    framework = None
+
+    # --- use case hints ---
+    if any(k in t for k in ["text-to-sql", "text to sql", "nl2sql", "natural language to sql", "generate sql", "sql query", "bigquery", "snowflake", "redshift", "postgres", "databricks sql", "warehouse", "semantic layer", "bi agent", "analytics query"]):
+        use_case = "text-to-sql-bi-agent"
+    elif any(k in t for k in ["rag", "retrieval", "vector db", "embedding", "semantic search", "knowledge base"]):
+        use_case = "retrieval-augmented-search"
+    elif any(k in t for k in ["mcp", "model context protocol"]):
+        use_case = "mcp-tool-use"
+
+    # --- framework hints ---
+    if any(k in t for k in ["google adk", " agent development kit", "vertex ai", "agent builder", "google agent builder", "google-genai", "adk"]):
+        framework = "adk"
+    elif "crewai" in t:
+        framework = "crewai"
+    elif "langchain" in t and "langgraph" not in t:
+        framework = "langchain"
+
+    return use_case, framework
+
+
+def _classify_use_case_with_llm(
+    signals: list[str],
+    hint_use_case: str | None = None,
+    hint_framework: str | None = None,
+) -> tuple[str | None, str | None, str | None]:
     """Use Claude Haiku to classify use case and framework from prospect signals."""
     import litellm
 
-    combined_text = "\n".join(signals[:20])  # Cap to control token usage
+    combined_text = "\n".join(signals[:30])  # Use more signals so text-to-SQL/ADK mentions aren't dropped
+    hints_text = ""
+    if hint_use_case or hint_framework:
+        hints_text = (
+            "\n\n## Hints (keyword signals detected)\n"
+            f"- hinted_use_case: {hint_use_case or 'none'}\n"
+            f"- hinted_framework: {hint_framework or 'none'}\n"
+            "If these hints are supported by the Conversation Signals, prefer them.\n"
+        )
 
     prompt = f"""You are classifying a prospect's AI/ML use case and orchestration framework to select the most appropriate demo.
 
@@ -964,8 +1078,9 @@ Based on the following conversation signals from sales calls, classify:
 3. "multi-agent-orchestration" - Multi-agent systems where multiple autonomous agents collaborate: supervisor/worker patterns, research+analysis+writing teams, agent delegation, orchestrator agents. Choose this when MULTIPLE agents cooperate, not just a single chatbot calling tools.
 4. "classification-routing" - Classification pipelines, intent detection, ticket routing, document categorization, sentiment analysis, content moderation, auto-labeling workflows.
 5. "multimodal-ai" - Vision/image AI, multimodal LLM applications, document extraction (OCR/IDP), image classification, quality inspection, medical imaging analysis.
-6. "multiturn-chatbot-with-tools" - Single chatbot or agent with tool calling where no specific pattern (SQL, RAG, multi-agent, classification, vision) dominates.
-7. "generic" - When signals are ambiguous or don't clearly match any specific pattern above.
+6. "mcp-tool-use" - MCP (Model Context Protocol) based agents, tool-use pipelines connecting to external servers/services (file systems, databases, APIs, Slack, GitHub), agentic tool discovery and execution.
+7. "multiturn-chatbot-with-tools" - Single chatbot or agent with tool calling where no specific pattern (SQL, RAG, multi-agent, classification, vision, MCP) dominates.
+8. "generic" - When signals are ambiguous or don't clearly match any specific pattern above.
 
 ## Available Frameworks:
 1. "langgraph" - LangGraph / LangChain graph-based agent orchestration. DEFAULT if no framework is mentioned.
@@ -973,14 +1088,16 @@ Based on the following conversation signals from sales calls, classify:
 3. "crewai" - CrewAI multi-agent framework.
 4. "adk" - Google ADK (Agent Development Kit), Google Agent Builder, Vertex AI agents, google-genai.
 
-Look for explicit framework mentions in the signals. If the prospect mentions "ADK", "Google ADK", "Agent Development Kit", or "google-genai", use "adk". If they mention "CrewAI", use "crewai". If they mention "LangChain" without LangGraph, use "langchain". Default to "langgraph" if unclear.
+Framework rules (apply in order): If the prospect mentions "ADK", "Google ADK", "Agent Development Kit", "Vertex AI agents", "Google Agent Builder", or "google-genai", use "adk". If they mention "CrewAI", use "crewai". If they mention "LangChain" without LangGraph, use "langchain". Only default to "langgraph" when no framework is mentioned at all.
+Use case rules: If there is ANY mention of natural language to database, text-to-SQL, SQL queries, BI agents, analytics queries, or data querying, prefer "text-to-sql-bi-agent" over "multi-agent-orchestration".
 
 ## Conversation Signals:
 {combined_text}
+{hints_text}
 
 ## Instructions:
 Return ONLY a JSON object with:
-- "use_case": one of the seven demo type strings
+- "use_case": one of the eight demo type strings
 - "framework": one of the four framework strings
 - "reasoning": a brief 1-sentence explanation
 
@@ -1016,6 +1133,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
             "multi-agent-orchestration",
             "classification-routing",
             "multimodal-ai",
+            "mcp-tool-use",
             "multiturn-chatbot-with-tools",
             "generic",
         }
@@ -1065,6 +1183,61 @@ def _sse_event(event: str, data: dict | str) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+@app.post("/api/classify-demo", response_model=ClassifyDemoResponse)
+async def classify_demo(request: ClassifyDemoRequest):
+    """
+    Classify a prospect's use case and framework from CRM/Gong data.
+    Returns the classification along with all available options for user override.
+    """
+    overview = None
+    industry = None
+    try:
+        def _bq_lookup():
+            from bigquery_client import BigQueryClient
+            bq = BigQueryClient()
+            return bq.get_prospect_overview(account_name=request.account_name)
+        overview = await asyncio.wait_for(asyncio.to_thread(_bq_lookup), timeout=30.0)
+        if overview and overview.salesforce:
+            industry = overview.salesforce.industry
+    except (asyncio.TimeoutError, Exception):
+        pass
+
+    gong_calls_used = None
+    data_sources_note = None
+    if overview:
+        gong_calls_used = overview.gong_summary.total_calls if overview.gong_summary else 0
+        if gong_calls_used and overview.data_sources_available:
+            data_sources_note = f"Classification used Gong ({gong_calls_used} call(s)), Salesforce, and/or deal summary."
+        elif overview.data_sources_available:
+            data_sources_note = "No Gong calls linked to this account in BigQuery; used Salesforce/CRM only. Classification may be generic."
+        else:
+            data_sources_note = "No prospect data found for this account name. Using default use case."
+    else:
+        data_sources_note = "Could not load prospect data (BigQuery timeout or no match). Using default use case."
+
+    use_case, framework, reasoning = (
+        _infer_use_case(overview) if overview
+        else (_industry_heuristic(None), "langgraph", None)
+    )
+
+    # Fallback if classification returned None (e.g. LLM parsing failed)
+    if not use_case:
+        use_case = _industry_heuristic(industry)
+    if not framework:
+        framework = "langgraph"
+
+    return ClassifyDemoResponse(
+        use_case=use_case,
+        framework=framework,
+        reasoning=reasoning,
+        industry=industry,
+        available_use_cases=AVAILABLE_USE_CASES,
+        available_frameworks=AVAILABLE_FRAMEWORKS,
+        gong_calls_used=gong_calls_used,
+        data_sources_note=data_sources_note,
+    )
+
+
 @app.post("/api/generate-demo-stream")
 async def generate_demo_stream(request: GenerateDemoRequest):
     """
@@ -1076,26 +1249,35 @@ async def generate_demo_stream(request: GenerateDemoRequest):
 
     async def event_stream():
         try:
-            yield _sse_event("progress", {"message": "Fetching prospect profile from BigQuery..."})
+            # If use_case and framework are already provided (user confirmed via classify step),
+            # skip BigQuery lookup and classification
+            if request.use_case and request.framework:
+                use_case = request.use_case
+                framework = request.framework
+                use_case_reasoning = "User confirmed"
+                industry = None
+            else:
+                yield _sse_event("progress", {"message": "Fetching prospect profile from BigQuery..."})
 
-            overview = None
-            industry = None
-            try:
-                def _bq_lookup():
-                    from bigquery_client import BigQueryClient
-                    bq = BigQueryClient()
-                    return bq.get_prospect_overview(account_name=request.account_name)
-                overview = await asyncio.wait_for(asyncio.to_thread(_bq_lookup), timeout=30.0)
-                if overview and overview.salesforce:
-                    industry = overview.salesforce.industry
-            except asyncio.TimeoutError:
-                yield _sse_event("progress", {"message": "BigQuery timeout (30s). Using default use case..."})
-            except Exception:
-                pass
+                overview = None
+                industry = None
+                try:
+                    def _bq_lookup():
+                        from bigquery_client import BigQueryClient
+                        bq = BigQueryClient()
+                        return bq.get_prospect_overview(account_name=request.account_name)
+                    overview = await asyncio.wait_for(asyncio.to_thread(_bq_lookup), timeout=30.0)
+                    if overview and overview.salesforce:
+                        industry = overview.salesforce.industry
+                except asyncio.TimeoutError:
+                    yield _sse_event("progress", {"message": "BigQuery timeout (30s). Using default use case..."})
+                except Exception:
+                    pass
 
-            yield _sse_event("progress", {"message": "Analyzing prospect data to select best demo type..."})
-            use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
-            model = request.model or "claude-opus-4-6"
+                yield _sse_event("progress", {"message": "Analyzing prospect data to select best demo type..."})
+                use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
+
+            model = request.model or "gpt-5.2"
 
             yield _sse_event("progress", {"message": f"Use case: {use_case} | Framework: {framework}. Running LLM pipeline (model: {model})..."})
 
@@ -1148,37 +1330,77 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 # Pass demo_provider directly to runners (trace.set_tracer_provider
                 # is a one-time setter and cannot override the app's global provider)
                 all_results = []
+                trace_error = None  # set when first trace fails so we can surface it in the response
+                # Deterministic poisoned trace distribution (~30%)
+                import random as _random
+                bad_indices = set(_random.sample(range(num_traces), k=max(1, int(num_traces * 0.3))))
                 for i in range(num_traces):
-                    yield _sse_event("progress", {"message": f"Generating trace {i + 1}/{num_traces}..."})
+                    quality_label = "poisoned" if i in bad_indices else "good"
+                    yield _sse_event("progress", {"message": f"Generating trace {i + 1}/{num_traces} ({quality_label})..."})
 
                     def _run_pipeline(trace_idx=i):
-                        # Clear inherited parent span context so each run creates
-                        # a true root trace (not orphaned under sa-call-analyzer)
-                        ctx = trace.set_span_in_context(trace.INVALID_SPAN)
-                        token = otel_context.attach(ctx)
-                        try:
-                            from arize_demo_traces.runners.registry import get_runner
-                            runner = get_runner(framework, use_case)
-                            return runner(model=model, guard=guard, tracer_provider=demo_provider)
-                        finally:
-                            otel_context.detach(token)
+                        # Run pipeline in an isolated context so trace hierarchy is correct.
+                        # asyncio.to_thread does NOT propagate OTel context to worker threads;
+                        # we must run with explicit context to avoid orphaned/incomplete traces.
+                        def _body():
+                            ctx = trace.set_span_in_context(trace.INVALID_SPAN)
+                            token = otel_context.attach(ctx)
+                            try:
+                                from arize_demo_traces.runners.registry import get_runner
+                                from arize_demo_traces.eval_wrapper import run_with_evals
+                                runner = get_runner(framework, use_case)
+                                return run_with_evals(
+                                    runner=runner,
+                                    use_case=use_case,
+                                    framework=framework,
+                                    model=model,
+                                    guard=guard,
+                                    tracer_provider=demo_provider,
+                                    force_bad=(trace_idx in bad_indices),
+                                )
+                            finally:
+                                otel_context.detach(token)
+
+                        # Run in fresh context so worker thread has proper OTel context from the start
+                        run_ctx = contextvars.copy_context()
+                        return run_ctx.run(_body)
 
                     try:
-                        result = await asyncio.wait_for(asyncio.to_thread(_run_pipeline), timeout=60.0)
+                        result = await asyncio.wait_for(asyncio.to_thread(_run_pipeline), timeout=120.0)
                         all_results.append(result)
-                    except (asyncio.TimeoutError, RuntimeError) as e:
-                        # Stop generating if we hit cost guard or timeout
-                        yield _sse_event("progress", {"message": f"Stopped at trace {i + 1}: {e}"})
+                        # Flush after each trace so spans export before next run (avoids partial traces)
+                        if demo_provider is not None:
+                            try:
+                                demo_provider.force_flush(timeout_millis=5000)
+                            except Exception:
+                                pass
+                    except asyncio.TimeoutError:
+                        trace_error = f"Trace {i + 1} timed out (120s)"
+                        yield _sse_event("progress", {"message": f"Stopped at trace {i + 1}: timeout (120s)"})
+                        break
+                    except RuntimeError as e:
+                        trace_error = f"Trace {i + 1}: {e or 'runtime error'}"
+                        yield _sse_event("progress", {"message": f"Stopped at trace {i + 1}: {e or 'runtime error'}"})
+                        break
+                    except Exception as e:
+                        import traceback
+                        print(f"❌ Demo trace {i + 1} error: {traceback.format_exc()}")
+                        trace_error = f"Trace {i + 1} failed: {type(e).__name__}: {e}"
+                        yield _sse_event("progress", {"message": trace_error})
                         break
 
                 result = {"traces_generated": len(all_results), "results": all_results}
+                if trace_error is not None:
+                    result["error"] = trace_error
             except Exception as e:
+                import traceback
+                print(f"❌ Demo pipeline error: {traceback.format_exc()}")
                 yield _sse_event("error", {"detail": str(e)})
                 return
             finally:
                 if demo_provider is not None:
                     try:
-                        demo_provider.force_flush(timeout_millis=10000)
+                        demo_provider.force_flush(timeout_millis=30000)
                     except Exception:
                         pass
                     # Restore instrumentors to original provider
@@ -1197,7 +1419,28 @@ async def generate_demo_stream(request: GenerateDemoRequest):
 
             yield _sse_event("progress", {"message": "Pipeline complete. Sending traces to Arize..."})
 
+            # Create online eval task via GraphQL API
             space_id = os.getenv("ARIZE_SPACE_ID")
+            if space_id and result.get("traces_generated", 0) > 0:
+                yield _sse_event("progress", {"message": "Creating online evaluation task..."})
+                try:
+                    from arize_demo_traces.online_evals import create_and_run_online_eval
+                    eval_result = await asyncio.to_thread(
+                        create_and_run_online_eval,
+                        project_name=project_name,
+                        space_id=space_id,
+                    )
+                    if eval_result.get("success"):
+                        yield _sse_event("progress", {
+                            "message": f"Online eval task '{eval_result.get('task_name')}' created and running."
+                        })
+                    elif eval_result.get("error"):
+                        yield _sse_event("progress", {
+                            "message": f"Online eval setup: {eval_result['error']}"
+                        })
+                except Exception as e:
+                    yield _sse_event("progress", {"message": f"Online eval setup skipped: {e}"})
+
             arize_url = None
             if space_id:
                 arize_url = f"https://app.arize.com/?space_id={space_id}&project_id={project_name}"
@@ -1213,6 +1456,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 project_name=project_name,
                 arize_url=arize_url,
                 result=result,
+                error_message=result.get("error") if result else None,
             )
             yield _sse_event("done", response.model_dump())
         except Exception as e:
@@ -1263,24 +1507,31 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
             LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
 
-        # Step 1: Fetch prospect profile from BigQuery
-        overview = None
-        industry = None
-        try:
-            from bigquery_client import BigQueryClient
-            bq = BigQueryClient()
-            overview = bq.get_prospect_overview(account_name=request.account_name)
-            if overview and overview.salesforce:
-                industry = overview.salesforce.industry
-        except Exception as e:
-            pass
+        # If use_case and framework are already provided (user confirmed), skip classification
+        if request.use_case and request.framework:
+            use_case = request.use_case
+            framework = request.framework
+            use_case_reasoning = "User confirmed"
+            industry = None
+        else:
+            # Step 1: Fetch prospect profile from BigQuery
+            overview = None
+            industry = None
+            try:
+                from bigquery_client import BigQueryClient
+                bq = BigQueryClient()
+                overview = bq.get_prospect_overview(account_name=request.account_name)
+                if overview and overview.salesforce:
+                    industry = overview.salesforce.industry
+            except Exception as e:
+                pass
 
-        # Step 2: Infer use case from full prospect data (Gong calls, industry, etc.)
-        use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
+            # Step 2: Infer use case from full prospect data (Gong calls, industry, etc.)
+            use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
 
         # Step 3: Run the real pipeline multiple times
         num_traces = 10
-        model = request.model or "claude-opus-4-6"
+        model = request.model or "gpt-5.2"
 
         from arize_demo_traces.cost_guard import CostGuard
         calls_per_trace = 12 if framework == "crewai" or use_case == "multi-agent-orchestration" else 8
@@ -1300,21 +1551,39 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
                 pass
 
         all_results = []
+        import random as _random
+        bad_indices = set(_random.sample(range(num_traces), k=max(1, int(num_traces * 0.3))))
         for i in range(num_traces):
-            def _run_pipeline():
+            def _run_pipeline(_trace_idx=i):
                 from opentelemetry import context as otel_context
-                ctx = trace.set_span_in_context(trace.INVALID_SPAN)
-                token = otel_context.attach(ctx)
-                try:
-                    from arize_demo_traces.runners.registry import get_runner
-                    runner = get_runner(framework, use_case)
-                    return runner(model=model, guard=guard, tracer_provider=demo_provider)
-                finally:
-                    otel_context.detach(token)
+                def _body():
+                    ctx = trace.set_span_in_context(trace.INVALID_SPAN)
+                    token = otel_context.attach(ctx)
+                    try:
+                        from arize_demo_traces.runners.registry import get_runner
+                        from arize_demo_traces.eval_wrapper import run_with_evals
+                        runner = get_runner(framework, use_case)
+                        return run_with_evals(
+                            runner=runner,
+                            use_case=use_case,
+                            framework=framework,
+                            model=model,
+                            guard=guard,
+                            tracer_provider=demo_provider,
+                            force_bad=(_trace_idx in bad_indices),
+                        )
+                    finally:
+                        otel_context.detach(token)
+                return contextvars.copy_context().run(_body)
 
             try:
                 result = await asyncio.to_thread(_run_pipeline)
                 all_results.append(result)
+                if demo_provider is not None:
+                    try:
+                        demo_provider.force_flush(timeout_millis=5000)
+                    except Exception:
+                        pass
             except (asyncio.TimeoutError, RuntimeError):
                 break
             except Exception as e:
@@ -1344,7 +1613,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
     finally:
         if demo_provider is not None:
             try:
-                demo_provider.force_flush(timeout_millis=10000)
+                demo_provider.force_flush(timeout_millis=30000)
             except Exception:
                 pass
             # Restore instrumentors to original provider
