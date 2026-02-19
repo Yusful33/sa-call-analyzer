@@ -11,13 +11,15 @@ from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
     format_docs,
+    search_documents,
+    fetch_document_metadata,
 )
 
 
@@ -26,6 +28,7 @@ def run_rag(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a CrewAI RAG pipeline with retrieval agent, synthesis agent, guardrails, and evaluation."""
     from opentelemetry import trace
@@ -44,6 +47,8 @@ def run_rag(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "crewai",
+            "metadata.use_case": "retrieval-augmented-search",
         },
     ) as pipeline_span:
 
@@ -53,6 +58,10 @@ def run_rag(
                 tracer, g["name"], query, llm, guard,
                 system_prompt=g["system_prompt"],
             )
+
+        # === TOOL CALLS ===
+        run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
+        run_tool_call(tracer, "fetch_document_metadata", "knowledge-base", fetch_document_metadata, guard=guard, source="knowledge-base")
 
         # === RETRIEVE DOCUMENTS (outside CrewAI since agents can't use vectorstores directly) ===
         with tracer.start_as_current_span(

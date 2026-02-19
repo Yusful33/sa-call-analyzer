@@ -13,6 +13,8 @@ TEXT_TO_SQL = "text-to-sql-bi-agent"
 MULTI_AGENT = "multi-agent-orchestration"
 CLASSIFICATION = "classification-routing"
 MULTIMODAL = "multimodal-ai"
+MCP = "mcp-tool-use"
+TRAVEL_AGENT = "travel-agent"
 
 # Framework name constants
 LANGGRAPH = "langgraph"
@@ -85,6 +87,12 @@ def _get_langgraph_runner(use_case: str) -> Callable | None:
     elif use_case == MULTIMODAL:
         from .langgraph.multimodal import run_multimodal
         return run_multimodal
+    elif use_case == MCP:
+        from .langgraph.mcp import run_mcp
+        return run_mcp
+    elif use_case == TRAVEL_AGENT:
+        from .langgraph.travel_agent import run_travel_agent
+        return run_travel_agent
     else:
         from .langgraph.generic import run_generic
         return run_generic
@@ -109,6 +117,12 @@ def _get_langchain_runner(use_case: str) -> Callable | None:
     elif use_case == MULTIMODAL:
         from .langchain.multimodal import run_multimodal
         return run_multimodal
+    elif use_case == MCP:
+        from .langchain.mcp import run_mcp
+        return run_mcp
+    elif use_case == TRAVEL_AGENT:
+        from .langchain.travel_agent import run_travel_agent
+        return run_travel_agent
     else:
         from .langchain.generic import run_generic
         return run_generic
@@ -133,6 +147,12 @@ def _get_crewai_runner(use_case: str) -> Callable | None:
     elif use_case == MULTIMODAL:
         from .crewai_fw.multimodal import run_multimodal
         return run_multimodal
+    elif use_case == MCP:
+        from .crewai_fw.mcp import run_mcp
+        return run_mcp
+    elif use_case == TRAVEL_AGENT:
+        from .crewai_fw.travel_agent import run_travel_agent
+        return run_travel_agent
     else:
         from .crewai_fw.generic import run_generic
         return run_generic
@@ -157,6 +177,12 @@ def _get_adk_runner(use_case: str) -> Callable | None:
     elif use_case == MULTIMODAL:
         from .adk.multimodal import run_multimodal
         return run_multimodal
+    elif use_case == MCP:
+        from .adk.mcp import run_mcp
+        return run_mcp
+    elif use_case == TRAVEL_AGENT:
+        from .adk.travel_agent import run_travel_agent
+        return run_travel_agent
     else:
         from .adk.generic import run_generic
         return run_generic

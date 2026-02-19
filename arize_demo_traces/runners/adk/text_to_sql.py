@@ -5,12 +5,9 @@ Uses real LLM calls inside manually created OTel spans with OpenInference attrib
 
 Trace structure:
   sql_agent.run (AGENT)
-    -> guardrails (GUARDRAIL group)
     -> generate_content (LLM) - route query type
     -> generate_content (LLM) - generate SQL
     -> validate_sql (TOOL) - validate the SQL
-    -> execute_query (TOOL) - simulated execution
-    -> generate_content (LLM) - summarize results
 """
 
 import random
@@ -20,20 +17,15 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import (
-    run_guardrail,
-    run_local_guardrail,
-)
+from ...trace_enrichment import run_tool_call
 from ...use_cases.text_to_sql import (
-    QUERIES,
-    SCHEMA,
-    GUARDRAILS,
-    LOCAL_GUARDRAILS,
     SYSTEM_PROMPT_SQL_GEN,
     SYSTEM_PROMPT_SQL_VALIDATE,
     SYSTEM_PROMPT_ROUTE,
-    SYSTEM_PROMPT_SUMMARIZE,
-    get_simulated_results,
+    get_table_schema,
+    execute_query,
+    get_queries_for_prospect,
+    get_context_preamble,
 )
 
 
@@ -42,16 +34,19 @@ def run_text_to_sql(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
-    """Execute an ADK-style text-to-SQL agent: guardrails -> route -> generate -> validate -> execute -> summarize."""
+    """Execute an ADK-style text-to-SQL agent: route -> generate -> validate."""
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.text-to-sql.adk")
 
+    queries_pool = get_queries_for_prospect(prospect_context)
     if not query:
-        query = random.choice(QUERIES)
+        query = random.choice(queries_pool)
+    sql_gen_system_prompt = get_context_preamble(prospect_context) + SYSTEM_PROMPT_SQL_GEN
 
     llm = get_chat_llm(model, temperature=0)
 
@@ -61,20 +56,10 @@ def run_text_to_sql(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "adk",
+            "metadata.use_case": "text-to-sql-bi-agent",
         },
     ) as agent_span:
-
-        # ---- Guardrails ----
-        for g in GUARDRAILS:
-            run_guardrail(
-                tracer, g["name"], query, llm, guard,
-                system_prompt=g["system_prompt"],
-            )
-        for lg in LOCAL_GUARDRAILS:
-            run_local_guardrail(
-                tracer, lg["name"], query,
-                passed=lg["passed"], detail=lg["detail"],
-            )
 
         # ---- generate_content: route query type ----
         with tracer.start_as_current_span(
@@ -92,10 +77,16 @@ def run_text_to_sql(
             route_chain = route_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            query_type = route_chain.invoke({"query": query})
-            route_span.set_attribute("output.value", query_type.strip())
+            raw_route = route_chain.invoke({"query": query})
+            query_type = (raw_route or "").strip() if isinstance(raw_route, str) else "ANALYTICAL"
+            if not query_type:
+                query_type = "ANALYTICAL"
+            route_span.set_attribute("output.value", query_type)
             route_span.set_attribute("output.mime_type", "text/plain")
             route_span.set_status(Status(StatusCode.OK))
+
+        # ---- get_table_schema: fetch schema for SQL generation ----
+        run_tool_call(tracer, "get_table_schema", query, get_table_schema, guard=guard, table_name="sales")
 
         # ---- generate_content: generate SQL ----
         with tracer.start_as_current_span(
@@ -107,7 +98,7 @@ def run_text_to_sql(
             },
         ) as sql_span:
             sql_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT_SQL_GEN),
+                ("system", sql_gen_system_prompt),
                 ("human", "{question}"),
             ])
             sql_chain = sql_prompt | llm | StrOutputParser()
@@ -140,48 +131,10 @@ def run_text_to_sql(
             validate_span.set_attribute("output.mime_type", "text/plain")
             validate_span.set_status(Status(StatusCode.OK))
 
-        # ---- execute_query: simulated SQL execution (TOOL span) ----
-        with tracer.start_as_current_span(
-            "execute_query",
-            attributes={
-                "openinference.span.kind": "TOOL",
-                "input.value": generated_sql,
-                "input.mime_type": "text/plain",
-                "tool.name": "execute_query",
-            },
-        ) as exec_span:
-            result_key, results = get_simulated_results()
-            exec_span.set_attribute("output.value", str(results))
-            exec_span.set_attribute("output.mime_type", "text/plain")
-            exec_span.set_attribute("tool.result_key", result_key)
-            exec_span.set_status(Status(StatusCode.OK))
+        # ---- execute_query: run the generated SQL ----
+        run_tool_call(tracer, "execute_query", generated_sql, execute_query, guard=guard, sql=generated_sql)
 
-        # ---- generate_content: summarize results ----
-        with tracer.start_as_current_span(
-            "generate_content",
-            attributes={
-                "openinference.span.kind": "LLM",
-                "input.value": query,
-                "input.mime_type": "text/plain",
-            },
-        ) as summary_span:
-            summary_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT_SUMMARIZE),
-                ("human", "Question: {question}\nSQL: {sql}\nResults: {results}"),
-            ])
-            summary_chain = summary_prompt | llm | StrOutputParser()
-            if guard:
-                guard.check()
-            summary = summary_chain.invoke({
-                "question": query,
-                "sql": generated_sql,
-                "results": str(results),
-            })
-            summary_span.set_attribute("output.value", summary)
-            summary_span.set_attribute("output.mime_type", "text/plain")
-            summary_span.set_status(Status(StatusCode.OK))
-
-        agent_span.set_attribute("output.value", summary)
+        agent_span.set_attribute("output.value", generated_sql)
         agent_span.set_attribute("output.mime_type", "text/plain")
         agent_span.set_status(Status(StatusCode.OK))
 
@@ -189,6 +142,4 @@ def run_text_to_sql(
         "query": query,
         "generated_sql": generated_sql,
         "validation": validation,
-        "results": results,
-        "summary": summary,
     }

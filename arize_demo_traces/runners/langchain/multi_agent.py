@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
     QUERIES,
     GUARDRAILS,
@@ -20,6 +20,8 @@ from ...use_cases.multi_agent import (
     ANALYSIS_PROMPT,
     WRITER_PROMPT,
     REVIEWER_PROMPT,
+    search_web,
+    analyze_metrics,
 )
 
 
@@ -28,6 +30,7 @@ def run_multi_agent(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangChain LCEL multi-agent orchestration with guardrails."""
     from opentelemetry import trace
@@ -47,6 +50,8 @@ def run_multi_agent(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langchain",
+            "metadata.use_case": "multi-agent-orchestration",
         },
     ) as agent_span:
 
@@ -85,6 +90,7 @@ def run_multi_agent(
             "research_agent",
             attributes={"openinference.span.kind": "AGENT", "input.value": query},
         ) as step:
+            run_tool_call(tracer, "search_web", query, search_web, guard=guard, query=query)
             research_prompt = ChatPromptTemplate.from_messages([
                 ("system", RESEARCH_PROMPT),
                 ("human", "Task: {query}"),
@@ -101,6 +107,7 @@ def run_multi_agent(
             "analysis_agent",
             attributes={"openinference.span.kind": "AGENT", "input.value": query},
         ) as step:
+            run_tool_call(tracer, "analyze_metrics", query, analyze_metrics, guard=guard, metric_name="performance")
             analysis_prompt = ChatPromptTemplate.from_messages([
                 ("system", ANALYSIS_PROMPT),
                 ("human", "Original task: {query}\n\nResearch findings:\n{research}"),

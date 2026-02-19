@@ -1,0 +1,106 @@
+{
+  "industry": "Financial Services",
+  "deal_count": 9,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Risk models and credit decisions require continuous monitoring for accuracy",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Regulatory requirements demand model explainability and audit trails",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Payment and transaction models need real-time monitoring",
+      "frequency": 3,
+      "example_quote": null
+    },
+    {
+      "pain": "Model drift can lead to financial losses or compliance issues",
+      "frequency": 3,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Continuous monitoring for risk and credit decision models",
+      "frequency": 5,
+      "use_case": "Risk management"
+    },
+    {
+      "value": "Complete audit trail for regulatory compliance",
+      "frequency": 4,
+      "use_case": "Regulatory compliance"
+    },
+    {
+      "value": "Real-time monitoring for payment and transaction models",
+      "frequency": 3,
+      "use_case": "Payment processing"
+    },
+    {
+      "value": "Drift detection prevents losses from degraded models",
+      "frequency": 3,
+      "use_case": "Loss prevention"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We have extensive compliance requirements for any vendor",
+      "stage_typically_appears": "early",
+      "effective_response": "We work with major financial institutions including The Hartford, North American Bancard, and Interac. Arize is SOC2 compliant and supports VPC deployment for organizations with strict data residency requirements.",
+      "frequency": 5
+    },
+    {
+      "objection": "We're already monitored by our risk management team",
+      "stage_typically_appears": "early",
+      "effective_response": "Risk management reviews are typically periodic, but model drift happens continuously. Arize provides real-time monitoring between reviews so you catch issues before they become compliance problems.",
+      "frequency": 3
+    },
+    {
+      "objection": "How do you help with regulatory examinations?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize maintains a complete audit trail of model behavior, predictions, and performance over time. When regulators ask questions, you can demonstrate continuous monitoring and provide evidence of how models performed.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How do you monitor your risk or credit decision models between formal reviews?",
+      "tied_to_signal": "Risk/Credit models",
+      "validates_hypothesis": "Continuous monitoring gap",
+      "follow_up_if_yes": "Is that monitoring meeting regulatory expectations?",
+      "follow_up_if_no": "What happens if models drift between reviews?"
+    },
+    {
+      "question": "What's your process when regulators ask about model performance over time?",
+      "tied_to_signal": "Regulated entity",
+      "validates_hypothesis": "Audit trail needs",
+      "follow_up_if_yes": "How long does it take to pull that information?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "For your payment or transaction models, can you detect issues in real-time?",
+      "tied_to_signal": "Payment processing",
+      "validates_hypothesis": "Real-time monitoring",
+      "follow_up_if_yes": "What's your response time once an issue is detected?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How do you currently balance model accuracy monitoring with compliance documentation?",
+      "tied_to_signal": "Financial services",
+      "validates_hypothesis": "Dual requirement",
+      "follow_up_if_yes": "Do your current tools help with both?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "The Hartford",
+    "North American Bancard",
+    "Interac Corp."
+  ],
+  "avg_deal_size": 89233,
+  "avg_sales_cycle_days": null
+}

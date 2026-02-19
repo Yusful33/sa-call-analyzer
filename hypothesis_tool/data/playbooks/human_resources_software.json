@@ -1,0 +1,108 @@
+{
+  "industry": "Human Resources Software",
+  "deal_count": 16,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Poor matching algorithms directly impact revenue - no placements means no payment",
+      "frequency": 8,
+      "example_quote": "When ziprecruiter doesn't place candidates, they do not get paid. Their algorithms recommended jobs to candidates and recruiters. If there aren't strong matches, then there is less hiring out of ziprecruiter"
+    },
+    {
+      "pain": "Candidate matching relevance degrades over time without visibility",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Skill matching algorithms need continuous monitoring for accuracy",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "No clear metrics to track ML model effectiveness on business outcomes",
+      "frequency": 4,
+      "example_quote": "Candidate placement, Effective candidate searching, Accurate skill matching (Relevance)"
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Superior debuggability helps ensure ML models drive profitability",
+      "frequency": 8,
+      "use_case": "Matching algorithms"
+    },
+    {
+      "value": "Monitor relevance metrics to ensure high-quality candidate-job matches",
+      "frequency": 6,
+      "use_case": "Candidate matching"
+    },
+    {
+      "value": "Track business outcomes (placements, conversions) alongside model metrics",
+      "frequency": 5,
+      "use_case": "Revenue attribution"
+    },
+    {
+      "value": "Early warning when matching quality starts to degrade",
+      "frequency": 4,
+      "use_case": "Proactive monitoring"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We already track conversion metrics in our product analytics",
+      "stage_typically_appears": "early",
+      "effective_response": "Product analytics tells you conversions dropped, but not why. Arize connects model behavior to business outcomes so you can identify if it's the model, the data, or something else.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our matching algorithm is proprietary - we're hesitant to share data",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize analyzes model inputs and outputs without exposing your algorithm. Companies like ZipRecruiter trust us with their core matching systems. We can deploy in your VPC for maximum security.",
+      "frequency": 4
+    },
+    {
+      "objection": "We're not sure if model monitoring will impact our KPIs",
+      "stage_typically_appears": "mid",
+      "effective_response": "ZipRecruiter found that Arize's debuggability directly impacted profitability - catching degradation in matching before it hurt placements. What would a 1% improvement in match quality mean for your business?",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How do you currently measure the effectiveness of your candidate matching algorithms?",
+      "tied_to_signal": "Uses ML for matching/recommendations",
+      "validates_hypothesis": "Matching quality monitoring gap",
+      "follow_up_if_yes": "Can you trace back placement failures to specific model issues?",
+      "follow_up_if_no": "How do you know when matching quality degrades?"
+    },
+    {
+      "question": "When placements or conversions drop, how long does it take to determine if the issue is the model vs other factors?",
+      "tied_to_signal": "Revenue-driven ML",
+      "validates_hypothesis": "Slow root cause analysis",
+      "follow_up_if_yes": "What's the revenue impact during that investigation window?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you monitoring skill matching relevance over time as job markets and skills evolve?",
+      "tied_to_signal": "Skills-based matching",
+      "validates_hypothesis": "Skill drift concerns",
+      "follow_up_if_yes": "How quickly can you adapt when skills taxonomy changes?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What metrics do you use to connect model performance to placement success?",
+      "tied_to_signal": "Placement-based revenue",
+      "validates_hypothesis": "Business-to-model attribution",
+      "follow_up_if_yes": "Can you slice that by segment, role type, or geography?",
+      "follow_up_if_no": "Would that visibility help prioritize model improvements?"
+    }
+  ],
+  "sample_customers": [
+    "ZipRecruiter",
+    "Nayya",
+    "Legion Technologies",
+    "Sense",
+    "UKG"
+  ],
+  "avg_deal_size": 52662,
+  "avg_sales_cycle_days": null
+}

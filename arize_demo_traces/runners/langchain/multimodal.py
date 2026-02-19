@@ -14,6 +14,7 @@ from ...llm import get_chat_llm
 from ...trace_enrichment import (
     run_guardrail,
     run_local_guardrail,
+    run_tool_call,
 )
 from ...use_cases.multimodal import (
     QUERIES,
@@ -24,6 +25,8 @@ from ...use_cases.multimodal import (
     SYSTEM_PROMPT_CLASSIFY_IMAGE,
     SYSTEM_PROMPT_SUMMARIZE_FINDINGS,
     get_random_query,
+    analyze_image_content,
+    extract_structured_data,
 )
 
 
@@ -32,6 +35,7 @@ def run_multimodal(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangChain LCEL multimodal pipeline with guardrails."""
     from opentelemetry import trace
@@ -61,6 +65,8 @@ def run_multimodal(
             "openinference.span.kind": "CHAIN",
             "input.value": combined_input,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langchain",
+            "metadata.use_case": "multimodal-ai",
         },
     ) as pipeline_span:
 
@@ -108,6 +114,7 @@ def run_multimodal(
             "analyze_content",
             attributes={"openinference.span.kind": "CHAIN", "input.value": combined_input},
         ) as step:
+            run_tool_call(tracer, "analyze_image_content", image_description[:200], analyze_image_content, guard=guard, image_description=image_description)
             analyze_prompt = ChatPromptTemplate.from_messages([
                 ("system", SYSTEM_PROMPT_VISION),
                 ("human", "{query}"),
@@ -138,6 +145,7 @@ def run_multimodal(
                 "image_description": image_description,
                 "analysis": analysis,
             })
+            run_tool_call(tracer, "extract_structured_data", extraction[:200], extract_structured_data, guard=guard, text=extraction[:500])
             step.set_attribute("output.value", extraction)
             step.set_status(Status(StatusCode.OK))
 

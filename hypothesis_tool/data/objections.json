@@ -1,0 +1,84 @@
+{
+  "objections": [
+    {
+      "objection": "We're already using LangSmith",
+      "stage_typically_appears": "early",
+      "category": "competitive",
+      "effective_response": "LangSmith is great for LangChain tracing. Where we see teams add Arize is for production monitoring and broader eval frameworks. Are you finding LangSmith sufficient for your production monitoring needs?",
+      "follow_up_questions": [
+        "How are you handling monitoring for non-LangChain components?",
+        "What's your alerting story when model quality degrades?"
+      ]
+    },
+    {
+      "objection": "We don't see the ROI",
+      "stage_typically_appears": "mid",
+      "category": "value",
+      "effective_response": "That's a fair concern. Let me share how [similar company] calculated their ROI - they reduced debugging time from days to hours, which freed up 2 engineers' worth of time. What does debugging a model issue cost your team today?",
+      "follow_up_questions": [
+        "How long does it typically take to debug a production model issue?",
+        "What's the cost when a model degrades and you don't catch it quickly?"
+      ]
+    },
+    {
+      "objection": "We built our own monitoring",
+      "stage_typically_appears": "early",
+      "category": "competitive",
+      "effective_response": "Makes sense - a lot of teams start there. The question we often hear is: how much time does your team spend maintaining that infrastructure vs building your core product? Where does that time go?",
+      "follow_up_questions": [
+        "How much engineering time goes into maintaining your monitoring?",
+        "When was the last time you had to add a new capability to it?"
+      ]
+    },
+    {
+      "objection": "We're too early stage",
+      "stage_typically_appears": "early",
+      "category": "timing",
+      "effective_response": "I get that. Most teams think about monitoring after their first production incident. The teams that implement it early actually save time because they catch issues before customers do. What's your timeline for production?",
+      "follow_up_questions": [
+        "When are you planning to go to production?",
+        "How would you know if something went wrong on day one?"
+      ]
+    },
+    {
+      "objection": "We need to focus on building first",
+      "stage_typically_appears": "early",
+      "category": "timing",
+      "effective_response": "Totally understand. The good news is Arize integrates in about 2 lines of code - it's not a big lift. Teams usually add it alongside development so they have visibility from day one. Want me to show you how quick the integration is?",
+      "follow_up_questions": [
+        "What's your development timeline looking like?",
+        "When do you expect to have models in production?"
+      ]
+    },
+    {
+      "objection": "Datadog handles this for us",
+      "stage_typically_appears": "early",
+      "category": "competitive",
+      "effective_response": "Datadog is great for infrastructure monitoring. Where teams find gaps is ML-specific observability - things like drift detection, embedding analysis, and understanding why a model's predictions changed. How are you handling those ML-specific metrics in Datadog?",
+      "follow_up_questions": [
+        "Can you detect when your model's input distribution shifts?",
+        "How do you debug why a model made a specific prediction?"
+      ]
+    },
+    {
+      "objection": "We need to check with security/compliance first",
+      "stage_typically_appears": "late",
+      "category": "process",
+      "effective_response": "Absolutely, that's standard. We have SOC 2 Type II, and we can deploy in your VPC if data residency is a concern. Want me to connect you with our security team to start that process in parallel?",
+      "follow_up_questions": [
+        "What are your main security requirements?",
+        "Do you need on-prem or is cloud acceptable?"
+      ]
+    },
+    {
+      "objection": "The pricing is too high",
+      "stage_typically_appears": "late",
+      "category": "commercial",
+      "effective_response": "Let's make sure we're sizing this right for your actual usage. Often we can adjust the plan based on your volume. Can you share more about your expected inference volume so I can see what makes sense?",
+      "follow_up_questions": [
+        "What's your monthly inference volume?",
+        "How does this compare to the cost of an engineering incident?"
+      ]
+    }
+  ]
+}

@@ -119,6 +119,35 @@ EVALUATORS = [
 ]
 
 
+# ---- Tools (simulated) ----
+
+def lookup_routing_rules(category: str) -> str:
+    """Look up routing rules for a ticket category."""
+    import json as _json
+    cat_info = CATEGORIES.get(category, CATEGORIES.get("technical_support"))
+    return _json.dumps({
+        "category": category,
+        "routing_team": cat_info["routing"],
+        "priority": cat_info["priority"],
+        "sla_hours": {"critical": 1, "high": 4, "medium": 8, "low": 24}.get(cat_info["priority"], 8),
+        "escalation_path": f"{cat_info['routing']} -> team_lead -> vp_support",
+        "auto_response": True,
+    })
+
+
+def search_response_templates(category: str) -> str:
+    """Search for response templates matching a category."""
+    templates = {
+        "billing_refund": "Thank you for reaching out about your billing concern. I've reviewed your account and [ACTION]. Your refund of [AMOUNT] will be processed within 5-7 business days.",
+        "technical_support": "I understand you're experiencing a technical issue. I've checked our systems and [DIAGNOSIS]. Here are the recommended steps: [STEPS].",
+        "account_management": "I'd be happy to help with your account request. I've updated your account to reflect [CHANGES]. The changes will take effect [TIMELINE].",
+        "sales_inquiry": "Thank you for your interest! Based on your requirements, I'd recommend our [PLAN] plan. Here's a detailed breakdown: [DETAILS].",
+        "security_compliance": "Your security concern has been flagged as [PRIORITY] priority. Our security team has been notified and will [ACTION] within [SLA].",
+        "positive_feedback": "Thank you so much for your kind words! We're thrilled to hear that [FEATURE] is working well for you. Your feedback has been shared with our product team.",
+    }
+    return templates.get(category, templates["technical_support"])
+
+
 def get_expected_category(query: str) -> str:
     """Return a plausible expected category for evaluation purposes."""
     query_lower = query.lower()

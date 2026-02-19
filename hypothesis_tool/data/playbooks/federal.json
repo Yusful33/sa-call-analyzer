@@ -1,0 +1,105 @@
+{
+  "industry": "Federal",
+  "deal_count": 8,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "LLM deployments require monitoring for safety, accuracy, and security",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Mission-critical AI systems need observability but options are limited in secure environments",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "AI governance and audit requirements for federal AI initiatives",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Need FedRAMP or equivalent security authorization for any vendor",
+      "frequency": 3,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "LLM observability for defense and federal AI applications",
+      "frequency": 5,
+      "use_case": "Federal LLM programs"
+    },
+    {
+      "value": "Secure deployment options for classified and sensitive environments",
+      "frequency": 4,
+      "use_case": "Secure environments"
+    },
+    {
+      "value": "Complete audit trail for AI governance compliance",
+      "frequency": 4,
+      "use_case": "AI governance"
+    },
+    {
+      "value": "On-premise deployment that meets federal security requirements",
+      "frequency": 3,
+      "use_case": "Security authorization"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We need FedRAMP authorization",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize is pursuing FedRAMP authorization and currently works with the Defense Innovation Unit and US Navy on LLM programs. We offer air-gapped deployments that meet the most stringent security requirements.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our environment is air-gapped - can you deploy offline?",
+      "stage_typically_appears": "early",
+      "effective_response": "Yes, Arize supports fully air-gapped deployments. We work with federal agencies that require complete isolation. Our team can discuss your specific deployment requirements.",
+      "frequency": 4
+    },
+    {
+      "objection": "We're building AI governance capabilities internally",
+      "stage_typically_appears": "mid",
+      "effective_response": "Internal governance tools often focus on policy while lacking production monitoring. Arize complements governance frameworks by providing the observability layer - you set the policies, Arize monitors compliance.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you planning to monitor your LLM deployments for accuracy and safety?",
+      "tied_to_signal": "Federal AI initiative",
+      "validates_hypothesis": "LLM monitoring need",
+      "follow_up_if_yes": "Does your current approach provide the audit trail needed for oversight?",
+      "follow_up_if_no": "What's blocking LLM monitoring implementation?"
+    },
+    {
+      "question": "What security authorization does your environment require for new vendors?",
+      "tied_to_signal": "Federal agency",
+      "validates_hypothesis": "Security requirements",
+      "follow_up_if_yes": "Is FedRAMP required, or do you have alternative authorization paths?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you meeting AI governance requirements for your deployed models?",
+      "tied_to_signal": "Federal AI mandate",
+      "validates_hypothesis": "Governance compliance",
+      "follow_up_if_yes": "Is observability a component of your governance framework?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Do you need air-gapped or on-premise deployment capabilities?",
+      "tied_to_signal": "Secure environment",
+      "validates_hypothesis": "Deployment requirements",
+      "follow_up_if_yes": "What's the typical timeline for security review of new vendors?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Defense Innovation Unit - DOD LLM",
+    "US Navy"
+  ],
+  "avg_deal_size": 496250,
+  "avg_sales_cycle_days": null
+}

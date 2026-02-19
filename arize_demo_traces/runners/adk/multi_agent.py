@@ -24,7 +24,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
     QUERIES,
     GUARDRAILS,
@@ -33,6 +33,8 @@ from ...use_cases.multi_agent import (
     ANALYSIS_PROMPT,
     WRITER_PROMPT,
     REVIEWER_PROMPT,
+    search_web,
+    analyze_metrics,
 )
 
 
@@ -41,6 +43,7 @@ def run_multi_agent(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute an ADK-style multi-agent orchestration: plan -> research -> analyze -> write -> review."""
     from opentelemetry import trace
@@ -60,6 +63,8 @@ def run_multi_agent(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "adk",
+            "metadata.use_case": "multi-agent-orchestration",
         },
     ) as agent_span:
 
@@ -100,6 +105,7 @@ def run_multi_agent(
                 "input.mime_type": "text/plain",
             },
         ) as research_agent_span:
+            run_tool_call(tracer, "search_web", query, search_web, guard=guard, query=query)
             with tracer.start_as_current_span(
                 "generate_content",
                 attributes={
@@ -132,6 +138,7 @@ def run_multi_agent(
                 "input.mime_type": "text/plain",
             },
         ) as analysis_agent_span:
+            run_tool_call(tracer, "analyze_metrics", query, analyze_metrics, guard=guard, metric_name="performance")
             with tracer.start_as_current_span(
                 "generate_content",
                 attributes={

@@ -778,10 +778,10 @@
         <div class="card">
             <div class="tabs-container">
                 <div class="tabs">
-                    <button class="tab" onclick="switchTab('hypothesis')">🔬 Hypothesis Research</button>
-                    <button class="tab active" onclick="switchTab('prospect')">📊 Prospect Overview</button>
-                    <button class="tab" onclick="switchTab('demo')">🎯 Custom Demo Builder</button>
-                    <button class="tab" onclick="switchTab('gong')">🔗 Gong URL</button>
+                    <button class="tab" onclick="switchTab('hypothesis', event)">🔬 Hypothesis Research</button>
+                    <button class="tab active" onclick="switchTab('prospect', event)">📊 Prospect Overview</button>
+                    <button class="tab" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
+                    <button class="tab" onclick="switchTab('gong', event)">🔗 Gong URL</button>
                 </div>
 
                 <div class="tab-content-wrapper">
@@ -856,7 +856,8 @@
                 <div class="input-section" style="margin-top: 15px;">
                     <label for="demoModelSelect">LLM Model for Demo Traces</label>
                     <select id="demoModelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
-                        <option value="claude-opus-4-6" selected>Claude Opus 4.6</option>
+                        <option value="gpt-5.2" selected>GPT-5.2</option>
+                        <option value="claude-opus-4-6">Claude Opus 4.6</option>
                         <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
                         <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
                         <option value="gpt-4.1">GPT-4.1</option>
@@ -878,6 +879,32 @@
                     >
                     <p class="help-text">
                         Name of the Arize project where traces will land. Defaults to the prospect name.
+                    </p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="demoArizeSpaceId">Arize Space ID (optional)</label>
+                    <input
+                        type="text"
+                        id="demoArizeSpaceId"
+                        placeholder="Leave blank to use app default"
+                        autocomplete="off"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
+                    >
+                    <p class="help-text">
+                        Your Arize Space ID. If set, traces from this demo are sent to this space instead of the app default.
+                    </p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="demoArizeApiKey">Arize API Key (optional)</label>
+                    <input
+                        type="password"
+                        id="demoArizeApiKey"
+                        placeholder="Leave blank to use app default"
+                        autocomplete="off"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
+                    >
+                    <p class="help-text">
+                        Your Arize API key. Use with Space ID above to send traces to your own Arize project.
                     </p>
                 </div>
                 <p class="help-text" style="margin-top: 15px; padding: 12px; background: #fff3e0; border-radius: 8px;">
@@ -921,10 +948,11 @@
             <div class="input-section" style="margin-bottom: 20px;">
                 <label for="modelSelect">AI Model</label>
                 <select id="modelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
+                    <option value="gpt-4o-mini" selected>GPT-4o Mini (Fast, ~30-60s)</option>
+                    <option value="gpt-5.2">GPT-5.2 (Latest, slower)</option>
+                    <option value="gpt-4o">GPT-4o (Most Capable)</option>
                     <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fast, Cost-effective)</option>
                     <option value="claude-sonnet-4">Claude 4 Sonnet (Balanced)</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini (Fast)</option>
-                    <option value="gpt-4o">GPT-4o (Most Capable)</option>
                 </select>
                 <p class="help-text">
                     Choose the AI model for analysis. Haiku is fastest, Sonnet/GPT-4o provide deeper insights.
@@ -944,6 +972,28 @@
             <div class="spinner"></div>
             <p id="loading-message">Analyzing call transcript with AI...</p>
             <p style="margin-top: 10px; font-size: 0.9em; color: #666;">This may take 30-60 seconds</p>
+        </div>
+
+        <!-- Demo use-case confirmation -->
+        <div id="demo-confirm" class="card" style="display: none;">
+            <h3 style="margin-bottom: 5px;">Confirm Use Case</h3>
+            <p id="confirm-reasoning" style="color: #666; font-size: 0.9em; margin-bottom: 8px;"></p>
+            <p id="confirm-data-sources" style="color: #888; font-size: 0.8em; margin-bottom: 15px; font-style: italic;"></p>
+            <div style="display: flex; gap: 15px;">
+                <div style="flex: 1;">
+                    <label for="confirmUseCase" style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em;">Use Case</label>
+                    <select id="confirmUseCase" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;"></select>
+                </div>
+                <div style="flex: 1;">
+                    <label for="confirmFramework" style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em;">Framework</label>
+                    <select id="confirmFramework" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;"></select>
+                </div>
+            </div>
+            <p id="confirm-industry" style="color: #888; font-size: 0.85em; margin-top: 10px;"></p>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn-primary" onclick="confirmAndGenerate()">Confirm & Generate</button>
+                <button onclick="cancelDemo()" style="padding: 10px 20px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+            </div>
         </div>
 
         <!-- Progress container for SSE streaming (prospect timeline) -->
@@ -976,17 +1026,20 @@
         // Initialize button state on page load
         document.addEventListener('DOMContentLoaded', function() {
             const analyzeBtn = document.getElementById('analyzeBtn');
-            const modelSection = document.getElementById('modelSelect').parentElement;
-            analyzeBtn.textContent = 'Get Prospect Overview';
-            modelSection.style.display = 'none';
+            const modelSelect = document.getElementById('modelSelect');
+            const modelSection = modelSelect ? modelSelect.parentElement : null;
+            if (analyzeBtn) analyzeBtn.textContent = 'Get Prospect Overview';
+            if (modelSection) modelSection.style.display = 'none';
         });
 
-        function switchTab(tab) {
+        function switchTab(tab, evt) {
             currentTab = tab;
 
             // Update tab buttons
-            document.querySelectorAll('.tab').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
+            const tabButtons = document.querySelectorAll('.tab');
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            const target = (evt && evt.target) || tabButtons[['hypothesis','prospect','demo','gong'].indexOf(tab)];
+            if (target) target.classList.add('active');
 
             // Update tab content
             document.getElementById('gong-tab').classList.toggle('active', tab === 'gong');
@@ -996,23 +1049,25 @@
             
             // Update button text and hide model selector for prospect overview / demo / hypothesis
             const analyzeBtn = document.getElementById('analyzeBtn');
-            const modelSection = document.getElementById('modelSelect').parentElement;
+            const modelSelect = document.getElementById('modelSelect');
+            const modelSection = modelSelect ? modelSelect.parentElement : null;
             if (tab === 'prospect') {
-                analyzeBtn.textContent = 'Get Prospect Overview';
-                modelSection.style.display = 'none';
+                if (analyzeBtn) analyzeBtn.textContent = 'Get Prospect Overview';
+                if (modelSection) modelSection.style.display = 'none';
             } else if (tab === 'demo') {
-                analyzeBtn.textContent = 'Generate Demo Traces';
-                modelSection.style.display = 'none';
+                if (analyzeBtn) analyzeBtn.textContent = 'Generate Demo Traces';
+                if (modelSection) modelSection.style.display = 'none';
             } else if (tab === 'hypothesis') {
-                analyzeBtn.textContent = 'Research Company';
-                modelSection.style.display = 'none';
+                if (analyzeBtn) analyzeBtn.textContent = 'Research Company';
+                if (modelSection) modelSection.style.display = 'none';
             } else {
-                analyzeBtn.textContent = 'Analyze Call';
-                modelSection.style.display = 'block';
+                if (analyzeBtn) analyzeBtn.textContent = 'Analyze Call';
+                if (modelSection) modelSection.style.display = 'block';
             }
         }
 
         function handleAnalyze() {
+            console.log('[Stillness] handleAnalyze called, currentTab=', currentTab);
             if (currentTab === 'prospect') {
                 analyzeProspect();
             } else if (currentTab === 'demo') {
@@ -1024,6 +1079,11 @@
             }
         }
 
+        // State for the two-phase demo flow
+        let _demoAccountName = '';
+        let _demoProjectName = '';
+        let _demoModel = '';
+
         async function generateDemo() {
             const accountName = document.getElementById('demoAccountName').value.trim();
             if (!accountName) {
@@ -1031,28 +1091,115 @@
                 return;
             }
 
-            const projectName = document.getElementById('demoProjectName').value.trim() || accountName.toLowerCase().replace(/\s+/g, '-') + '-demo';
-            const demoModel = document.getElementById('demoModelSelect').value;
+            // Save for phase 2
+            _demoAccountName = accountName;
+            _demoProjectName = document.getElementById('demoProjectName').value.trim() || accountName.toLowerCase().replace(/\s+/g, '-') + '-demo';
+            _demoModel = document.getElementById('demoModelSelect').value;
 
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
+            const confirm = document.getElementById('demo-confirm');
             const loadingMsg = document.getElementById('loading-message');
 
             loading.style.display = 'block';
             results.style.display = 'none';
-            loadingMsg.textContent = 'Starting...';
+            confirm.style.display = 'none';
+            loadingMsg.textContent = 'Classifying prospect use case...';
+
+            try {
+                const res = await fetch('/api/classify-demo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ account_name: accountName }),
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || `Classification failed: ${res.status}`);
+                }
+
+                const classification = await res.json();
+                loading.style.display = 'none';
+
+                // Populate use case dropdown
+                const ucSelect = document.getElementById('confirmUseCase');
+                ucSelect.innerHTML = '';
+                for (const uc of classification.available_use_cases) {
+                    const opt = document.createElement('option');
+                    opt.value = uc.value;
+                    opt.textContent = uc.label;
+                    if (uc.value === classification.use_case) opt.selected = true;
+                    ucSelect.appendChild(opt);
+                }
+
+                // Populate framework dropdown
+                const fwSelect = document.getElementById('confirmFramework');
+                fwSelect.innerHTML = '';
+                for (const fw of classification.available_frameworks) {
+                    const opt = document.createElement('option');
+                    opt.value = fw.value;
+                    opt.textContent = fw.label;
+                    if (fw.value === classification.framework) opt.selected = true;
+                    fwSelect.appendChild(opt);
+                }
+
+                // Show reasoning
+                const reasoningEl = document.getElementById('confirm-reasoning');
+                reasoningEl.textContent = classification.reasoning || 'Select or confirm the use case and framework for demo generation.';
+
+                // Show whether Gong/CRM data was used (transparency)
+                const dataSourcesEl = document.getElementById('confirm-data-sources');
+                dataSourcesEl.textContent = classification.data_sources_note || '';
+                dataSourcesEl.style.display = classification.data_sources_note ? 'block' : 'none';
+
+                // Show industry if available
+                const industryEl = document.getElementById('confirm-industry');
+                industryEl.textContent = classification.industry ? `Industry: ${classification.industry}` : '';
+
+                confirm.style.display = 'block';
+            } catch (err) {
+                loading.style.display = 'none';
+                results.style.display = 'block';
+                results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${err.message || 'Classification failed.'}</div>`;
+            }
+        }
+
+        function cancelDemo() {
+            document.getElementById('demo-confirm').style.display = 'none';
+        }
+
+        async function confirmAndGenerate() {
+            const useCase = document.getElementById('confirmUseCase').value;
+            const framework = document.getElementById('confirmFramework').value;
+
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const confirm = document.getElementById('demo-confirm');
+            const loadingMsg = document.getElementById('loading-message');
+
+            confirm.style.display = 'none';
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            loadingMsg.textContent = 'Starting trace generation...';
 
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 600000);
+                const demoArizeSpaceId = document.getElementById('demoArizeSpaceId').value.trim();
+                const demoArizeApiKey = document.getElementById('demoArizeApiKey').value.trim();
+                const payload = {
+                    account_name: _demoAccountName,
+                    project_name: _demoProjectName,
+                    model: _demoModel,
+                    use_case: useCase,
+                    framework: framework,
+                };
+                if (demoArizeSpaceId) payload.arize_space_id = demoArizeSpaceId;
+                if (demoArizeApiKey) payload.arize_api_key = demoArizeApiKey;
                 const res = await fetch('/api/generate-demo-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        account_name: accountName,
-                        project_name: projectName,
-                        model: demoModel,
-                    }),
+                    body: JSON.stringify(payload),
                     signal: controller.signal,
                 });
                 clearTimeout(timeoutId);
@@ -1105,7 +1252,7 @@
                 }
 
                 results.style.display = 'block';
-                let html = '<h2>🎯 Demo Traces Generated</h2>';
+                let html = '<h2>Demo Traces Generated</h2>';
                 html += `<div style="padding: 15px; background: #e8f5e9; border-radius: 8px; margin-bottom: 15px;">`;
                 html += `<p><strong>Prospect:</strong> ${data.prospect_name}</p>`;
                 html += `<p><strong>Industry:</strong> ${data.industry || 'N/A'}</p>`;
@@ -1120,7 +1267,23 @@
                 html += `<p><strong>LLM Calls:</strong> ${data.llm_calls_made}</p>`;
                 html += `<p><strong>Arize Project:</strong> ${data.project_name}</p>`;
                 if (data.arize_url) {
-                    html += `<p><a href="${data.arize_url}" target="_blank" rel="noreferrer" style="color: #1976d2; font-weight: bold;">Open in Arize →</a></p>`;
+                    html += `<p><a href="${data.arize_url}" target="_blank" rel="noreferrer" style="color: #1976d2; font-weight: bold;">Open in Arize</a></p>`;
+                }
+                if (data.eval_message != null && data.eval_message !== '') {
+                    const evalStyle = data.eval_created ? 'color: #2e7d32;' : 'color: #ed6c02;';
+                    html += `<p style="${evalStyle} margin-top: 8px;"><strong>Online evals:</strong> ${String(data.eval_message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>`;
+                }
+
+                // Download Script button
+                if (data.result && data.result.traces_generated > 0) {
+                    const scriptParams = new URLSearchParams({
+                        use_case: data.use_case,
+                        framework: data.framework || 'langgraph',
+                        model: data.model_used,
+                        project_name: data.project_name,
+                    });
+                    html += `<p style="margin-top: 10px;"><a href="/api/export-script?${scriptParams.toString()}" download style="display: inline-block; padding: 10px 20px; background: #1976d2; color: white; border-radius: 6px; text-decoration: none; font-weight: 600;">Download Trace Demo Script</a></p>`;
+                    html += `<p style="color: #888; font-size: 0.85em; margin-top: 4px;">Standalone .py file for prospects: run it, try a few turns, then open Arize to see how trace data is sent into the platform. Use <code>--batch</code> for 10 synthetic traces.</p>`;
                 }
                 html += `</div>`;
 
@@ -1129,7 +1292,14 @@
                     html += `<pre style="background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px;">${JSON.stringify(data.result, null, 2)}</pre>`;
                 }
 
-                html += `<p style="color: #666; margin-top: 15px;">Traces were sent to Arize automatically. Open the link above to walk through the demo.</p>`;
+                const errMsg = data.error_message || (data.result && data.result.error);
+                const noTraces = data.result && data.result.traces_generated === 0;
+                if (noTraces && errMsg) {
+                    const safeMsg = String(errMsg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                    html += `<p style="color: #c62828; margin-top: 15px;"><strong>No traces were sent.</strong> ${safeMsg}</p>`;
+                } else if (!noTraces) {
+                    html += `<p style="color: #666; margin-top: 15px;">Traces were sent to Arize automatically. Open the link above to walk through the demo.</p>`;
+                }
                 results.innerHTML = html;
             } catch (err) {
                 loading.style.display = 'none';
@@ -2272,8 +2442,11 @@
         }
 
         async function analyzeTranscript() {
-            const gongUrl = document.getElementById('gongUrl').value;
-            const transcript = document.getElementById('transcript').value;
+            console.log('[Stillness] analyzeTranscript called, currentTab=', currentTab);
+            try {
+            const gongUrl = (document.getElementById('gongUrl') || {}).value || '';
+            const transcriptEl = document.getElementById('transcript');
+            const transcript = transcriptEl ? transcriptEl.value : '';
             const analyzeBtn = document.getElementById('analyzeBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -2290,17 +2463,17 @@
             }
 
             // Show loading with appropriate message
-            analyzeBtn.disabled = true;
-            loading.style.display = 'block';
-            if (currentTab === 'gong') {
-                document.getElementById('loading-message').textContent = 'Fetching transcript from Gong API...';
-            } else {
-                document.getElementById('loading-message').textContent = 'Analyzing transcript...';
+            if (analyzeBtn) analyzeBtn.disabled = true;
+            if (loading) loading.style.display = 'block';
+            const loadingMsg = document.getElementById('loading-message');
+            if (loadingMsg) {
+                loadingMsg.textContent = currentTab === 'gong' ? 'Fetching transcript from Gong API...' : 'Analyzing transcript...';
             }
-            results.classList.remove('show');
+            if (results) results.classList.remove('show');
 
             // Get selected model
-            const selectedModel = document.getElementById('modelSelect').value;
+            const modelSelect = document.getElementById('modelSelect');
+            const selectedModel = modelSelect ? modelSelect.value : 'gpt-4o';
 
             // Build request body based on current tab
             const requestBody = {
@@ -2315,13 +2488,17 @@
             }
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 240000);
                 const response = await fetch('/api/analyze', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     const error = await response.json();
@@ -2331,11 +2508,20 @@
                 const data = await response.json();
                 displayResults(data);
             } catch (error) {
-                alert('Error: ' + error.message);
-                console.error(error);
+                const msg = error.name === 'AbortError' ? 'Request timed out after 4 minutes. Try a faster model (GPT-4o Mini) or shorter transcript.' : (error.message || String(error));
+                alert('Error: ' + msg);
+                console.error('Analyze error:', error);
             } finally {
-                analyzeBtn.disabled = false;
-                loading.style.display = 'none';
+                if (analyzeBtn) analyzeBtn.disabled = false;
+                if (loading) loading.style.display = 'none';
+            }
+            } catch (err) {
+                alert('Unexpected error: ' + (err.message || String(err)));
+                console.error('Analyze transcript error:', err);
+                const ab = document.getElementById('analyzeBtn');
+                const ld = document.getElementById('loading');
+                if (ab) ab.disabled = false;
+                if (ld) ld.style.display = 'none';
             }
         }
 
@@ -2814,12 +3000,15 @@
             `;
         }
 
-        // Allow Enter key in textarea without submitting
-        document.getElementById('transcript').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.stopPropagation();
-            }
-        });
+        // Allow Enter key in transcript textarea without submitting (if manual tab exists)
+        const transcriptEl = document.getElementById('transcript');
+        if (transcriptEl) {
+            transcriptEl.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.stopPropagation();
+                }
+            });
+        }
     </script>
 </body>
 </html>

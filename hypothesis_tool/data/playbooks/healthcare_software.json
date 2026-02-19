@@ -1,0 +1,108 @@
+{
+  "industry": "Healthcare Software",
+  "deal_count": 16,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "No observability into clinical ML models - critical systems running blind",
+      "frequency": 6,
+      "example_quote": "no observability"
+    },
+    {
+      "pain": "Healthcare AI requires explainability for clinician trust and regulatory compliance",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Model drift in clinical settings can directly impact patient outcomes",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "HIPAA and compliance requirements limit monitoring tool options",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Full observability for clinical ML models with audit trails",
+      "frequency": 6,
+      "use_case": "Clinical AI monitoring"
+    },
+    {
+      "value": "Explainability features that build clinician confidence",
+      "frequency": 5,
+      "use_case": "Clinical adoption"
+    },
+    {
+      "value": "HIPAA-compliant deployment options",
+      "frequency": 4,
+      "use_case": "Compliance"
+    },
+    {
+      "value": "Drift detection for patient-facing models",
+      "frequency": 4,
+      "use_case": "Patient safety"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We need HIPAA compliance - can you guarantee that?",
+      "stage_typically_appears": "early",
+      "effective_response": "Absolutely. Arize offers HIPAA-compliant deployments and works with major healthcare organizations including Tempus Labs, Teladoc Health, and Northwestern Medicine. We can sign a BAA and discuss your specific compliance requirements.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our clinical team needs to understand model decisions - is Arize explainable?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Yes, explainability is core to Arize. We provide feature importance, cohort analysis, and detailed breakdowns of model behavior. This helps clinicians understand and trust the AI recommendations.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our IT/security team will need to approve any new vendor",
+      "stage_typically_appears": "early",
+      "effective_response": "We're prepared for healthcare security reviews. We have SOC2, can deploy in your VPC or private cloud, and have security documentation ready. Cohere Health and Intermountain Health went through similar processes.",
+      "frequency": 4
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you currently monitoring your clinical ML models for accuracy and reliability?",
+      "tied_to_signal": "Clinical AI",
+      "validates_hypothesis": "Observability gap",
+      "follow_up_if_yes": "Does your current solution provide the audit trail needed for compliance?",
+      "follow_up_if_no": "What's preventing you from implementing monitoring?"
+    },
+    {
+      "question": "How do clinicians currently understand why the AI made a particular recommendation?",
+      "tied_to_signal": "Clinical-facing AI",
+      "validates_hypothesis": "Explainability needs",
+      "follow_up_if_yes": "Is that level of explainability sufficient for clinician trust?",
+      "follow_up_if_no": "Is that affecting clinical adoption of your AI tools?"
+    },
+    {
+      "question": "What's your process when a model shows drift or unexpected behavior in a clinical setting?",
+      "tied_to_signal": "Production clinical ML",
+      "validates_hypothesis": "Drift response",
+      "follow_up_if_yes": "How quickly can you respond to protect patient outcomes?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What compliance requirements do monitoring tools need to meet in your environment?",
+      "tied_to_signal": "Healthcare organization",
+      "validates_hypothesis": "Compliance requirements",
+      "follow_up_if_yes": "Which requirements have been hardest to satisfy with other vendors?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Tempus Labs",
+    "Teladoc Health",
+    "Cohere Health",
+    "Atropos Health",
+    "Neurocare.ai"
+  ],
+  "avg_deal_size": 66720,
+  "avg_sales_cycle_days": null
+}

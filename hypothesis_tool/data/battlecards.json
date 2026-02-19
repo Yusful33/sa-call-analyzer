@@ -1,0 +1,175 @@
+{
+  "langsmith": {
+    "name": "LangSmith",
+    "when_they_use": [
+      "LangChain-heavy development",
+      "Tracing LLM calls",
+      "Prompt management"
+    ],
+    "arize_advantages": [
+      "Broader eval framework beyond LangChain",
+      "Better for production monitoring at scale",
+      "Not locked to LangChain ecosystem",
+      "Unified platform for traditional ML and LLMs"
+    ],
+    "displacement_questions": [
+      "How are you handling evals beyond what LangSmith provides?",
+      "Are you finding LangSmith sufficient as you scale to production?",
+      "What's your monitoring story for non-LangChain components?",
+      "How do you handle drift detection in production?"
+    ],
+    "key_differentiators": [
+      "LangSmith is LangChain-focused; Arize is framework-agnostic",
+      "Arize has native production monitoring with drift/performance alerts",
+      "Arize provides deeper root cause analysis"
+    ],
+    "watch_outs": [
+      "If they're deeply invested in LangChain, switching cost is higher",
+      "LangSmith is often free for small scale"
+    ]
+  },
+  "braintrust": {
+    "name": "Braintrust",
+    "when_they_use": [
+      "LLM evals and testing",
+      "Prompt playground and iteration",
+      "Dataset management for evals"
+    ],
+    "arize_advantages": [
+      "Unified platform for evals AND production monitoring",
+      "Real-time alerting on eval regressions",
+      "Traditional ML support alongside LLMs",
+      "Deeper tracing and root cause analysis"
+    ],
+    "displacement_questions": [
+      "How are you connecting your Braintrust evals to what's happening in production?",
+      "When an eval score drops, how do you trace that back to specific prompts or retrieval issues?",
+      "Are you also monitoring traditional ML models, or just LLMs?",
+      "What's your workflow when you need to debug a production issue - do you have to context-switch between tools?"
+    ],
+    "key_differentiators": [
+      "Braintrust is evals-focused; Arize provides full observability lifecycle",
+      "Arize has native production monitoring with drift/performance alerts",
+      "Arize supports both traditional ML and LLMs in one platform"
+    ],
+    "watch_outs": [
+      "Braintrust has strong eval features, don't dismiss their capabilities",
+      "Some teams prefer separate tools for evals vs monitoring"
+    ]
+  },
+  "weights_and_biases": {
+    "name": "Weights & Biases",
+    "when_they_use": [
+      "Experiment tracking during training",
+      "Model versioning",
+      "Training visualization"
+    ],
+    "arize_advantages": [
+      "Production focus vs training focus",
+      "Drift detection and real-time monitoring",
+      "Better for operational ML vs experimental ML"
+    ],
+    "displacement_questions": [
+      "How are you bridging the gap between W&B experiment tracking and production monitoring?",
+      "What's your process when a production model drifts from training?",
+      "Do you have visibility into how models perform on live traffic?",
+      "How quickly can you identify and debug production issues?"
+    ],
+    "key_differentiators": [
+      "W&B is training-focused; Arize is production-focused",
+      "Arize provides real-time drift detection and alerting",
+      "Better root cause analysis for production issues"
+    ],
+    "watch_outs": [
+      "W&B has strong brand recognition in ML community",
+      "Some teams use W&B for training and want Arize for production - this can be complementary"
+    ]
+  },
+  "datadog": {
+    "name": "Datadog",
+    "when_they_use": [
+      "General infrastructure monitoring",
+      "APM and logging",
+      "Some ML monitoring through integrations"
+    ],
+    "arize_advantages": [
+      "Purpose-built for ML/AI observability",
+      "Deeper ML-specific metrics (drift, performance, embeddings)",
+      "Better understanding of ML failure modes",
+      "Native support for model evaluation"
+    ],
+    "displacement_questions": [
+      "How are you monitoring ML-specific metrics like drift in Datadog?",
+      "Can you do root cause analysis when a model degrades?",
+      "How do you evaluate model quality beyond basic latency/error rates?",
+      "What's your process for debugging model-specific issues vs infrastructure issues?"
+    ],
+    "key_differentiators": [
+      "Datadog is general infrastructure; Arize is ML-native",
+      "Arize understands ML semantics (features, predictions, embeddings)",
+      "Better for ML teams who need deep model insights"
+    ],
+    "watch_outs": [
+      "Datadog is often already deployed - another tool is more complexity",
+      "Some teams want 'one pane of glass' and resist ML-specific tools"
+    ]
+  },
+  "homegrown": {
+    "name": "Homegrown / DIY",
+    "signals": [
+      "Custom dashboards in Grafana",
+      "Prometheus + custom metrics",
+      "Manual alerting",
+      "In-house monitoring scripts"
+    ],
+    "arize_advantages": [
+      "Purpose-built for ML, not retrofitted",
+      "Less maintenance burden on the team",
+      "Better root cause analysis out of the box",
+      "Faster time to value vs building"
+    ],
+    "displacement_questions": [
+      "How much time does your team spend maintaining monitoring infrastructure?",
+      "When a model degrades, how quickly can you identify the root cause?",
+      "What would your team do with the time saved if monitoring was handled?",
+      "Have you calculated the total cost of ownership for your homegrown solution?"
+    ],
+    "key_differentiators": [
+      "Build vs buy - focus on core product not infrastructure",
+      "Arize has years of ML observability expertise baked in",
+      "Continuous improvements without engineering investment"
+    ],
+    "watch_outs": [
+      "Engineers often proud of what they built - be respectful",
+      "Migration from homegrown can be painful",
+      "Some orgs have 'build everything' culture"
+    ]
+  },
+  "greenfield": {
+    "name": "No Solution (Greenfield)",
+    "signals": [
+      "No ML monitoring in place",
+      "Just started deploying models",
+      "Flying blind in production"
+    ],
+    "arize_advantages": [
+      "Build it right from the start",
+      "Avoid technical debt of homegrown solutions",
+      "Faster path to production-ready ML"
+    ],
+    "displacement_questions": [
+      "What's your current visibility into production model performance?",
+      "How would you know if a model started degrading tomorrow?",
+      "What's your plan for monitoring as you scale?",
+      "How do you currently debug model issues in production?"
+    ],
+    "key_differentiators": [
+      "Start with best practices vs learning the hard way",
+      "Get monitoring right before production incidents happen"
+    ],
+    "watch_outs": [
+      "May not see the need until they've had a production incident",
+      "Budget may not be allocated yet for monitoring"
+    ]
+  }
+}

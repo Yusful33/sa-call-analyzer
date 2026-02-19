@@ -24,6 +24,13 @@ def get_chat_llm(model: str, temperature: float = 0, **kwargs: Any):
             **kwargs,
         )
 
+    # Prefer direct OpenAI API when key is available (avoids LiteLLM proxy issues)
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if openai_api_key:
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(model=model, temperature=temperature, **kwargs)
+
+    # Fall back to LiteLLM proxy
     use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
     litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
     llm_kwargs = {}

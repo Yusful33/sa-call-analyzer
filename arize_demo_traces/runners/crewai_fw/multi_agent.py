@@ -10,7 +10,7 @@ from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
     QUERIES,
     AGENTS,
@@ -19,6 +19,8 @@ from ...use_cases.multi_agent import (
     ANALYSIS_PROMPT,
     WRITER_PROMPT,
     REVIEWER_PROMPT,
+    search_web,
+    analyze_metrics,
 )
 
 
@@ -27,6 +29,7 @@ def run_multi_agent(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a CrewAI multi-agent orchestration: guardrails -> 4-agent crew."""
     from opentelemetry import trace
@@ -45,6 +48,8 @@ def run_multi_agent(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "crewai",
+            "metadata.use_case": "multi-agent-orchestration",
         },
     ) as root_span:
 
@@ -54,6 +59,10 @@ def run_multi_agent(
                 tracer, g["name"], query, llm, guard,
                 system_prompt=g["system_prompt"],
             )
+
+        # === TOOL CALLS ===
+        run_tool_call(tracer, "search_web", query, search_web, guard=guard, query=query)
+        run_tool_call(tracer, "analyze_metrics", query, analyze_metrics, guard=guard, metric_name="performance")
 
         # === CREWAI AGENTS ===
         agent_cfgs = AGENTS  # researcher, analyst, writer, reviewer

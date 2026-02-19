@@ -98,7 +98,29 @@ def run_evaluator(tracer, name, question, response, llm, guard=None, criteria="q
         return result
 
 
-def run_local_evaluator(tracer, name, score, label="", input_value=""):
+def run_tool_call(tracer, name, input_value, tool_fn, guard=None, **kwargs):
+    """Create a TOOL span and execute a tool function."""
+    from opentelemetry.trace import Status, StatusCode
+
+    with tracer.start_as_current_span(
+        name,
+        attributes={
+            "openinference.span.kind": "TOOL",
+            "tool.name": name,
+            "input.value": str(input_value)[:500],
+            "input.mime_type": "text/plain",
+        },
+    ) as span:
+        if guard:
+            guard.check()
+        result = tool_fn(**kwargs)
+        span.set_attribute("output.value", str(result)[:2000])
+        span.set_attribute("output.mime_type", "text/plain")
+        span.set_status(Status(StatusCode.OK))
+        return result
+
+
+def run_local_evaluator(tracer, name, score, label="", input_value="", explanation=""):
     """Create an EVALUATOR span for computed (non-LLM) metrics like response time."""
     from opentelemetry.trace import Status, StatusCode
 
@@ -110,10 +132,13 @@ def run_local_evaluator(tracer, name, score, label="", input_value=""):
             "input.mime_type": "text/plain",
         },
     ) as span:
-        span.set_attribute("output.value", f"{score}")
+        output = explanation if explanation else f"{score}"
+        span.set_attribute("output.value", output)
         span.set_attribute("output.mime_type", "text/plain")
         span.set_attribute("eval.score", float(score) if isinstance(score, (int, float)) else 0.0)
         if label:
             span.set_attribute("eval.label", label)
+        if explanation:
+            span.set_attribute("eval.explanation", explanation)
         span.set_status(Status(StatusCode.OK))
         return score

@@ -12,13 +12,15 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
     format_docs,
+    search_documents,
+    fetch_document_metadata,
 )
 
 
@@ -35,6 +37,7 @@ def run_rag(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangGraph RAG pipeline: guardrails -> retrieve -> generate."""
     from opentelemetry import trace
@@ -59,11 +62,17 @@ def run_rag(
         return {"guardrail_passed": True}
 
     def retrieve_node(state: RAGState) -> dict:
+        run_tool_call(tracer, "search_documents", state["query"],
+                      search_documents, guard=guard, query=state["query"])
         if guard:
             guard.check()
         vectorstore = get_vectorstore()
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
         docs = retriever.invoke(state["query"])
+        if docs:
+            run_tool_call(tracer, "fetch_document_metadata", docs[0].metadata.get("source", ""),
+                          fetch_document_metadata, guard=guard,
+                          source=docs[0].metadata.get("source", "unknown"))
         return {"context": format_docs(docs), "retrieved_docs": docs}
 
     def generate_node(state: RAGState) -> dict:
@@ -96,6 +105,8 @@ def run_rag(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langgraph",
+            "metadata.use_case": "retrieval-augmented-search",
         },
     ) as span:
         result = graph.invoke({

@@ -1,0 +1,107 @@
+{
+  "industry": "E-commerce",
+  "deal_count": 10,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Recommendation models directly impact GMV - degradation means lost sales",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Search ranking quality degrades without visibility until conversion drops",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Personalization models drift as user behavior and inventory change",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "No way to connect model performance to business metrics like AOV and conversion",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Protect GMV by detecting recommendation degradation early",
+      "frequency": 6,
+      "use_case": "Revenue protection"
+    },
+    {
+      "value": "Monitor search ranking quality before it impacts conversion",
+      "frequency": 5,
+      "use_case": "Search quality"
+    },
+    {
+      "value": "Track personalization model drift in real-time",
+      "frequency": 4,
+      "use_case": "Personalization"
+    },
+    {
+      "value": "Connect model metrics to business KPIs like AOV and conversion",
+      "frequency": 4,
+      "use_case": "Business impact"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We track conversion rates - isn't that enough?",
+      "stage_typically_appears": "early",
+      "effective_response": "Conversion tells you something went wrong, but not why or which model caused it. Arize connects model behavior to conversion so you can identify and fix root causes quickly. That's how Stitch Fix and OLX approach it.",
+      "frequency": 5
+    },
+    {
+      "objection": "We're moving fast - implementation needs to be quick",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize SDK integration takes less than a day for most e-commerce companies. You can start with your most critical model and expand. The faster you get monitoring, the faster you protect revenue.",
+      "frequency": 3
+    },
+    {
+      "objection": "How do you handle real-time data at our scale?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize handles production scale for major e-commerce players. We process millions of predictions daily and provide real-time monitoring. We can discuss your specific scale requirements.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How quickly can you detect when your recommendation models start degrading?",
+      "tied_to_signal": "Recommendations",
+      "validates_hypothesis": "Detection speed",
+      "follow_up_if_yes": "Is that fast enough to prevent meaningful GMV impact?",
+      "follow_up_if_no": "How do you typically find out about model issues?"
+    },
+    {
+      "question": "Can you connect model performance metrics directly to business KPIs like conversion and AOV?",
+      "tied_to_signal": "E-commerce analytics",
+      "validates_hypothesis": "Business correlation",
+      "follow_up_if_yes": "Is that connection actionable for model improvements?",
+      "follow_up_if_no": "Would that visibility help prioritize model work?"
+    },
+    {
+      "question": "How do you handle model drift when inventory, pricing, or user behavior changes rapidly?",
+      "tied_to_signal": "Dynamic catalog",
+      "validates_hypothesis": "Drift from change",
+      "follow_up_if_yes": "Can you distinguish between expected changes and actual degradation?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What's the revenue impact when a key model underperforms for even a few hours?",
+      "tied_to_signal": "Revenue-critical ML",
+      "validates_hypothesis": "Revenue at risk",
+      "follow_up_if_yes": "Does that justify investment in better monitoring?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Stitch Fix",
+    "OpenStore",
+    "OLX Group",
+    "Flipp Corp"
+  ],
+  "avg_deal_size": 75000,
+  "avg_sales_cycle_days": null
+}

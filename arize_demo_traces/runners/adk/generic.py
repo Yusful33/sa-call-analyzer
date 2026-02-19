@@ -16,8 +16,8 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT
+from ...trace_enrichment import run_guardrail, run_tool_call
+from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
 
 
 def run_generic(
@@ -25,6 +25,7 @@ def run_generic(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute an ADK-style generic assistant agent: guardrails -> generate."""
     from opentelemetry import trace
@@ -44,6 +45,8 @@ def run_generic(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "adk",
+            "metadata.use_case": "generic",
         },
     ) as agent_span:
 
@@ -53,6 +56,10 @@ def run_generic(
                 tracer, g["name"], query, llm, guard,
                 system_prompt=g["system_prompt"],
             )
+
+        # ---- Tool calls: web search and context ----
+        run_tool_call(tracer, "web_search", query, web_search, guard=guard, query=query)
+        run_tool_call(tracer, "get_current_context", query, get_current_context, guard=guard)
 
         # ---- generate_content: generate response ----
         with tracer.start_as_current_span(

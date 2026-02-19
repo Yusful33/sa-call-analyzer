@@ -13,8 +13,8 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT
+from ...trace_enrichment import run_guardrail, run_tool_call
+from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
 
 
 class GenericState(TypedDict):
@@ -28,6 +28,7 @@ def run_generic(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangGraph generic pipeline: guardrails -> generate."""
     from opentelemetry import trace
@@ -52,6 +53,10 @@ def run_generic(
         return {"guardrail_passed": True}
 
     def generate_node(state: GenericState) -> dict:
+        run_tool_call(tracer, "web_search", state["query"],
+                      web_search, guard=guard, query=state["query"])
+        run_tool_call(tracer, "get_current_context", state["query"],
+                      get_current_context, guard=guard)
         prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
             ("human", "{question}"),
@@ -78,6 +83,8 @@ def run_generic(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langgraph",
+            "metadata.use_case": "generic",
         },
     ) as span:
         result = graph.invoke({

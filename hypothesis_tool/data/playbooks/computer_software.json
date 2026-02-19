@@ -1,0 +1,108 @@
+{
+  "industry": "Computer Software",
+  "deal_count": 22,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "ML-powered product features degrading without visibility until users complain",
+      "frequency": 7,
+      "example_quote": null
+    },
+    {
+      "pain": "Data scientists spending too much time debugging production issues",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "No clear ownership of model performance between engineering and data science",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Scaling ML operations as model count grows - internal tools don't scale",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Proactive monitoring catches feature degradation before users notice",
+      "frequency": 7,
+      "use_case": "User experience"
+    },
+    {
+      "value": "Self-serve debugging frees data scientists to build new models",
+      "frequency": 6,
+      "use_case": "DS productivity"
+    },
+    {
+      "value": "Clear visibility helps align engineering and data science on model health",
+      "frequency": 5,
+      "use_case": "Team alignment"
+    },
+    {
+      "value": "Platform scales with your model count without additional overhead",
+      "frequency": 4,
+      "use_case": "ML operations scale"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We're using MLflow for model management",
+      "stage_typically_appears": "early",
+      "effective_response": "MLflow is great for experiment tracking and model registry, but it's not designed for production monitoring. Arize complements MLflow by providing the observability layer once models are deployed.",
+      "frequency": 6
+    },
+    {
+      "objection": "Our engineering team already monitors the system",
+      "stage_typically_appears": "early",
+      "effective_response": "Engineering monitoring (APM, infrastructure) doesn't understand ML-specific issues like drift, feature importance shifts, or embedding quality. Arize provides ML-native monitoring that engineering tools can't.",
+      "frequency": 5
+    },
+    {
+      "objection": "We only have a few models - do we need a platform?",
+      "stage_typically_appears": "early",
+      "effective_response": "Even a few models benefit from proper monitoring. eBay started with key models and expanded. The question is: what's the business impact if those models degrade? That usually justifies monitoring.",
+      "frequency": 4
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How do you currently know when an ML-powered feature is degrading?",
+      "tied_to_signal": "ML-powered product",
+      "validates_hypothesis": "Visibility gap",
+      "follow_up_if_yes": "Is that fast enough to prevent user impact?",
+      "follow_up_if_no": "How do you typically find out about issues?"
+    },
+    {
+      "question": "What percentage of your data science team's time goes to debugging vs building new models?",
+      "tied_to_signal": "DS team",
+      "validates_hypothesis": "Productivity waste",
+      "follow_up_if_yes": "Is leadership satisfied with that ratio?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Who owns model performance in production - data science or engineering?",
+      "tied_to_signal": "Production ML",
+      "validates_hypothesis": "Ownership clarity",
+      "follow_up_if_yes": "Does that ownership have the right tools?",
+      "follow_up_if_no": "Is that ambiguity causing issues?"
+    },
+    {
+      "question": "As you add more models, how will your monitoring approach scale?",
+      "tied_to_signal": "Growing ML usage",
+      "validates_hypothesis": "Scaling concerns",
+      "follow_up_if_yes": "What's your model count trajectory?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "eBay",
+    "PagerDuty",
+    "Adara Inc",
+    "Flipp Corp",
+    "Ichizoku"
+  ],
+  "avg_deal_size": 59816,
+  "avg_sales_cycle_days": null
+}

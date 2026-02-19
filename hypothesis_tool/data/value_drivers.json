@@ -1,0 +1,169 @@
+{
+  "value_categories": {
+    "reduce_risk": {
+      "description": "Reduce operational and business risk from AI/ML systems",
+      "patterns": [
+        {
+          "pain": "No visibility into model performance",
+          "industries": ["Music", "Restaurants", "Hospitals"],
+          "arize_solution": "Production monitoring and alerting for model degradation",
+          "quote": null
+        },
+        {
+          "pain": "Models are drifting, accuracy degrading",
+          "industries": ["Telecommunications", "Insurance", "Banking"],
+          "arize_solution": "Drift detection and automated alerts before business impact",
+          "quote": null
+        },
+        {
+          "pain": "ML performance degradation in critical systems (Ads, Trust & Safety, Search)",
+          "industries": ["E-commerce", "Social Networks", "AdTech"],
+          "arize_solution": "Real-time performance monitoring across model fleet",
+          "quote": null
+        },
+        {
+          "pain": "No solution for RCA when production issues occur",
+          "industries": ["Transportation", "Software", "Data/Internet"],
+          "arize_solution": "Root cause analysis and troubleshooting workflows",
+          "quote": null
+        },
+        {
+          "pain": "LLM hallucinations and quality issues in production",
+          "industries": ["Management Consulting", "BI Software", "Enterprise"],
+          "arize_solution": "LLM evaluation, hallucination detection, and response quality monitoring",
+          "quote": null
+        }
+      ]
+    },
+    "increase_efficiency": {
+      "description": "Go faster - reduce time spent troubleshooting and debugging",
+      "patterns": [
+        {
+          "pain": "Takes 2+ weeks to troubleshoot production issues (70% of time)",
+          "industries": ["Telecommunications", "Enterprise"],
+          "arize_solution": "Automated RCA reduces troubleshooting from weeks to hours",
+          "quote": null
+        },
+        {
+          "pain": "Too much time wasted on manual troubleshooting models in production",
+          "industries": ["Social Networks", "Software", "Tech"],
+          "arize_solution": "Proactive monitoring catches issues before they escalate",
+          "quote": "Arize would literally stop us from working weekends. By catching issues sooner, I would get so much of my life back."
+        },
+        {
+          "pain": "Data scientists spending majority of time debugging vs building",
+          "industries": ["All"],
+          "arize_solution": "Self-serve debugging tools let DS focus on high-value work",
+          "quote": null
+        },
+        {
+          "pain": "LLM prompt iteration is slow and lacks visibility",
+          "industries": ["All GenAI adopters"],
+          "arize_solution": "Prompt tracing and evaluation accelerates iteration cycles",
+          "quote": null
+        }
+      ]
+    },
+    "increase_revenue": {
+      "description": "Increase revenue through better model performance",
+      "patterns": [
+        {
+          "pain": "Missed ad spend / revenue from model degradation",
+          "industries": ["Grocery Retail", "AdTech", "E-commerce"],
+          "arize_solution": "Prevent revenue-impacting model failures with monitoring",
+          "quote": "$10m / month in automated ad allocation - need to ensure models perform"
+        },
+        {
+          "pain": "Poor recommendations/matching leads to lost business",
+          "industries": ["Human Resources Software", "E-commerce", "Media"],
+          "arize_solution": "Monitor recommendation quality and relevance metrics",
+          "quote": "When we don't place candidates, we don't get paid. Arize helps ensure our matching algorithms perform."
+        },
+        {
+          "pain": "Customer churn from poor AI/ML-powered experiences",
+          "industries": ["Telecommunications", "SaaS", "Consumer"],
+          "arize_solution": "Monitor customer-facing models to ensure quality experience",
+          "quote": null
+        },
+        {
+          "pain": "LLM-powered products delivering poor responses hurts conversion",
+          "industries": ["SaaS", "Consumer Tech", "Enterprise"],
+          "arize_solution": "LLM quality monitoring ensures AI assistants deliver value",
+          "quote": null
+        }
+      ]
+    },
+    "reduce_cost": {
+      "description": "Reduce costs through efficiency and avoiding build-vs-buy",
+      "patterns": [
+        {
+          "pain": "Building internal monitoring creates technical debt",
+          "industries": ["Enterprise", "All"],
+          "arize_solution": "Purpose-built platform vs. homegrown solutions",
+          "quote": "They don't want to waste time building a solution, then acquiring technical debt"
+        },
+        {
+          "pain": "Can't retain ML talent without proper tooling",
+          "industries": ["Insurance", "Traditional Enterprise"],
+          "arize_solution": "Modern ML tooling helps attract and retain talent",
+          "quote": null
+        },
+        {
+          "pain": "LLM token costs spiraling without visibility",
+          "industries": ["All GenAI adopters"],
+          "arize_solution": "Token usage monitoring and cost optimization",
+          "quote": null
+        },
+        {
+          "pain": "Multiple point solutions creating complexity",
+          "industries": ["Enterprise"],
+          "arize_solution": "Unified platform for MLOps and LLMOps",
+          "quote": "Need unified platform to do both, MLOps and LLMOps"
+        }
+      ]
+    }
+  },
+  "llm_specific_patterns": [
+    {
+      "pain": "Trouble with evaluations on LLMs - numeric vs thumbs up/down",
+      "solution": "Arize LLM evaluation framework with customizable metrics",
+      "industries": ["Management Consulting", "Enterprise"]
+    },
+    {
+      "pain": "Cosine similarity metrics not meeting targets",
+      "solution": "RAG retrieval quality monitoring and optimization",
+      "industries": ["BI Software", "Enterprise Search"]
+    },
+    {
+      "pain": "Toxicity concerns on AI assistants",
+      "solution": "Content safety monitoring and guardrails",
+      "industries": ["HR Tech", "Consumer"]
+    },
+    {
+      "pain": "End-to-end tracing for LLM workflows",
+      "solution": "LangGraph/LangChain tracing with Arize Phoenix",
+      "industries": ["All GenAI adopters"]
+    },
+    {
+      "pain": "Teams need visibility into agent workflows",
+      "solution": "Multi-step agent tracing and debugging",
+      "industries": ["Enterprise", "Tech"]
+    }
+  ],
+  "urgency_triggers": [
+    "Executive mandate to improve model performance by specific date",
+    "Teams working weekends debugging production issues",
+    "Cost of delay - revenue at risk each day without solution",
+    "Current vendor (Fiddler, homegrown) breaking under pressure",
+    "Multiple teams pressing for solution",
+    "Security/compliance audit requiring observability"
+  ],
+  "why_arize_reasons": [
+    "Superior debuggability and root cause analysis",
+    "Usability and ease of adoption",
+    "Scalability for production workloads",
+    "Buy vs build - avoid technical debt",
+    "Partnership and support quality",
+    "Unified MLOps + LLMOps platform"
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "industry": "Insurance",
+  "deal_count": 25,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Old infrastructure preventing modern ML monitoring - can't retain talent due to outdated tooling",
+      "frequency": 8,
+      "example_quote": "old infrastructure. can't retain talent. data drift and data quality issues."
+    },
+    {
+      "pain": "Data drift and data quality issues degrading model accuracy over time",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "No visibility into model performance in production for underwriting and claims models",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Risk scoring models degrading without early warning systems",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Fraud detection models require constant monitoring but lack proper tooling",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Modern ML platform that helps attract and retain data science talent",
+      "frequency": 8,
+      "use_case": "Talent retention and recruitment"
+    },
+    {
+      "value": "Automated drift detection catches model degradation before it impacts claims processing",
+      "frequency": 6,
+      "use_case": "Claims automation models"
+    },
+    {
+      "value": "Data quality monitoring ensures underwriting models maintain accuracy",
+      "frequency": 5,
+      "use_case": "Risk scoring and underwriting"
+    },
+    {
+      "value": "Real-time monitoring for fraud detection models",
+      "frequency": 4,
+      "use_case": "Fraud detection"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We have strict compliance requirements - can your platform meet them?",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize is SOC2 compliant and works with major insurers including New York Life, PURE Insurance, and Die Mobiliar. We can deploy in your VPC for maximum data security.",
+      "frequency": 6
+    },
+    {
+      "objection": "Our data science team is small and may not have bandwidth to implement",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize's SDK integration takes less than a day. Our customers find that the time saved on troubleshooting more than offsets implementation time - you'll get that time back within weeks.",
+      "frequency": 4
+    },
+    {
+      "objection": "We're already using homegrown monitoring",
+      "stage_typically_appears": "early",
+      "effective_response": "Many insurance companies started that way but found maintaining internal tools creates technical debt and diverts data scientists from high-value work. Arize replaces that with a purpose-built platform.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you currently monitoring for drift in your underwriting or claims models?",
+      "tied_to_signal": "Uses ML for underwriting or claims",
+      "validates_hypothesis": "Lack of drift monitoring",
+      "follow_up_if_yes": "How quickly can you detect when drift is impacting business outcomes?",
+      "follow_up_if_no": "What happens when model accuracy degrades without early warning?"
+    },
+    {
+      "question": "Are you finding it challenging to retain ML talent given your current tooling?",
+      "tied_to_signal": "Job postings for data scientists",
+      "validates_hypothesis": "Talent retention pain",
+      "follow_up_if_yes": "What do candidates typically ask about in terms of your ML infrastructure?",
+      "follow_up_if_no": "What tools have helped you retain your data science team?"
+    },
+    {
+      "question": "When a production model issue occurs, how long does it typically take to identify the root cause?",
+      "tied_to_signal": "Production ML systems",
+      "validates_hypothesis": "Troubleshooting time waste",
+      "follow_up_if_yes": "Is that time acceptable given the potential revenue impact?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you handling data quality monitoring for your ML pipelines?",
+      "tied_to_signal": "Data quality concerns mentioned",
+      "validates_hypothesis": "Data quality issues",
+      "follow_up_if_yes": "How often do data issues slip through to production?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "New York Life",
+    "PURE Insurance",
+    "Next Insurance",
+    "Clearcover",
+    "Die Mobiliar"
+  ],
+  "avg_deal_size": 67926,
+  "avg_sales_cycle_days": null
+}

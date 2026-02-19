@@ -1,0 +1,108 @@
+{
+  "industry": "Telephony & Wireless",
+  "deal_count": 9,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Models are drifting and accuracy is degrading (fraud & customer churn models)",
+      "frequency": 6,
+      "example_quote": "Models are drifting, need to improve accuracy (fraud & customer churn), takes DSPs 2 weeks to troubleshoot (70% of time) on avg, and usually the problem is still not solved"
+    },
+    {
+      "pain": "Data scientists spend 70% of time troubleshooting - averaging 2 weeks per issue",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Even after weeks of troubleshooting, problems often remain unsolved",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Building internal solutions creates technical debt and diverts resources",
+      "frequency": 4,
+      "example_quote": "They don't want to waste time building a solution, then acquiring technical debt"
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Automated drift detection for fraud and churn models",
+      "frequency": 6,
+      "use_case": "Fraud detection and churn prediction"
+    },
+    {
+      "value": "Reduce troubleshooting from weeks to hours with automated RCA",
+      "frequency": 5,
+      "use_case": "DS productivity"
+    },
+    {
+      "value": "Purpose-built platform avoids technical debt of homegrown solutions",
+      "frequency": 4,
+      "use_case": "Build vs buy"
+    },
+    {
+      "value": "Improve model accuracy for critical business models",
+      "frequency": 4,
+      "use_case": "Model performance"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We're considering building our own monitoring solution",
+      "stage_typically_appears": "early",
+      "effective_response": "Spark New Zealand considered that path but realized it would create technical debt and divert their data scientists from core work. They chose Arize so they could focus on improving model accuracy, not maintaining tooling.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our team is already overwhelmed - we don't have time to implement new tools",
+      "stage_typically_appears": "mid",
+      "effective_response": "That's exactly the problem - your team is spending 70% of their time troubleshooting. Arize reduces that dramatically. Spark found they could resolve issues in hours instead of weeks after implementing Arize.",
+      "frequency": 4
+    },
+    {
+      "objection": "How do we know this will actually improve model accuracy?",
+      "stage_typically_appears": "late",
+      "effective_response": "Spark New Zealand tracked improvement in their broadband churn model - their most critical model. Catching drift earlier and resolving issues faster directly improved accuracy. We can structure a similar PoC to measure impact.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "When your fraud or churn models show accuracy degradation, how long does it typically take your team to identify the root cause?",
+      "tied_to_signal": "Uses ML for fraud/churn",
+      "validates_hypothesis": "Long troubleshooting cycles",
+      "follow_up_if_yes": "What percentage of your data science team's time goes to troubleshooting vs new development?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you currently detecting drift in your production models before it impacts business outcomes?",
+      "tied_to_signal": "Production ML systems",
+      "validates_hypothesis": "Drift detection gap",
+      "follow_up_if_yes": "How quickly can you act once drift is detected?",
+      "follow_up_if_no": "What happens when drift goes undetected?"
+    },
+    {
+      "question": "Have you considered building internal monitoring vs buying a purpose-built platform?",
+      "tied_to_signal": "Technical team",
+      "validates_hypothesis": "Build vs buy decision",
+      "follow_up_if_yes": "What's the estimated ongoing maintenance cost of that approach?",
+      "follow_up_if_no": "What's driving the buy preference?"
+    },
+    {
+      "question": "Which model is most critical to your business - if it degraded significantly, what would be the impact?",
+      "tied_to_signal": "Multiple ML use cases",
+      "validates_hypothesis": "Critical model monitoring",
+      "follow_up_if_yes": "How would you quantify a 1% accuracy improvement for that model?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Spark New Zealand",
+    "LG Uplus",
+    "AT&T",
+    "Ericsson",
+    "Exeo Group"
+  ],
+  "avg_deal_size": 167959,
+  "avg_sales_cycle_days": null
+}

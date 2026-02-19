@@ -19,7 +19,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.classification import (
     QUERIES,
     GUARDRAILS,
@@ -27,6 +27,8 @@ from ...use_cases.classification import (
     SYSTEM_PROMPT_SENTIMENT,
     SYSTEM_PROMPT_EXTRACT,
     SYSTEM_PROMPT_RESPONSE,
+    lookup_routing_rules,
+    search_response_templates,
 )
 
 
@@ -35,6 +37,7 @@ def run_classification(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute an ADK-style classification agent: guardrails -> classify -> sentiment -> extract -> respond."""
     from opentelemetry import trace
@@ -54,6 +57,8 @@ def run_classification(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "adk",
+            "metadata.use_case": "classification-routing",
         },
     ) as agent_span:
 
@@ -126,6 +131,10 @@ def run_classification(
             extract_span.set_attribute("output.value", entities)
             extract_span.set_attribute("output.mime_type", "text/plain")
             extract_span.set_status(Status(StatusCode.OK))
+
+        # ---- Tool calls: routing rules and response templates ----
+        run_tool_call(tracer, "lookup_routing_rules", classification, lookup_routing_rules, guard=guard, category="technical_support")
+        run_tool_call(tracer, "search_response_templates", classification, search_response_templates, guard=guard, category="technical_support")
 
         # ---- generate_content: respond ----
         with tracer.start_as_current_span(

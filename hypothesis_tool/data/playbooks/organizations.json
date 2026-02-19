@@ -1,0 +1,81 @@
+{
+  "industry": "Organizations",
+  "deal_count": 3,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "AI/ML systems need monitoring for regulatory compliance and member protection",
+      "frequency": 2,
+      "example_quote": null
+    },
+    {
+      "pain": "Limited visibility into how AI is being used across the organization",
+      "frequency": 2,
+      "example_quote": null
+    },
+    {
+      "pain": "Need to ensure AI outputs meet quality and fairness standards",
+      "frequency": 2,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Complete audit trail for AI/ML governance and compliance",
+      "frequency": 2,
+      "use_case": "Regulatory compliance"
+    },
+    {
+      "value": "Centralized visibility into AI system behavior",
+      "frequency": 2,
+      "use_case": "AI governance"
+    },
+    {
+      "value": "Quality monitoring for AI outputs",
+      "frequency": 2,
+      "use_case": "Quality assurance"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We have strict procurement and security requirements",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize works with regulated organizations including federal agencies. We're SOC2 compliant and can support VPC deployments. Our team is experienced with enterprise procurement processes.",
+      "frequency": 2
+    },
+    {
+      "objection": "We're not sure how to quantify the value of AI monitoring",
+      "stage_typically_appears": "mid",
+      "effective_response": "The value comes from risk reduction and operational efficiency. Monitoring prevents AI failures before they impact stakeholders, and provides the audit trail needed for governance. What's the cost if an AI system behaves unexpectedly?",
+      "frequency": 1
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you currently monitoring AI systems for accuracy and compliance?",
+      "tied_to_signal": "AI/ML deployment",
+      "validates_hypothesis": "Monitoring gap",
+      "follow_up_if_yes": "Does your monitoring provide the audit trail needed for governance?",
+      "follow_up_if_no": "What's preventing implementation?"
+    },
+    {
+      "question": "What governance requirements do you have for AI systems?",
+      "tied_to_signal": "Regulated organization",
+      "validates_hypothesis": "Governance needs",
+      "follow_up_if_yes": "How do you currently demonstrate compliance?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Who is responsible for ensuring AI systems behave as expected?",
+      "tied_to_signal": "AI program",
+      "validates_hypothesis": "Ownership clarity",
+      "follow_up_if_yes": "Do they have the right tools for that responsibility?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "FINRA"
+  ],
+  "avg_deal_size": 50000,
+  "avg_sales_cycle_days": null
+}

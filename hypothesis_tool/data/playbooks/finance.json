@@ -1,0 +1,108 @@
+{
+  "industry": "Finance",
+  "deal_count": 18,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Trading and investment models need real-time monitoring with minimal latency",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Risk models drifting without detection can lead to significant losses",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Regulatory requirements demand audit trails and model documentation",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "No unified view across quantitative models from different teams",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Low-latency monitoring for trading and investment models",
+      "frequency": 6,
+      "use_case": "Quantitative finance"
+    },
+    {
+      "value": "Early drift detection for risk management models",
+      "frequency": 5,
+      "use_case": "Risk management"
+    },
+    {
+      "value": "Complete audit trail for regulatory compliance",
+      "frequency": 4,
+      "use_case": "Regulatory compliance"
+    },
+    {
+      "value": "Centralized observability across quantitative teams",
+      "frequency": 4,
+      "use_case": "Multi-team visibility"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "Our models are proprietary - we can't share trading signals",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize analyzes model behavior without exposing your alpha or trading signals. We can deploy in your VPC so data never leaves your infrastructure. Chime and other fintech firms trust us with their core models.",
+      "frequency": 5
+    },
+    {
+      "objection": "We need microsecond latency - will monitoring add overhead?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize's async logging adds minimal overhead. For latency-critical paths, we support batch logging and can work with you to optimize for your specific performance requirements.",
+      "frequency": 4
+    },
+    {
+      "objection": "We have our own quant tooling",
+      "stage_typically_appears": "early",
+      "effective_response": "Internal tooling works until your model count grows and you need cross-model visibility. Arize complements quant tooling by providing production monitoring, drift detection, and the audit trail that internal tools often lack.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you monitoring your trading or investment models in production?",
+      "tied_to_signal": "Quantitative models",
+      "validates_hypothesis": "Production monitoring gap",
+      "follow_up_if_yes": "Does your monitoring catch drift before it impacts P&L?",
+      "follow_up_if_no": "What's preventing implementation?"
+    },
+    {
+      "question": "When risk models show unexpected behavior, how quickly can your team identify the root cause?",
+      "tied_to_signal": "Risk models",
+      "validates_hypothesis": "RCA speed",
+      "follow_up_if_yes": "What's the financial exposure during that investigation window?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How do you currently meet regulatory requirements for model documentation and audit trails?",
+      "tied_to_signal": "Regulated entity",
+      "validates_hypothesis": "Compliance needs",
+      "follow_up_if_yes": "Is that process scalable as you deploy more models?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Do different quant teams have visibility into each other's model performance?",
+      "tied_to_signal": "Multiple quant teams",
+      "validates_hypothesis": "Cross-team visibility",
+      "follow_up_if_yes": "Does that unified view help with firm-wide risk management?",
+      "follow_up_if_no": "Would that visibility help identify systemic issues?"
+    }
+  ],
+  "sample_customers": [
+    "Chime",
+    "Georgian Partners",
+    "NinjaHoldings (CreditNinja)",
+    "Omega Point",
+    "NFX Capital Management"
+  ],
+  "avg_deal_size": 112436,
+  "avg_sales_cycle_days": null
+}

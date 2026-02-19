@@ -8,6 +8,7 @@ import os
 import base64
 import time
 import requests
+import contextvars
 from typing import List, Dict, Optional, Generator
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -87,7 +88,7 @@ class GongMCPClient:
             }
         ) as span:
             try:
-                response = requests.post(url, json=payload, timeout=300)
+                response = requests.post(url, json=payload, timeout=90)
                 
                 span.set_attribute("http.status_code", response.status_code)
                 
@@ -258,10 +259,13 @@ class GongMCPClient:
 
             # Fetch remaining transcripts in parallel
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_call_id = {
-                    executor.submit(self._make_request, "/transcript", {"call_id": cid}): cid
-                    for cid in calls_to_fetch
-                }
+                # Propagate OTel context into worker threads so child spans from
+                # _make_request attach to this parent span (avoid orphan roots).
+                future_to_call_id = {}
+                for cid in calls_to_fetch:
+                    ctx = contextvars.copy_context()
+                    fut = executor.submit(ctx.run, self._make_request, "/transcript", {"call_id": cid})
+                    future_to_call_id[fut] = cid
 
                 for future in as_completed(future_to_call_id):
                     call_id = future_to_call_id[future]

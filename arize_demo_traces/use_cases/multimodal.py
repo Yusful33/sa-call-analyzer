@@ -101,6 +101,38 @@ EVALUATORS = [
 ]
 
 
+# ---- Tools (simulated) ----
+
+def analyze_image_content(image_description: str) -> str:
+    """Analyze image content using vision model."""
+    import json as _json
+    return _json.dumps({
+        "objects_detected": ["primary_subject", "background_elements", "text_overlay"],
+        "confidence": 0.92,
+        "dominant_colors": ["#2C3E50", "#ECF0F1", "#3498DB"],
+        "image_quality": "high",
+        "resolution_adequate": True,
+        "ocr_text_detected": True,
+        "analysis_summary": f"Image contains identifiable content: {image_description[:100]}...",
+    })
+
+
+def extract_structured_data(text: str) -> str:
+    """Extract structured data from text content."""
+    import json as _json
+    return _json.dumps({
+        "entities": [
+            {"type": "organization", "value": "TechCorp Solutions Inc.", "confidence": 0.97},
+            {"type": "date", "value": "2026-01-15", "confidence": 0.95},
+            {"type": "monetary", "value": "$20,072.50", "confidence": 0.99},
+            {"type": "reference_id", "value": "INV-2026-0342", "confidence": 0.98},
+        ],
+        "tables_detected": 1,
+        "key_value_pairs": 8,
+        "extraction_confidence": 0.96,
+    })
+
+
 def get_random_query() -> dict:
     """Return a random multimodal query with text + image description."""
     import random

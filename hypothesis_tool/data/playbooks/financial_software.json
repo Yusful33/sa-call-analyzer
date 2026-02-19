@@ -1,0 +1,108 @@
+{
+  "industry": "Financial Software",
+  "deal_count": 15,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Credit risk and lending models require continuous monitoring for accuracy",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Fraud detection models need real-time visibility to catch emerging patterns",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Model drift can lead to bad lending decisions or missed fraud",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Compliance requirements for fair lending and model explainability",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Continuous monitoring for credit risk and underwriting models",
+      "frequency": 6,
+      "use_case": "Credit decisions"
+    },
+    {
+      "value": "Real-time fraud detection model monitoring",
+      "frequency": 5,
+      "use_case": "Fraud prevention"
+    },
+    {
+      "value": "Drift detection prevents bad lending decisions",
+      "frequency": 4,
+      "use_case": "Lending quality"
+    },
+    {
+      "value": "Model explainability for fair lending compliance",
+      "frequency": 4,
+      "use_case": "Regulatory compliance"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We already have model validation processes",
+      "stage_typically_appears": "early",
+      "effective_response": "Model validation is point-in-time, but production models drift continuously. Arize provides ongoing monitoring between validation cycles so you catch issues before your next review. Upstart and Ramp use both validation and continuous monitoring.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our compliance team is concerned about sharing credit data",
+      "stage_typically_appears": "early",
+      "effective_response": "Understood - Arize can deploy in your VPC so credit data never leaves your infrastructure. We work with major fintech lenders including MoneyLion and Koalafi who have similar requirements.",
+      "frequency": 4
+    },
+    {
+      "objection": "How does Arize help with fair lending compliance?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Arize provides cohort analysis and feature importance that helps identify disparate impact. You can slice model performance by protected attributes and document your monitoring for regulators.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you monitoring your credit or lending models between formal validation cycles?",
+      "tied_to_signal": "Lending/Credit ML",
+      "validates_hypothesis": "Continuous monitoring gap",
+      "follow_up_if_yes": "What triggers an early re-validation?",
+      "follow_up_if_no": "What happens if models drift between validations?"
+    },
+    {
+      "question": "For your fraud detection models, can you identify emerging fraud patterns in real-time?",
+      "tied_to_signal": "Fraud detection",
+      "validates_hypothesis": "Real-time visibility",
+      "follow_up_if_yes": "How quickly can you respond to new patterns?",
+      "follow_up_if_no": "What's the cost of fraud that slips through?"
+    },
+    {
+      "question": "How do you ensure fair lending compliance as your models evolve?",
+      "tied_to_signal": "Regulated lender",
+      "validates_hypothesis": "Fair lending monitoring",
+      "follow_up_if_yes": "Can you slice model performance by protected attributes?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "When a lending model makes an unexpected decision, can you explain why to regulators?",
+      "tied_to_signal": "Regulatory requirements",
+      "validates_hypothesis": "Explainability needs",
+      "follow_up_if_yes": "Is that process automated or manual?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Upstart",
+    "Ramp",
+    "MoneyLion",
+    "Koalafi",
+    "Zippi"
+  ],
+  "avg_deal_size": 44625,
+  "avg_sales_cycle_days": null
+}

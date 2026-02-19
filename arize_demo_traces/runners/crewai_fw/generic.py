@@ -10,8 +10,8 @@ from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT
+from ...trace_enrichment import run_guardrail, run_tool_call
+from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
 
 
 def run_generic(
@@ -19,6 +19,7 @@ def run_generic(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a CrewAI generic pipeline with knowledge assistant agent, guardrails, and evaluation."""
     from opentelemetry import trace
@@ -37,6 +38,8 @@ def run_generic(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "crewai",
+            "metadata.use_case": "generic",
         },
     ) as pipeline_span:
 
@@ -46,6 +49,10 @@ def run_generic(
                 tracer, g["name"], query, llm, guard,
                 system_prompt=g["system_prompt"],
             )
+
+        # === TOOL CALLS ===
+        run_tool_call(tracer, "web_search", query, web_search, guard=guard, query=query)
+        run_tool_call(tracer, "get_current_context", query, get_current_context, guard=guard)
 
         # === CREWAI AGENT ===
         assistant_agent = Agent(

@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.classification import (
     QUERIES,
     GUARDRAILS,
@@ -19,6 +19,8 @@ from ...use_cases.classification import (
     SYSTEM_PROMPT_SENTIMENT,
     SYSTEM_PROMPT_EXTRACT,
     SYSTEM_PROMPT_RESPONSE,
+    lookup_routing_rules,
+    search_response_templates,
 )
 
 
@@ -27,6 +29,7 @@ def run_classification(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangChain LCEL classification pipeline with guardrails."""
     from opentelemetry import trace
@@ -46,6 +49,8 @@ def run_classification(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langchain",
+            "metadata.use_case": "classification-routing",
         },
     ) as pipeline_span:
 
@@ -110,6 +115,10 @@ def run_classification(
             entities = extract_chain.invoke({"query": query})
             step.set_attribute("output.value", entities)
             step.set_status(Status(StatusCode.OK))
+
+        # === TOOL CALLS ===
+        run_tool_call(tracer, "lookup_routing_rules", category, lookup_routing_rules, guard=guard, category="technical_support")
+        run_tool_call(tracer, "search_response_templates", category, search_response_templates, guard=guard, category="technical_support")
 
         # === GENERATE RESPONSE ===
         with tracer.start_as_current_span(

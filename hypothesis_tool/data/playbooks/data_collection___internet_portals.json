@@ -1,0 +1,108 @@
+{
+  "industry": "Data Collection & Internet Portals",
+  "deal_count": 8,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "No solution for root cause analysis - production issues directly impact revenue",
+      "frequency": 5,
+      "example_quote": "No solution for RCA - revenue impacting"
+    },
+    {
+      "pain": "Recommendation and search models degrade without visibility until revenue drops",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Multiple models in production with no centralized monitoring",
+      "frequency": 3,
+      "example_quote": null
+    },
+    {
+      "pain": "User experience tied directly to model performance - issues impact engagement",
+      "frequency": 3,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Root cause analysis that directly links model behavior to revenue impact",
+      "frequency": 5,
+      "use_case": "Revenue protection"
+    },
+    {
+      "value": "Proactive monitoring for recommendation/search models",
+      "frequency": 4,
+      "use_case": "User-facing ML"
+    },
+    {
+      "value": "Centralized observability for fleet of production models",
+      "frequency": 3,
+      "use_case": "Model fleet management"
+    },
+    {
+      "value": "Fast identification of issues before they impact user engagement",
+      "frequency": 3,
+      "use_case": "User experience"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We can correlate model issues with revenue drops in our existing analytics",
+      "stage_typically_appears": "early",
+      "effective_response": "Analytics tells you revenue dropped, but Arize tells you WHY. Stitch Fix needed root cause analysis that could pinpoint exactly which model behavior caused the revenue impact - that's what standard analytics can't provide.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our engineering team monitors models as part of general site reliability",
+      "stage_typically_appears": "early",
+      "effective_response": "SRE tools are great for infrastructure but don't understand ML-specific issues like drift, feature importance shifts, or embedding quality. Arize provides ML-native monitoring that complements your SRE stack.",
+      "frequency": 3
+    },
+    {
+      "objection": "We're not sure we can quantify the ROI of model monitoring",
+      "stage_typically_appears": "late",
+      "effective_response": "Let's calculate it: what revenue flows through your recommendation models? Even a 0.1% improvement or preventing one major outage typically provides 10x+ ROI on Arize. Stitch Fix justified it based on revenue protection alone.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "When you see a drop in conversion or engagement, how long does it take to determine if it's a model issue vs other factors?",
+      "tied_to_signal": "Revenue-tied ML",
+      "validates_hypothesis": "Slow RCA",
+      "follow_up_if_yes": "What's the revenue impact during that investigation window?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you monitoring your recommendation or search models for degradation before users notice?",
+      "tied_to_signal": "Recommendations/Search",
+      "validates_hypothesis": "Proactive monitoring gap",
+      "follow_up_if_yes": "What's your current time-to-detection for model issues?",
+      "follow_up_if_no": "How do you typically find out about model issues?"
+    },
+    {
+      "question": "How many models do you have in production, and do you have a single view across all of them?",
+      "tied_to_signal": "Multiple ML systems",
+      "validates_hypothesis": "Fleet visibility",
+      "follow_up_if_yes": "Can you quickly identify which model is causing an issue?",
+      "follow_up_if_no": "Is that fragmentation slowing down incident response?"
+    },
+    {
+      "question": "Can you connect model performance metrics directly to business KPIs like GMV or engagement?",
+      "tied_to_signal": "E-commerce/marketplace",
+      "validates_hypothesis": "Business impact correlation",
+      "follow_up_if_yes": "Is that connection actionable for model improvements?",
+      "follow_up_if_no": "Would that visibility help prioritize model investments?"
+    }
+  ],
+  "sample_customers": [
+    "Stitch Fix",
+    "Agoda",
+    "OLX Group",
+    "GoodRx",
+    "Roblox"
+  ],
+  "avg_deal_size": 74762,
+  "avg_sales_cycle_days": null
+}

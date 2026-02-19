@@ -1,0 +1,113 @@
+{
+  "industry": "Software",
+  "deal_count": 25,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Time to identify and resolve production ML issues is too long",
+      "frequency": 10,
+      "example_quote": "time to issues identification and resolution"
+    },
+    {
+      "pain": "Data scientists spending majority of time debugging vs building new models",
+      "frequency": 8,
+      "example_quote": null
+    },
+    {
+      "pain": "No unified platform for observability across ML and LLM workloads",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Production incidents from model degradation impacting user experience",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Lack of root cause analysis tools for complex ML systems",
+      "frequency": 4,
+      "example_quote": "Ability to drive to root-cause immediately improves workflow and time-to-resolution."
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Drive to root cause immediately - dramatically reduces time-to-resolution",
+      "frequency": 10,
+      "use_case": "Production debugging"
+    },
+    {
+      "value": "Proactive monitoring catches issues before they impact users",
+      "frequency": 7,
+      "use_case": "User-facing ML features"
+    },
+    {
+      "value": "Self-serve debugging lets DS teams move faster without ops bottlenecks",
+      "frequency": 6,
+      "use_case": "Team efficiency"
+    },
+    {
+      "value": "Single platform for both traditional ML and LLM observability",
+      "frequency": 5,
+      "use_case": "GenAI adoption"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We're building our own monitoring internally",
+      "stage_typically_appears": "early",
+      "effective_response": "Many software companies start there but find it creates technical debt. Chartboost switched to Arize because internal tools couldn't keep up - they needed to drive to root cause immediately, and custom tooling couldn't deliver that.",
+      "frequency": 7
+    },
+    {
+      "objection": "We already use DataDog/New Relic for monitoring",
+      "stage_typically_appears": "early",
+      "effective_response": "APM tools are great for infrastructure but don't understand ML-specific metrics like drift, feature importance, or embedding analysis. Arize complements your APM by providing ML-native observability.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our ML team is too busy to implement new tooling",
+      "stage_typically_appears": "mid",
+      "effective_response": "That's exactly the problem - they're busy debugging instead of building. Arize customers report 80% reduction in troubleshooting time. Would getting that time back justify a short implementation?",
+      "frequency": 4
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "When a production ML issue occurs, how long does it typically take your team to identify the root cause?",
+      "tied_to_signal": "Production ML systems",
+      "validates_hypothesis": "Slow RCA",
+      "follow_up_if_yes": "What's the business impact during that troubleshooting window?",
+      "follow_up_if_no": "What tools enable that fast resolution?"
+    },
+    {
+      "question": "What percentage of your data science team's time is spent on debugging vs building new models?",
+      "tied_to_signal": "Growing ML team",
+      "validates_hypothesis": "DS productivity waste",
+      "follow_up_if_yes": "Is that ratio acceptable to leadership?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Are you adopting or planning to adopt LLMs alongside your traditional ML models?",
+      "tied_to_signal": "GenAI signals",
+      "validates_hypothesis": "Need for unified platform",
+      "follow_up_if_yes": "How are you planning to monitor both under one platform?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How do you currently detect when a model starts degrading before users notice?",
+      "tied_to_signal": "User-facing ML",
+      "validates_hypothesis": "Proactive monitoring gap",
+      "follow_up_if_yes": "How quickly can you respond once detected?",
+      "follow_up_if_no": "What's the cost when degradation reaches users?"
+    }
+  ],
+  "sample_customers": [
+    "Shelf Engine",
+    "PredictHQ",
+    "Gojek",
+    "Chartboost",
+    "Simple"
+  ],
+  "avg_deal_size": 29849,
+  "avg_sales_cycle_days": null
+}

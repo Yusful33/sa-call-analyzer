@@ -32,6 +32,7 @@ def run_chatbot(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangGraph chatbot with tool-calling loop: guardrails -> agent <-> tools."""
     from opentelemetry import trace
@@ -109,6 +110,8 @@ def run_chatbot(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langgraph",
+            "metadata.use_case": "multiturn-chatbot-with-tools",
         },
     ) as span:
         result = graph.invoke({

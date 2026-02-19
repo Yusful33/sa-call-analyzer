@@ -1,0 +1,106 @@
+{
+  "industry": "Banking",
+  "deal_count": 7,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Security and environment requirements are unlike standard environments - few vendors qualify",
+      "frequency": 5,
+      "example_quote": "security and environment is not like usual environments. probably hard to find vendors who can work with their setup."
+    },
+    {
+      "pain": "Fraud detection models require constant monitoring but tooling options are limited",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Credit risk and lending models need explainability for regulatory compliance",
+      "frequency": 3,
+      "example_quote": null
+    },
+    {
+      "pain": "Model drift in financial models can have significant monetary impact",
+      "frequency": 3,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Enterprise-grade security that meets stringent banking requirements",
+      "frequency": 5,
+      "use_case": "Security compliance"
+    },
+    {
+      "value": "Real-time monitoring for fraud detection models",
+      "frequency": 4,
+      "use_case": "Fraud prevention"
+    },
+    {
+      "value": "Model explainability features for regulatory compliance",
+      "frequency": 3,
+      "use_case": "Regulatory compliance"
+    },
+    {
+      "value": "Drift detection for credit and lending models",
+      "frequency": 3,
+      "use_case": "Risk management"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "Our security requirements are extremely strict - most vendors can't comply",
+      "stage_typically_appears": "early",
+      "effective_response": "We understand - that's common in banking. Arize works with OCBC Bank, America First Credit Union, and Wise. We offer VPC deployment, SOC2 compliance, and have passed security reviews for major financial institutions.",
+      "frequency": 5
+    },
+    {
+      "objection": "We need on-premise or private cloud deployment",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize supports VPC and private cloud deployments. We've deployed in highly regulated banking environments where data cannot leave the customer's infrastructure.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our compliance team will require extensive documentation",
+      "stage_typically_appears": "mid",
+      "effective_response": "We're prepared for that. We have SOC2 reports, security questionnaires pre-filled, and can provide architecture documentation. Our enterprise team has experience working through banking compliance reviews.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "What are your biggest concerns when evaluating ML observability vendors from a security perspective?",
+      "tied_to_signal": "Banking/Financial services",
+      "validates_hypothesis": "Security requirements",
+      "follow_up_if_yes": "What's your preferred deployment model - VPC, private cloud, or SaaS?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you currently monitoring your fraud detection models for accuracy and drift?",
+      "tied_to_signal": "Fraud detection ML",
+      "validates_hypothesis": "Fraud model monitoring",
+      "follow_up_if_yes": "What happens when fraud models miss new patterns or drift?",
+      "follow_up_if_no": "What's preventing you from implementing monitoring?"
+    },
+    {
+      "question": "For your credit or lending models, how do you provide explainability to meet regulatory requirements?",
+      "tied_to_signal": "Credit/lending models",
+      "validates_hypothesis": "Explainability needs",
+      "follow_up_if_yes": "Is your current approach scalable as you deploy more models?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What's the process when regulators ask about how a particular credit decision was made?",
+      "tied_to_signal": "Regulatory oversight",
+      "validates_hypothesis": "Audit trail needs",
+      "follow_up_if_yes": "How long does it take to pull that information today?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "OCBC Bank",
+    "America First Credit Union",
+    "Wise"
+  ],
+  "avg_deal_size": 68960,
+  "avg_sales_cycle_days": null
+}

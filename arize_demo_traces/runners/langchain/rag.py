@@ -11,13 +11,15 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
     format_docs,
+    search_documents,
+    fetch_document_metadata,
 )
 
 
@@ -26,6 +28,7 @@ def run_rag(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangChain LCEL RAG pipeline with guardrails, retrieval, and generation."""
     from opentelemetry import trace
@@ -45,6 +48,8 @@ def run_rag(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langchain",
+            "metadata.use_case": "retrieval-augmented-search",
         },
     ) as pipeline_span:
 
@@ -69,9 +74,13 @@ def run_rag(
         ) as step:
             if guard:
                 guard.check()
+            run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
             retrieved = retriever.invoke(query)
+            if retrieved:
+                run_tool_call(tracer, "fetch_document_metadata", retrieved[0].metadata.get("source", ""),
+                              fetch_document_metadata, guard=guard, source=retrieved[0].metadata.get("source", "unknown"))
             context = format_docs(retrieved)
             step.set_attribute("retrieval.documents", _json.dumps(
                 [{"content": d.page_content[:200], "source": d.metadata.get("source", "")} for d in retrieved]

@@ -1,0 +1,108 @@
+{
+  "industry": "Travel Agencies & Services",
+  "deal_count": 15,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Search and recommendation models directly impact booking conversion - degradation means lost revenue",
+      "frequency": 6,
+      "example_quote": null
+    },
+    {
+      "pain": "Pricing models need real-time monitoring as market conditions change rapidly",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "Seasonal variations and external events cause model drift that's hard to detect",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Multiple models across search, pricing, and personalization with no unified visibility",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Protect booking revenue by detecting search/recommendation degradation early",
+      "frequency": 6,
+      "use_case": "Revenue protection"
+    },
+    {
+      "value": "Real-time monitoring for dynamic pricing models",
+      "frequency": 5,
+      "use_case": "Pricing optimization"
+    },
+    {
+      "value": "Detect drift from seasonal changes and market shifts",
+      "frequency": 4,
+      "use_case": "Seasonal adaptation"
+    },
+    {
+      "value": "Unified observability across search, pricing, and personalization models",
+      "frequency": 4,
+      "use_case": "Model fleet"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We already track booking conversion rates",
+      "stage_typically_appears": "early",
+      "effective_response": "Conversion tells you something went wrong, but not why. Arize connects model behavior to conversion so you can identify and fix the root cause before more revenue is lost. That's how Booking.com and Skyscanner approach it.",
+      "frequency": 5
+    },
+    {
+      "objection": "Our models are complex and custom - will Arize handle them?",
+      "stage_typically_appears": "mid",
+      "effective_response": "We work with some of the most sophisticated travel ML systems including Booking.com, Priceline, and Tripadvisor. Arize is model-agnostic and handles everything from simple classifiers to complex ranking and pricing systems.",
+      "frequency": 4
+    },
+    {
+      "objection": "Travel is seasonal - how do you handle that variability?",
+      "stage_typically_appears": "mid",
+      "effective_response": "Great question. Arize distinguishes between expected seasonal drift and unexpected degradation. You can set baselines by season and get alerted only when models deviate from expected seasonal patterns.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How quickly can you detect when your search ranking or recommendation models are degrading?",
+      "tied_to_signal": "Search/Recommendation ML",
+      "validates_hypothesis": "Detection speed",
+      "follow_up_if_yes": "What's the response time once detected?",
+      "follow_up_if_no": "How do you typically find out about model issues?"
+    },
+    {
+      "question": "How are you handling model monitoring across seasonal variations and market events?",
+      "tied_to_signal": "Travel industry",
+      "validates_hypothesis": "Seasonal drift",
+      "follow_up_if_yes": "Can you distinguish between expected seasonal changes and actual degradation?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "Do you have visibility across all your models - search, pricing, personalization - in one place?",
+      "tied_to_signal": "Multiple ML systems",
+      "validates_hypothesis": "Unified visibility",
+      "follow_up_if_yes": "Does that visibility help you prioritize where to invest?",
+      "follow_up_if_no": "Is fragmentation slowing down your response to issues?"
+    },
+    {
+      "question": "For your pricing models, how do you monitor for drift in real-time as market conditions change?",
+      "tied_to_signal": "Dynamic pricing",
+      "validates_hypothesis": "Pricing model monitoring",
+      "follow_up_if_yes": "What's the latency from drift detection to adjustment?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "Booking.com",
+    "Skyscanner",
+    "Priceline",
+    "Tripadvisor",
+    "GetYourGuide"
+  ],
+  "avg_deal_size": 181423,
+  "avg_sales_cycle_days": null
+}

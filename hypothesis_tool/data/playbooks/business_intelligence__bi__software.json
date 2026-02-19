@@ -1,0 +1,108 @@
+{
+  "industry": "Business Intelligence (BI) Software",
+  "deal_count": 14,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Trouble with evaluations on LLMs - need better eval frameworks beyond basic metrics",
+      "frequency": 6,
+      "example_quote": "> LLM Evals"
+    },
+    {
+      "pain": "Cosine similarity metrics not meeting targets for RAG/retrieval systems",
+      "frequency": 5,
+      "example_quote": null
+    },
+    {
+      "pain": "No visibility into LLM response quality and hallucination rates",
+      "frequency": 4,
+      "example_quote": null
+    },
+    {
+      "pain": "Difficulty debugging complex retrieval pipelines when accuracy drops",
+      "frequency": 4,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Comprehensive LLM evaluation framework with customizable metrics beyond thumbs up/down",
+      "frequency": 6,
+      "use_case": "LLM evaluation"
+    },
+    {
+      "value": "RAG retrieval quality monitoring and optimization",
+      "frequency": 5,
+      "use_case": "Retrieval systems"
+    },
+    {
+      "value": "Hallucination detection and response quality tracking",
+      "frequency": 4,
+      "use_case": "LLM quality assurance"
+    },
+    {
+      "value": "End-to-end tracing for complex LLM pipelines",
+      "frequency": 4,
+      "use_case": "Pipeline debugging"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We're using LangSmith for our LLM tracing",
+      "stage_typically_appears": "early",
+      "effective_response": "LangSmith is great for development tracing, but Arize provides production-grade observability with drift detection, A/B testing, and business metric correlation that LangSmith doesn't offer. Many teams use both for different stages.",
+      "frequency": 5
+    },
+    {
+      "objection": "We're not sure how to define 'good' for our LLM outputs",
+      "stage_typically_appears": "mid",
+      "effective_response": "That's a common challenge with LLM evals. Arize helps you go beyond simple metrics with customizable evaluation criteria, human-in-the-loop feedback, and automated annotation. Bloomfire used our eval framework to establish their quality benchmarks.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our RAG system is still being developed - monitoring seems premature",
+      "stage_typically_appears": "early",
+      "effective_response": "Actually, monitoring during development helps you iterate faster. You can track retrieval quality improvements across experiments and catch regressions before they hit production. It's cheaper to fix issues during development.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How are you currently evaluating the quality of your LLM outputs beyond basic accuracy?",
+      "tied_to_signal": "LLM/GenAI deployment",
+      "validates_hypothesis": "LLM eval gap",
+      "follow_up_if_yes": "Are those metrics giving you actionable insights to improve quality?",
+      "follow_up_if_no": "What's preventing you from establishing evaluation criteria?"
+    },
+    {
+      "question": "For your RAG system, how do you know if retrieval quality is meeting user expectations?",
+      "tied_to_signal": "Uses RAG/retrieval",
+      "validates_hypothesis": "Retrieval quality monitoring",
+      "follow_up_if_yes": "What happens when cosine similarity doesn't correlate with user satisfaction?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are you detecting and measuring hallucinations in your LLM responses?",
+      "tied_to_signal": "Customer-facing LLM",
+      "validates_hypothesis": "Hallucination concerns",
+      "follow_up_if_yes": "What's your current hallucination rate and target?",
+      "follow_up_if_no": "What's the risk if hallucinations reach your users?"
+    },
+    {
+      "question": "When users report a poor response, can you trace back through your retrieval pipeline to identify why?",
+      "tied_to_signal": "Complex LLM pipeline",
+      "validates_hypothesis": "Pipeline debugging",
+      "follow_up_if_yes": "How long does that investigation typically take?",
+      "follow_up_if_no": "Would that visibility help you improve faster?"
+    }
+  ],
+  "sample_customers": [
+    "Bloomfire",
+    "Adobe",
+    "Bazaarvoice",
+    "BenchSci",
+    "OpenStore"
+  ],
+  "avg_deal_size": 29054,
+  "avg_sales_cycle_days": null
+}

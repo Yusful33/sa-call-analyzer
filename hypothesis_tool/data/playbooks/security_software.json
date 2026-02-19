@@ -1,0 +1,94 @@
+{
+  "industry": "Security Software",
+  "deal_count": 5,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Threat detection models need to adapt quickly to new attack patterns",
+      "frequency": 3,
+      "example_quote": null
+    },
+    {
+      "pain": "False positives from security ML models create alert fatigue",
+      "frequency": 3,
+      "example_quote": null
+    },
+    {
+      "pain": "No visibility into why security models flag or miss certain threats",
+      "frequency": 2,
+      "example_quote": null
+    },
+    {
+      "pain": "LLM-based security tools need quality monitoring for accuracy",
+      "frequency": 2,
+      "example_quote": null
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Rapid detection when threat models drift as attack patterns evolve",
+      "frequency": 3,
+      "use_case": "Threat detection"
+    },
+    {
+      "value": "Reduce false positives by understanding model behavior",
+      "frequency": 3,
+      "use_case": "Alert quality"
+    },
+    {
+      "value": "Explainability for security model decisions",
+      "frequency": 2,
+      "use_case": "Investigation support"
+    },
+    {
+      "value": "Quality monitoring for AI-powered security tools",
+      "frequency": 2,
+      "use_case": "AI security tools"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We're in the security business - we're very careful about adding vendors",
+      "stage_typically_appears": "early",
+      "effective_response": "Understood - security companies have the highest standards. Arize works with security leaders including Proofpoint, Radiant Security, and Kandji. We can discuss deployment options that meet your security requirements.",
+      "frequency": 3
+    },
+    {
+      "objection": "Our threat detection models are highly proprietary",
+      "stage_typically_appears": "early",
+      "effective_response": "Arize monitors model behavior without exposing your detection logic. We analyze inputs, outputs, and performance metrics - not your threat signatures or algorithms. VPC deployment keeps all data in your environment.",
+      "frequency": 2
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "How do your threat detection models adapt when new attack patterns emerge?",
+      "tied_to_signal": "AI/ML security",
+      "validates_hypothesis": "Adaptation speed",
+      "follow_up_if_yes": "How quickly can you detect when models are missing new threats?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What's your current false positive rate, and how do you manage alert fatigue?",
+      "tied_to_signal": "ML-based detection",
+      "validates_hypothesis": "False positive pain",
+      "follow_up_if_yes": "Can you identify which model behaviors cause most false positives?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "When investigating a security incident, can you understand why your models did or didn't flag something?",
+      "tied_to_signal": "Security investigation",
+      "validates_hypothesis": "Explainability gap",
+      "follow_up_if_yes": "Is that level of visibility sufficient for your analysts?",
+      "follow_up_if_no": "Would that visibility improve investigation efficiency?"
+    }
+  ],
+  "sample_customers": [
+    "Proofpoint",
+    "Radiant Security",
+    "Solink",
+    "Kandji"
+  ],
+  "avg_deal_size": 26500,
+  "avg_sales_cycle_days": null
+}

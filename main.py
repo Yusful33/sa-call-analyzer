@@ -882,6 +882,7 @@ AVAILABLE_USE_CASES = [
     {"value": "multimodal-ai", "label": "Multimodal / Vision AI"},
     {"value": "mcp-tool-use", "label": "MCP Tool Use"},
     {"value": "multiturn-chatbot-with-tools", "label": "Chatbot with Tools"},
+    {"value": "travel-agent", "label": "Travel Agent"},
     {"value": "generic", "label": "Generic LLM Pipeline"},
 ]
 
@@ -917,6 +918,8 @@ class GenerateDemoRequest(BaseModel):
     model: Optional[str] = None
     use_case: Optional[str] = None
     framework: Optional[str] = None
+    arize_api_key: Optional[str] = None
+    arize_space_id: Optional[str] = None
 
 
 class GenerateDemoResponse(BaseModel):
@@ -932,6 +935,8 @@ class GenerateDemoResponse(BaseModel):
     arize_url: Optional[str] = None
     result: Optional[dict] = None
     error_message: Optional[str] = None
+    eval_created: Optional[bool] = None
+    eval_message: Optional[str] = None
 
 
 def _infer_use_case(overview) -> tuple[str, str, str | None]:
@@ -1080,7 +1085,8 @@ Based on the following conversation signals from sales calls, classify:
 5. "multimodal-ai" - Vision/image AI, multimodal LLM applications, document extraction (OCR/IDP), image classification, quality inspection, medical imaging analysis.
 6. "mcp-tool-use" - MCP (Model Context Protocol) based agents, tool-use pipelines connecting to external servers/services (file systems, databases, APIs, Slack, GitHub), agentic tool discovery and execution.
 7. "multiturn-chatbot-with-tools" - Single chatbot or agent with tool calling where no specific pattern (SQL, RAG, multi-agent, classification, vision, MCP) dominates.
-8. "generic" - When signals are ambiguous or don't clearly match any specific pattern above.
+8. "travel-agent" - Travel booking agents: flight and hotel search, trip planning, itineraries, destination recommendations, tool-augmented travel assistants.
+9. "generic" - When signals are ambiguous or don't clearly match any specific pattern above.
 
 ## Available Frameworks:
 1. "langgraph" - LangGraph / LangChain graph-based agent orchestration. DEFAULT if no framework is mentioned.
@@ -1097,7 +1103,7 @@ Use case rules: If there is ANY mention of natural language to database, text-to
 
 ## Instructions:
 Return ONLY a JSON object with:
-- "use_case": one of the eight demo type strings
+- "use_case": one of the nine demo type strings
 - "framework": one of the four framework strings
 - "reasoning": a brief 1-sentence explanation
 
@@ -1135,6 +1141,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
             "multimodal-ai",
             "mcp-tool-use",
             "multiturn-chatbot-with-tools",
+            "travel-agent",
             "generic",
         }
         valid_frameworks = {"langgraph", "langchain", "crewai", "adk"}
@@ -1147,6 +1154,40 @@ Return only valid JSON, no markdown formatting or code blocks."""
     except Exception as e:
         print(f"⚠️ LLM use-case classification failed: {e}")
         return None, None, None
+
+
+def _build_prospect_demo_context(overview, account_name: str) -> dict | None:
+    """Build a short prospect context dict for tailoring demo traces (e.g. text-to-SQL).
+
+    Uses organization and call data: industry, key themes, deal state, account info.
+    Returns None if overview is missing or empty.
+    """
+    if not overview or not account_name:
+        return None
+    parts = []
+    industry = None
+    if getattr(overview, "salesforce", None) and overview.salesforce:
+        sf = overview.salesforce
+        if sf.industry:
+            industry = (sf.industry or "").strip()
+        if sf.name:
+            parts.append(f"Company: {sf.name}")
+        if sf.description:
+            parts.append(sf.description.strip()[:300])
+    if getattr(overview, "gong_summary", None) and overview.gong_summary and overview.gong_summary.key_themes:
+        parts.append("Key themes from calls: " + ", ".join(overview.gong_summary.key_themes[:5]))
+    if getattr(overview, "sales_engagement", None) and overview.sales_engagement and overview.sales_engagement.deal_summary:
+        ds = overview.sales_engagement.deal_summary
+        if ds.current_state:
+            parts.append(f"Deal context: {ds.current_state[:200]}")
+        if ds.key_topics_discussed:
+            parts.append("Topics discussed: " + ", ".join(ds.key_topics_discussed[:5]))
+    summary = " ".join(parts).strip() if parts else None
+    return {
+        "account_name": account_name,
+        "industry": industry or "General",
+        "summary": summary or f"Prospect: {account_name}.",
+    }
 
 
 def _industry_heuristic(industry: str | None) -> str:
@@ -1172,6 +1213,8 @@ def _industry_heuristic(industry: str | None) -> str:
         return "retrieval-augmented-search"
     elif any(k in industry_lower for k in ["telecom", "communications"]):
         return "classification-routing"
+    elif any(k in industry_lower for k in ["travel", "hospitality", "tourism", "leisure", "airline", "hotel"]):
+        return "travel-agent"
     else:
         return "retrieval-augmented-search"
 
@@ -1249,17 +1292,17 @@ async def generate_demo_stream(request: GenerateDemoRequest):
 
     async def event_stream():
         try:
+            overview = None
+            industry = None
             # If use_case and framework are already provided (user confirmed via classify step),
             # skip BigQuery lookup and classification
             if request.use_case and request.framework:
                 use_case = request.use_case
                 framework = request.framework
                 use_case_reasoning = "User confirmed"
-                industry = None
             else:
                 yield _sse_event("progress", {"message": "Fetching prospect profile from BigQuery..."})
-
-                overview = None
+                overview = None  # ensure defined before try (classification path)
                 industry = None
                 try:
                     def _bq_lookup():
@@ -1276,6 +1319,18 @@ async def generate_demo_stream(request: GenerateDemoRequest):
 
                 yield _sse_event("progress", {"message": "Analyzing prospect data to select best demo type..."})
                 use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
+
+            # If we don't have overview yet (e.g. user confirmed use case), fetch for prospect context to tailor traces
+            if overview is None and request.account_name:
+                try:
+                    def _bq_context():
+                        from bigquery_client import BigQueryClient
+                        bq = BigQueryClient()
+                        return bq.get_prospect_overview(account_name=request.account_name)
+                    overview = await asyncio.wait_for(asyncio.to_thread(_bq_context), timeout=15.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            prospect_context = _build_prospect_demo_context(overview, request.account_name) if overview else None
 
             model = request.model or "gpt-5.2"
 
@@ -1302,8 +1357,8 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                         crewai_instrumentor = CrewAIInstrumentor()
                     except ImportError:
                         pass
-                api_key = os.getenv("ARIZE_API_KEY")
-                space_id = os.getenv("ARIZE_SPACE_ID")
+                api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
+                space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
                 if api_key and space_id:
                     demo_provider = arize_register(
                         space_id=space_id,
@@ -1357,6 +1412,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                                     guard=guard,
                                     tracer_provider=demo_provider,
                                     force_bad=(trace_idx in bad_indices),
+                                    prospect_context=prospect_context,
                                 )
                             finally:
                                 otel_context.detach(token)
@@ -1419,27 +1475,48 @@ async def generate_demo_stream(request: GenerateDemoRequest):
 
             yield _sse_event("progress", {"message": "Pipeline complete. Sending traces to Arize..."})
 
-            # Create online eval task via GraphQL API
-            space_id = os.getenv("ARIZE_SPACE_ID")
-            if space_id and result.get("traces_generated", 0) > 0:
-                yield _sse_event("progress", {"message": "Creating online evaluation task..."})
+            # Create online eval task and run backfill on newly sent traces
+            eval_created = False
+            eval_message = None
+            space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
+            api_key_arize = request.arize_api_key or os.getenv("ARIZE_API_KEY")
+            if space_id and api_key_arize and result.get("traces_generated", 0) > 0:
+                yield _sse_event("progress", {"message": "Creating online evaluation task (runs on new spans continuously)..."})
                 try:
                     from arize_demo_traces.online_evals import create_and_run_online_eval
                     eval_result = await asyncio.to_thread(
                         create_and_run_online_eval,
                         project_name=project_name,
+                        use_case=use_case,
                         space_id=space_id,
+                        api_key=api_key_arize,
+                        delay_seconds_before_backfill=30,
+                        minutes_back=60,
+                        max_spans=500,
                     )
                     if eval_result.get("success"):
-                        yield _sse_event("progress", {
-                            "message": f"Online eval task '{eval_result.get('task_name')}' created and running."
-                        })
+                        eval_created = True
+                        eval_label = eval_result.get("eval_name", eval_result.get("task_name"))
+                        msg = f"Online eval '{eval_label}' created. Backfill run on recent spans (run_id={eval_result.get('run_id') or 'n/a'}). New traces will be evaluated automatically."
+                        if eval_result.get("backfill_task_error"):
+                            err = eval_result["backfill_task_error"]
+                            err_msg = err.get("message", err) if isinstance(err, dict) else str(err)
+                            msg += f" Backfill note: {err_msg}"
+                            eval_message = f"Task created; backfill had an issue: {err_msg}. You can re-run the eval from Arize Online Evals."
+                        elif eval_result.get("note"):
+                            msg += f" {eval_result['note']}"
+                            eval_message = eval_result.get("note")
+                        else:
+                            eval_message = "Eval task created and backfill started. Evaluations may take 1–2 min to appear in Arize."
+                        yield _sse_event("progress", {"message": msg})
                     elif eval_result.get("error"):
-                        yield _sse_event("progress", {
-                            "message": f"Online eval setup: {eval_result['error']}"
-                        })
+                        eval_message = eval_result["error"]
+                        yield _sse_event("progress", {"message": f"Online eval setup: {eval_result['error']}"})
                 except Exception as e:
+                    eval_message = f"Online eval setup failed: {e}"
                     yield _sse_event("progress", {"message": f"Online eval setup skipped: {e}"})
+            elif result.get("traces_generated", 0) > 0 and (not space_id or not api_key_arize):
+                eval_message = "No Arize Space ID or API key provided; online eval was not created. Set them in Custom Demo or env to enable evals."
 
             arize_url = None
             if space_id:
@@ -1457,6 +1534,8 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 arize_url=arize_url,
                 result=result,
                 error_message=result.get("error") if result else None,
+                eval_created=eval_created,
+                eval_message=eval_message,
             )
             yield _sse_event("done", response.model_dump())
         except Exception as e:
@@ -1490,8 +1569,8 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
         from openinference.instrumentation.openai import OpenAIInstrumentor
         from openinference.instrumentation.litellm import LiteLLMInstrumentor
         crewai_instrumentor = None
-        api_key = os.getenv("ARIZE_API_KEY")
-        space_id = os.getenv("ARIZE_SPACE_ID")
+        api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
+        space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
         if api_key and space_id:
             demo_provider = arize_register(
                 space_id=space_id,
@@ -1507,14 +1586,15 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
             LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
 
+        overview = None
+        industry = None
         # If use_case and framework are already provided (user confirmed), skip classification
         if request.use_case and request.framework:
             use_case = request.use_case
             framework = request.framework
             use_case_reasoning = "User confirmed"
-            industry = None
         else:
-            # Step 1: Fetch prospect profile from BigQuery
+            # Step 1: Fetch prospect profile from BigQuery (classification path)
             overview = None
             industry = None
             try:
@@ -1528,6 +1608,16 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
 
             # Step 2: Infer use case from full prospect data (Gong calls, industry, etc.)
             use_case, framework, use_case_reasoning = _infer_use_case(overview) if overview else (_industry_heuristic(None), "langgraph", None)
+
+        # If we don't have overview yet (e.g. user confirmed use case), fetch for prospect context
+        if overview is None and request.account_name:
+            try:
+                from bigquery_client import BigQueryClient
+                bq = BigQueryClient()
+                overview = bq.get_prospect_overview(account_name=request.account_name)
+            except Exception:
+                pass
+        prospect_context = _build_prospect_demo_context(overview, request.account_name) if overview else None
 
         # Step 3: Run the real pipeline multiple times
         num_traces = 10
@@ -1571,6 +1661,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
                             guard=guard,
                             tracer_provider=demo_provider,
                             force_bad=(_trace_idx in bad_indices),
+                            prospect_context=prospect_context,
                         )
                     finally:
                         otel_context.detach(token)
@@ -1593,8 +1684,39 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
 
         result = {"traces_generated": len(all_results), "results": all_results}
 
+        eval_created = False
+        eval_message = None
+        space_id_val = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
+        api_key_val = request.arize_api_key or os.getenv("ARIZE_API_KEY")
+        if space_id_val and api_key_val and result.get("traces_generated", 0) > 0:
+            try:
+                from arize_demo_traces.online_evals import create_and_run_online_eval
+                eval_result = await asyncio.to_thread(
+                    create_and_run_online_eval,
+                    project_name=project_name,
+                    use_case=use_case,
+                    space_id=space_id_val,
+                    api_key=api_key_val,
+                    delay_seconds_before_backfill=30,
+                    minutes_back=60,
+                    max_spans=500,
+                )
+                if eval_result.get("success"):
+                    eval_created = True
+                    if eval_result.get("backfill_task_error"):
+                        err = eval_result["backfill_task_error"]
+                        err_msg = err.get("message", err) if isinstance(err, dict) else str(err)
+                        eval_message = f"Task created; backfill had an issue: {err_msg}. Re-run the eval from Arize Online Evals."
+                    else:
+                        eval_message = "Eval task created and backfill started. Evaluations may take 1–2 min to appear in Arize."
+                elif eval_result.get("error"):
+                    eval_message = eval_result["error"]
+            except Exception as e:
+                eval_message = f"Online eval setup failed: {e}"
+        elif result.get("traces_generated", 0) > 0 and (not space_id_val or not api_key_val):
+            eval_message = "No Arize Space ID or API key provided; online eval was not created."
+
         arize_url = None
-        space_id_val = os.getenv("ARIZE_SPACE_ID")
         if space_id_val:
             arize_url = f"https://app.arize.com/?space_id={space_id_val}&project_id={project_name}"
 
@@ -1609,6 +1731,8 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             arize_url=arize_url,
             framework=framework,
             result=result,
+            eval_created=eval_created,
+            eval_message=eval_message,
         )
     finally:
         if demo_provider is not None:
@@ -1629,6 +1753,45 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             except Exception:
                 pass
             demo_provider.shutdown()
+
+
+# ============================================================
+# Export Customer Demo Script
+# ============================================================
+
+@app.get("/api/export-script")
+async def export_script(
+    use_case: str,
+    framework: str,
+    model: str = "gpt-4o-mini",
+    project_name: str = "customer-demo",
+):
+    """
+    Generate and download a standalone Python demo script.
+
+    The script includes all necessary code inlined so the customer can
+    run it in a fresh environment with just `pip install` + env vars.
+    """
+    from scripts.generate_customer_script import generate_script
+
+    try:
+        script_content = generate_script(
+            use_case=use_case,
+            framework=framework,
+            model=model,
+            project_name=project_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate script: {e}")
+
+    safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+    filename = f"{safe_name}_demo.py" if safe_name else "demo.py"
+
+    return Response(
+        content=script_content,
+        media_type="text/x-python",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ============================================================

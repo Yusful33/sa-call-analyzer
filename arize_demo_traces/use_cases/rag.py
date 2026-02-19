@@ -61,6 +61,33 @@ EVALUATORS = [
     },
 ]
 
+# ---- Tools (simulated) ----
+
+def search_documents(query: str) -> str:
+    """Search the knowledge base for relevant documents."""
+    query_lower = query.lower()
+    matches = []
+    for doc in SAMPLE_DOCS:
+        if any(word in doc.page_content.lower() for word in query_lower.split()[:3]):
+            matches.append(f"[{doc.metadata.get('source', 'unknown')}] {doc.page_content[:120]}...")
+    if not matches:
+        matches = [f"[{SAMPLE_DOCS[0].metadata['source']}] {SAMPLE_DOCS[0].page_content[:120]}..."]
+    return "\n".join(matches[:3])
+
+
+def fetch_document_metadata(source: str) -> str:
+    """Fetch metadata for a document source."""
+    import json as _json
+    return _json.dumps({
+        "source": source,
+        "author": "Documentation Team",
+        "last_updated": "2025-11-15",
+        "confidence_score": 0.94,
+        "word_count": 342,
+        "category": "knowledge-base",
+    })
+
+
 _vectorstore_cache: Chroma | None = None
 
 

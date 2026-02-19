@@ -13,7 +13,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.classification import (
     QUERIES,
     GUARDRAILS,
@@ -21,6 +21,8 @@ from ...use_cases.classification import (
     SYSTEM_PROMPT_SENTIMENT,
     SYSTEM_PROMPT_EXTRACT,
     SYSTEM_PROMPT_RESPONSE,
+    lookup_routing_rules,
+    search_response_templates,
 )
 
 
@@ -39,6 +41,7 @@ def run_classification(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute a LangGraph classification pipeline: guardrails -> classify -> sentiment -> extract -> respond."""
     from opentelemetry import trace
@@ -99,6 +102,10 @@ def run_classification(
         return {"entities": result}
 
     def generate_response_node(state: ClassificationState) -> dict:
+        run_tool_call(tracer, "lookup_routing_rules", state["category"],
+                      lookup_routing_rules, guard=guard, category="technical_support")
+        run_tool_call(tracer, "search_response_templates", state["category"],
+                      search_response_templates, guard=guard, category="technical_support")
         prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT_RESPONSE),
             ("human", "{query}"),
@@ -137,6 +144,8 @@ def run_classification(
             "openinference.span.kind": "CHAIN",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "langgraph",
+            "metadata.use_case": "classification-routing",
         },
     ) as span:
         result = graph.invoke({

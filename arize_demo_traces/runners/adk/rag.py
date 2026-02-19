@@ -18,13 +18,15 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
     format_docs,
+    search_documents,
+    fetch_document_metadata,
 )
 
 
@@ -33,6 +35,7 @@ def run_rag(
     model: str = "gpt-4o-mini",
     guard: CostGuard | None = None,
     tracer_provider=None,
+    prospect_context=None,
 ) -> dict:
     """Execute an ADK-style RAG agent: guardrails -> plan -> retrieve -> generate."""
     from opentelemetry import trace
@@ -52,6 +55,8 @@ def run_rag(
             "openinference.span.kind": "AGENT",
             "input.value": query,
             "input.mime_type": "text/plain",
+            "metadata.framework": "adk",
+            "metadata.use_case": "retrieval-augmented-search",
         },
     ) as agent_span:
 
@@ -82,6 +87,10 @@ def run_rag(
             plan_span.set_attribute("output.value", plan)
             plan_span.set_attribute("output.mime_type", "text/plain")
             plan_span.set_status(Status(StatusCode.OK))
+
+        # ---- Tool calls: document search and metadata ----
+        run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
+        run_tool_call(tracer, "fetch_document_metadata", "knowledge-base", fetch_document_metadata, guard=guard, source="knowledge-base")
 
         # ---- retrieve_documents: vectorstore retrieval ----
         with tracer.start_as_current_span(

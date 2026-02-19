@@ -51,6 +51,41 @@ WRITER_PROMPT = "You are a professional writer. Given the analysis and research,
 
 REVIEWER_PROMPT = "You are a quality reviewer. Review the following document for factual accuracy, logical consistency, completeness, and clarity. Provide a brief assessment and any corrections needed."
 
+# ---- Tools (simulated) ----
+
+def search_web(query: str) -> str:
+    """Search the web for research information."""
+    import json as _json
+    return _json.dumps({
+        "query": query[:80],
+        "results": [
+            {"source": "Industry Report 2025", "summary": f"Key findings on {query[:50]}: market growing at 24% CAGR, major players consolidating, regulatory landscape evolving."},
+            {"source": "Academic Research", "summary": "Recent studies indicate significant improvements in efficiency and cost reduction through AI-driven automation."},
+            {"source": "Market Analysis", "summary": "Current trends show increased enterprise adoption with focus on ROI measurement and governance frameworks."},
+        ],
+        "total_results": 47,
+    })
+
+
+def analyze_metrics(metric_name: str) -> str:
+    """Pull and analyze business metrics."""
+    import json as _json
+    return _json.dumps({
+        "metric": metric_name,
+        "current_value": 87.3,
+        "previous_period": 82.1,
+        "change_pct": 6.3,
+        "trend": "increasing",
+        "benchmark": 85.0,
+        "status": "above_target",
+        "breakdown": {
+            "segment_a": 91.2,
+            "segment_b": 84.5,
+            "segment_c": 86.1,
+        },
+    })
+
+
 GUARDRAILS = [
     {
         "name": "Scope Validation",

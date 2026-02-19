@@ -1,0 +1,107 @@
+{
+  "industry": "Telecommunications",
+  "deal_count": 8,
+  "generated_at": "2026-01-27T00:00:00Z",
+  "top_pain_points": [
+    {
+      "pain": "Need unified platform for both MLOps and LLMOps as GenAI adoption grows",
+      "frequency": 5,
+      "example_quote": "> unified platform to do both, MLOps and LLMOps"
+    },
+    {
+      "pain": "Security requirements are stringent - few vendors pass their security reviews",
+      "frequency": 4,
+      "example_quote": "> security is a bigger hurdle and not many vendors have passed"
+    },
+    {
+      "pain": "Need end-to-end tracing, evals, and datasets with proper team access controls",
+      "frequency": 4,
+      "example_quote": "> end to end tracing, evals, datasets - concern on teams and their structures and how teams access data in platform"
+    },
+    {
+      "pain": "Integration complexity - getting data in via SDK/integrations is a challenge",
+      "frequency": 3,
+      "example_quote": "> integrations and getting data in - SDK / Integrations"
+    }
+  ],
+  "winning_value_props": [
+    {
+      "value": "Single platform supporting both traditional ML and LLM observability",
+      "frequency": 5,
+      "use_case": "Platform consolidation"
+    },
+    {
+      "value": "Enterprise-grade security that passes stringent telco requirements",
+      "frequency": 4,
+      "use_case": "Security compliance"
+    },
+    {
+      "value": "Role-based access controls and team-aware data management",
+      "frequency": 4,
+      "use_case": "Multi-team environments"
+    },
+    {
+      "value": "Flexible SDK and integrations for complex telco data pipelines",
+      "frequency": 3,
+      "use_case": "Integration"
+    }
+  ],
+  "common_objections": [
+    {
+      "objection": "We have strict security requirements that most vendors can't meet",
+      "stage_typically_appears": "early",
+      "effective_response": "We work with major telcos including TELUS, AT&T, and Vodafone. Arize is SOC2 compliant and can deploy in your VPC or private cloud. We've passed security reviews for some of the most stringent enterprise environments.",
+      "frequency": 5
+    },
+    {
+      "objection": "We have separate teams using different tools for ML vs LLM",
+      "stage_typically_appears": "mid",
+      "effective_response": "That fragmentation is exactly the pain TELUS was facing. Arize provides a unified platform with proper access controls so teams can work independently while leadership gets consolidated visibility.",
+      "frequency": 4
+    },
+    {
+      "objection": "Our data infrastructure is complex - integration will be difficult",
+      "stage_typically_appears": "mid",
+      "effective_response": "We've integrated with complex telco data pipelines at multiple carriers. Our SDK is designed for flexibility, and our team provides hands-on implementation support.",
+      "frequency": 3
+    }
+  ],
+  "discovery_questions": [
+    {
+      "question": "Are your teams currently using separate tools for traditional ML monitoring vs your new LLM/GenAI workloads?",
+      "tied_to_signal": "GenAI adoption signals",
+      "validates_hypothesis": "Platform fragmentation",
+      "follow_up_if_yes": "Is that fragmentation creating blind spots or operational overhead?",
+      "follow_up_if_no": "Are you planning to adopt GenAI in the near term?"
+    },
+    {
+      "question": "How are you handling security and compliance requirements for ML observability tools?",
+      "tied_to_signal": "Enterprise telco",
+      "validates_hypothesis": "Security as blocker",
+      "follow_up_if_yes": "What's been the biggest challenge with vendor security reviews?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "How are different teams (central ML platform, LOB data scientists) currently accessing and sharing model observability data?",
+      "tied_to_signal": "Multiple ML teams",
+      "validates_hypothesis": "Team access concerns",
+      "follow_up_if_yes": "Are access controls meeting your governance requirements?",
+      "follow_up_if_no": null
+    },
+    {
+      "question": "What's been your experience integrating monitoring tools with your existing data pipelines?",
+      "tied_to_signal": "Complex infrastructure",
+      "validates_hypothesis": "Integration pain",
+      "follow_up_if_yes": "What made previous integrations challenging?",
+      "follow_up_if_no": null
+    }
+  ],
+  "sample_customers": [
+    "TELUS",
+    "VodafoneZiggo",
+    "Geotab",
+    "Standard Practice"
+  ],
+  "avg_deal_size": 65250,
+  "avg_sales_cycle_days": null
+}
