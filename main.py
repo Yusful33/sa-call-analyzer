@@ -1310,10 +1310,10 @@ async def generate_demo_stream(request: GenerateDemoRequest):
         try:
             overview = None
             industry = None
-                _threading_instrumentor = None  # set when demo_provider is created; uninstrument in finally
-                # If use_case and framework are already provided (user confirmed via classify step),
-                # skip BigQuery lookup and classification
-                if request.use_case and request.framework:
+            _threading_instrumentor = None  # set when demo_provider is created; uninstrument in finally
+            # If use_case and framework are already provided (user confirmed via classify step),
+            # skip BigQuery lookup and classification
+            if request.use_case and request.framework:
                 use_case = request.use_case
                 framework = request.framework
                 use_case_reasoning = "User confirmed"
