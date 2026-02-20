@@ -112,7 +112,7 @@ class SACallAnalysisCrew:
     def __init__(self):
         # Determine which LLM to use based on environment
         self.use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
-        self.default_model = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
+        self.default_model = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
         
         # Create token tracking callback for cost visibility
         self.token_callback = TokenTrackingCallback()

@@ -199,6 +199,20 @@ async def health_check():
     }
 
 
+# Map retired Anthropic model IDs to current ones (avoids 404 on Railway/production).
+MODEL_ID_ALIASES = {
+    "claude-3-5-haiku-20241022": "claude-haiku-4-5",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-20250514",
+}
+
+
+def _resolve_model_id(model: Optional[str]) -> Optional[str]:
+    """Return current model ID; map retired IDs so requests don't 404."""
+    if not model:
+        return None
+    return MODEL_ID_ALIASES.get(model.strip(), model.strip())
+
+
 @app.post("/api/analyze", response_model=AnalysisResult)
 async def analyze_transcript(request: AnalyzeRequest):
     """
@@ -333,6 +347,7 @@ async def analyze_transcript(request: AnalyzeRequest):
                 # Perform analysis (run in thread with 5min timeout - LLM calls can be slow,
                 # but technical + sales crews now run in parallel for ~2x speedup)
                 try:
+                    model = _resolve_model_id(request.model) or request.model
                     result = await asyncio.wait_for(
                         asyncio.to_thread(
                             analyzer.analyze_call,
@@ -340,7 +355,7 @@ async def analyze_transcript(request: AnalyzeRequest):
                             speakers=speakers,
                             transcript_data=transcript_data,
                             call_date=call_date,
-                            model=request.model
+                            model=model
                         ),
                         timeout=300.0
                     )
@@ -937,6 +952,7 @@ class GenerateDemoResponse(BaseModel):
     error_message: Optional[str] = None
     eval_created: Optional[bool] = None
     eval_message: Optional[str] = None
+    traces_sent_to_arize: Optional[bool] = None  # True when Space ID + API key were set and traces were exported
 
 
 def _infer_use_case(overview) -> tuple[str, str, str | None]:
@@ -1110,7 +1126,7 @@ Return ONLY a JSON object with:
 Return only valid JSON, no markdown formatting or code blocks."""
 
     try:
-        model = os.environ.get("USE_CASE_CLASSIFICATION_MODEL", "claude-3-5-haiku-20241022")
+        model = os.environ.get("USE_CASE_CLASSIFICATION_MODEL", "claude-haiku-4-5")
 
         response = litellm.completion(
             model=model,
@@ -1294,9 +1310,10 @@ async def generate_demo_stream(request: GenerateDemoRequest):
         try:
             overview = None
             industry = None
-            # If use_case and framework are already provided (user confirmed via classify step),
-            # skip BigQuery lookup and classification
-            if request.use_case and request.framework:
+                _threading_instrumentor = None  # set when demo_provider is created; uninstrument in finally
+                # If use_case and framework are already provided (user confirmed via classify step),
+                # skip BigQuery lookup and classification
+                if request.use_case and request.framework:
                 use_case = request.use_case
                 framework = request.framework
                 use_case_reasoning = "User confirmed"
@@ -1350,6 +1367,9 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 from openinference.instrumentation.langchain import LangChainInstrumentor
                 from openinference.instrumentation.openai import OpenAIInstrumentor
                 from openinference.instrumentation.litellm import LiteLLMInstrumentor
+                # Skip OpenAIInstrumentor when using LangChain: LangChain already creates ChatOpenAI spans,
+                # and OpenAI would add duplicate ChatCompletion spans (same call, same tokens/cost).
+                instrument_openai = False
                 crewai_instrumentor = None
                 if framework == "crewai":
                     try:
@@ -1360,19 +1380,33 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
                 space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
                 if api_key and space_id:
-                    demo_provider = arize_register(
+                    try:
+                        from arize.otel import Transport
+                        _transport = Transport.HTTP
+                        _endpoint = "https://otlp.arize.com/v1/traces"
+                    except ImportError:
+                        _transport = None
+                        _endpoint = None
+                    _reg_kw = dict(
                         space_id=space_id,
                         api_key=api_key,
                         project_name=project_name,
                         set_global_tracer_provider=False,
+                        batch=False,
                     )
+                    if _endpoint is not None:
+                        _reg_kw["endpoint"] = _endpoint
+                    if _transport is not None:
+                        _reg_kw["transport"] = _transport
+                    demo_provider = arize_register(**_reg_kw)
                     # Re-instrument libraries with demo provider so LLM calls
                     # are traced to the demo project instead of sa-call-analyzer
                     LangChainInstrumentor().uninstrument()
                     OpenAIInstrumentor().uninstrument()
                     LiteLLMInstrumentor().uninstrument()
                     LangChainInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
-                    OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
+                    if instrument_openai:
+                        OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
                     LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
                     if crewai_instrumentor:
                         try:
@@ -1380,6 +1414,21 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                         except Exception:
                             pass
                         crewai_instrumentor.instrument(tracer_provider=demo_provider, skip_dep_check=True)
+                    # Propagate trace context to worker threads (avoids orphaned spans when LLM client uses a thread pool).
+                    try:
+                        from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+                        _threading_instrumentor = ThreadingInstrumentor()
+                        _threading_instrumentor.instrument()
+                    except ImportError:
+                        pass
+                else:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "message": "Arize Space ID and API key not set — traces will not appear in your Arize project. "
+                            "Add them in Custom Demo or set ARIZE_SPACE_ID and ARIZE_API_KEY to see traces in Arize."
+                        },
+                    )
 
                 # Generate multiple traces, each as a separate root trace
                 # Pass demo_provider directly to runners (trace.set_tracer_provider
@@ -1465,15 +1514,30 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                         OpenAIInstrumentor().uninstrument()
                         LiteLLMInstrumentor().uninstrument()
                         LangChainInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
-                        OpenAIInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
+                        if instrument_openai:
+                            OpenAIInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
                         LiteLLMInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
                         if crewai_instrumentor:
                             crewai_instrumentor.uninstrument()
                     except Exception:
                         pass
+                    if _threading_instrumentor is not None:
+                        try:
+                            _threading_instrumentor.uninstrument()
+                        except Exception:
+                            pass
                     demo_provider.shutdown()
 
-            yield _sse_event("progress", {"message": "Pipeline complete. Sending traces to Arize..."})
+            if demo_provider is not None:
+                yield _sse_event(
+                    "progress",
+                    {
+                        "message": f"Pipeline complete. Traces sent to Arize project: {project_name}. "
+                        "Open the link below to view (may take 30–60 seconds to appear)."
+                    },
+                )
+            else:
+                yield _sse_event("progress", {"message": "Pipeline complete. (Traces were not sent to Arize — no Space ID or API key.)"})
 
             # Create online eval task and run backfill on newly sent traces
             eval_created = False
@@ -1516,7 +1580,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     eval_message = f"Online eval setup failed: {e}"
                     yield _sse_event("progress", {"message": f"Online eval setup skipped: {e}"})
             elif result.get("traces_generated", 0) > 0 and (not space_id or not api_key_arize):
-                eval_message = "No Arize Space ID or API key provided; online eval was not created. Set them in Custom Demo or env to enable evals."
+                eval_message = "No Arize Space ID or API key provided; traces were not sent to your Arize project and online eval was not created. Set them in Custom Demo or env to see traces in Arize."
 
             arize_url = None
             if space_id:
@@ -1536,6 +1600,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 error_message=result.get("error") if result else None,
                 eval_created=eval_created,
                 eval_message=eval_message,
+                traces_sent_to_arize=demo_provider is not None,
             )
             yield _sse_event("done", response.model_dump())
         except Exception as e:
@@ -1563,28 +1628,51 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
 
     original_provider = trace.get_tracer_provider()
     demo_provider = None
+    _threading_instrumentor = None
     try:
         from arize.otel import register as arize_register
         from openinference.instrumentation.langchain import LangChainInstrumentor
         from openinference.instrumentation.openai import OpenAIInstrumentor
         from openinference.instrumentation.litellm import LiteLLMInstrumentor
+        # Skip OpenAI instrumentor to avoid duplicate ChatOpenAI + ChatCompletion spans (same LLM call).
+        instrument_openai = False
         crewai_instrumentor = None
         api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
         space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
         if api_key and space_id:
-            demo_provider = arize_register(
+            try:
+                from arize.otel import Transport
+                _transport = Transport.HTTP
+                _endpoint = "https://otlp.arize.com/v1/traces"
+            except ImportError:
+                _transport = None
+                _endpoint = None
+            _reg_kw = dict(
                 space_id=space_id,
                 api_key=api_key,
                 project_name=project_name,
                 set_global_tracer_provider=False,
+                batch=False,
             )
+            if _endpoint is not None:
+                _reg_kw["endpoint"] = _endpoint
+            if _transport is not None:
+                _reg_kw["transport"] = _transport
+            demo_provider = arize_register(**_reg_kw)
             # Re-instrument libraries with demo provider
             LangChainInstrumentor().uninstrument()
             OpenAIInstrumentor().uninstrument()
             LiteLLMInstrumentor().uninstrument()
             LangChainInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
-            OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
+            if instrument_openai:
+                OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
             LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
+            try:
+                from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+                _threading_instrumentor = ThreadingInstrumentor()
+                _threading_instrumentor.instrument()
+            except ImportError:
+                pass
 
         overview = None
         industry = None
@@ -1714,7 +1802,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             except Exception as e:
                 eval_message = f"Online eval setup failed: {e}"
         elif result.get("traces_generated", 0) > 0 and (not space_id_val or not api_key_val):
-            eval_message = "No Arize Space ID or API key provided; online eval was not created."
+            eval_message = "No Arize Space ID or API key provided; traces were not sent to your Arize project and online eval was not created. Set them in Custom Demo or env to see traces in Arize."
 
         arize_url = None
         if space_id_val:
@@ -1733,6 +1821,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             result=result,
             eval_created=eval_created,
             eval_message=eval_message,
+            traces_sent_to_arize=demo_provider is not None,
         )
     finally:
         if demo_provider is not None:
@@ -1746,10 +1835,16 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
                 OpenAIInstrumentor().uninstrument()
                 LiteLLMInstrumentor().uninstrument()
                 LangChainInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
-                OpenAIInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
+                if instrument_openai:
+                    OpenAIInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
                 LiteLLMInstrumentor().instrument(tracer_provider=original_provider, skip_dep_check=True)
                 if crewai_instrumentor:
                     crewai_instrumentor.uninstrument()
+                if _threading_instrumentor is not None:
+                    try:
+                        _threading_instrumentor.uninstrument()
+                    except Exception:
+                        pass
             except Exception:
                 pass
             demo_provider.shutdown()

@@ -44,6 +44,9 @@ def run_multi_agent(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute an ADK-style multi-agent orchestration: plan -> research -> analyze -> write -> review."""
     from opentelemetry import trace

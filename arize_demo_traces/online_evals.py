@@ -9,12 +9,26 @@ Each use case gets a specialized eval template that targets the specific
 failure modes injected by eval_wrapper.py.
 """
 
+import json
 import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
 
 GRAPHQL_ENDPOINT = "https://app.arize.com/graphql"
+
+
+def _escape_graphql_string(s: str) -> str:
+    """Escape a string for use inside a GraphQL double-quoted string literal."""
+    if s is None:
+        return ""
+    return (
+        str(s)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 # ── Use-case-specific eval templates ───────────────────────────────────────────
 # Each template is tuned to catch the specific bad-output patterns from
@@ -222,7 +236,12 @@ Respond with ONLY "pass" or "fail".""",
 }
 
 
-def _graphql_request(query: str, variables: dict | None = None, api_key: str | None = None) -> dict:
+def _graphql_request(
+    query: str,
+    variables: dict | None = None,
+    api_key: str | None = None,
+    operation_name: str | None = None,
+) -> dict:
     """Execute a GraphQL request against the Arize API."""
     key = api_key or os.getenv("ARIZE_API_KEY", "")
     headers = {
@@ -230,15 +249,31 @@ def _graphql_request(query: str, variables: dict | None = None, api_key: str | N
         "Content-Type": "application/json",
     }
     payload = {"query": query}
-    if variables:
+    if variables is not None:
         payload["variables"] = variables
+    if operation_name:
+        payload["operationName"] = operation_name
 
     resp = requests.post(GRAPHQL_ENDPOINT, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    if "errors" in data:
-        raise RuntimeError(f"GraphQL errors: {data['errors']}")
-    return data
+    try:
+        body = resp.json()
+    except Exception:
+        body = resp.text or f"(status {resp.status_code})"
+
+    if not resp.ok:
+        msg = f"{resp.status_code} Client Error: {resp.reason} for url: {resp.url}"
+        if isinstance(body, dict):
+            if "errors" in body:
+                msg += f". GraphQL errors: {body['errors']}"
+            elif "error" in body:
+                msg += f". {body['error']}"
+        elif isinstance(body, str) and body.strip():
+            msg += f". Response: {body[:500]}"
+        raise RuntimeError(msg)
+
+    if "errors" in body:
+        raise RuntimeError(f"GraphQL errors: {body['errors']}")
+    return body
 
 
 def _get_project_id(space_id: str, project_name: str, api_key: str | None = None) -> str | None:
@@ -280,44 +315,36 @@ def _create_eval_task(
     query_filter: str,
     api_key: str | None = None,
 ) -> dict:
-    """Create a single online eval task via the Arize GraphQL API."""
-    create_mutation = """
-    mutation CreateOnlineEvalTask($input: CreateEvalTaskInput!) {
-      createEvalTask(input: $input) {
-        evalTask {
-          id
-          name
-          samplingRate
-          queryFilter
-        }
-      }
-    }
+    """Create a single online eval task via the Arize GraphQL API.
+    Uses an inlined mutation (input embedded in the query) so the server
+    always receives the input even when variable binding fails.
     """
+    # Escape template for embedding in GraphQL string literal
+    template_escaped = _escape_graphql_string(eval_template)
+    name_escaped = _escape_graphql_string(eval_name)
+    task_name_escaped = _escape_graphql_string(task_name)
+    query_filter_escaped = _escape_graphql_string(query_filter)
+    # Inline the full input in the mutation so we don't rely on variable binding
+    # (some environments return "variable $input was not provided a runtime value" otherwise)
+    create_mutation = (
+        'mutation CreateOnlineEvalTask { createEvalTask(input: {'
+        f'modelId: "{_escape_graphql_string(project_id)}", '
+        "samplingRate: 1, "
+        f'queryFilter: "{query_filter_escaped}", '
+        f'name: "{task_name_escaped}", '
+        "templateEvaluators: [{"
+        f'name: "{name_escaped}", '
+        'rails: ["fail", "pass"], '
+        f'template: "{template_escaped}", '
+        "position: 1, "
+        "includeExplanations: true, "
+        "useFunctionCallingIfAvailable: false"
+        "}], runContinuously: true, "
+        "llmConfig: { modelName: GPT_4o_MINI, provider: openAI, temperature: 0 }"
+        "}) { evalTask { id name samplingRate queryFilter } } }"
+    )
 
-    create_variables = {
-        "input": {
-            "modelId": project_id,
-            "samplingRate": 1,
-            "queryFilter": query_filter,
-            "name": task_name,
-            "templateEvaluators": {
-                "name": eval_name,
-                "rails": ["fail", "pass"],
-                "template": eval_template,
-                "position": 1,
-                "includeExplanations": True,
-                "useFunctionCallingIfAvailable": False,
-            },
-            "runContinuously": True,
-            "llmConfig": {
-                "modelName": "GPT_4o_MINI",
-                "provider": "openAI",
-                "temperature": 0,
-            },
-        }
-    }
-
-    result = _graphql_request(create_mutation, create_variables, api_key=api_key)
+    result = _graphql_request(create_mutation, variables=None, api_key=api_key)
     eval_task = result.get("data", {}).get("createEvalTask", {}).get("evalTask", {})
     return eval_task
 
@@ -351,7 +378,12 @@ def _run_eval_task(task_id: str, minutes_back: int = 30, max_spans: int = 100, a
         }
     }
 
-    result = _graphql_request(run_mutation, run_variables, api_key=api_key)
+    result = _graphql_request(
+        run_mutation,
+        run_variables,
+        api_key=api_key,
+        operation_name="RunOnlineTask",
+    )
     run_data = result.get("data", {}).get("runOnlineTask", {})
     out = {
         "run_id": run_data.get("runId"),

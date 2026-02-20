@@ -432,7 +432,6 @@ def _get_arize_credentials() -> tuple[str, str]:
 def main():
     from arize.otel import register as arize_register
     from openinference.instrumentation.langchain import LangChainInstrumentor
-    from openinference.instrumentation.openai import OpenAIInstrumentor
 
     space_id, api_key = _get_arize_credentials()
 
@@ -443,8 +442,8 @@ def main():
         project_name=PROJECT_NAME,
     )
 
+    # LangChain only; skip OpenAI to avoid duplicate ChatOpenAI + ChatCompletion spans per LLM call
     LangChainInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
-    OpenAIInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
 
     batch_mode = "--batch" in sys.argv  # argparse in _get_arize_credentials also parses --batch
     guard = CostGuard(max_calls=500 if batch_mode else 200)

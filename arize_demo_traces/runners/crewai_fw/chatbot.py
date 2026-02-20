@@ -20,6 +20,9 @@ def run_chatbot(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a CrewAI chatbot pipeline with routing agent, support agent, guardrails, and evaluation."""
     from opentelemetry import trace

@@ -35,6 +35,9 @@ def run_multimodal(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a CrewAI multimodal pipeline: guardrails -> vision+summarizer crew."""
     from opentelemetry import trace

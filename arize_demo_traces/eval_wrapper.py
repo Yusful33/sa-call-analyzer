@@ -143,72 +143,37 @@ def run_with_evals(
     prospect_context=None,
     query=None,
 ) -> dict:
-    """Execute a runner with wrapper span and optional poisoned-trace simulation.
+    """Execute a runner; the runner's span is the root (no demo_pipeline wrapper).
 
-    Poisoned traces (~30%) get a degraded output and a failed guardrail so that
-    online evaluators in Arize can flag them. Span status stays OK (no ERROR);
-    poisoning is content-only for eval design, not simulated runtime errors.
+    Poisoned traces (~30%) get degraded output on the runner's span so online
+    evaluators in Arize can flag them. Span status stays OK (no ERROR).
 
     Args:
-        runner: The runner function (e.g., run_rag from langgraph).
+        runner: The runner function (e.g., run_travel_agent from langgraph).
         use_case: Use case slug string.
         framework: Framework name.
         model: Model name for the LLM.
         guard: CostGuard instance.
         tracer_provider: OTel tracer provider for the demo project.
         force_bad: If set, overrides random bad/good determination.
-        prospect_context: Optional dict with account_name, industry, summary for
-            tailoring demo traces (e.g. text-to-SQL queries and prompts).
-        query: Optional user-supplied input (e.g. for interactive mode). When set,
-            passed to the runner so it uses this instead of sampling from use-case queries.
+        prospect_context: Optional dict for tailoring demo traces.
+        query: Optional user-supplied input (e.g. for interactive mode).
 
     Returns:
         The runner's result dict, augmented with {"_trace_quality": "good"|"bad"}.
     """
-    from opentelemetry import trace
-    from opentelemetry.trace import Status, StatusCode
-
-    provider = tracer_provider or trace.get_tracer_provider()
-    tracer = provider.get_tracer("demo.pipeline")
-
     # When query is user-supplied (interactive), don't poison
     is_bad = False if query is not None else (force_bad if force_bad is not None else (random.random() < BAD_TRACE_RATIO))
+    degraded_output = _pick_bad_output(use_case) if is_bad else None
 
-    with tracer.start_as_current_span(
-        "demo_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "metadata.framework": framework,
-            "metadata.use_case": use_case,
-            "metadata.trace_quality": "bad" if is_bad else "good",
-        },
-    ) as wrapper_span:
+    kwargs = {"model": model, "guard": guard, "tracer_provider": tracer_provider}
+    if prospect_context is not None:
+        kwargs["prospect_context"] = prospect_context
+    if query is not None:
+        kwargs["query"] = query
+    kwargs["degraded_output"] = degraded_output
+    kwargs["trace_quality"] = "bad" if is_bad else "good"
 
-        # --- Run the actual pipeline ---
-        kwargs = {"model": model, "guard": guard, "tracer_provider": tracer_provider}
-        if prospect_context is not None:
-            kwargs["prospect_context"] = prospect_context
-        if query is not None:
-            kwargs["query"] = query
-        result = runner(**kwargs)
-
-        query = result.get("query", "")
-        output = _extract_output(result)
-
-        wrapper_span.set_attribute("input.value", query)
-        wrapper_span.set_attribute("input.mime_type", "text/plain")
-
-        # --- For poisoned traces: degrade the output so Arize Online Evals flag it ---
-        # We only set bad content on the CHAIN span; no extra guardrail span. Evals
-        # show in the trace's Evaluations tab (from the online eval task), not as a span.
-        if is_bad:
-            degraded = _pick_bad_output(use_case)
-            wrapper_span.set_attribute("output.value", degraded)
-            wrapper_span.set_attribute("output.mime_type", "text/plain")
-        else:
-            wrapper_span.set_attribute("output.value", output[:2000])
-            wrapper_span.set_attribute("output.mime_type", "text/plain")
-        wrapper_span.set_status(Status(StatusCode.OK))
-
+    result = runner(**kwargs)
     result["_trace_quality"] = "bad" if is_bad else "good"
     return result

@@ -29,6 +29,9 @@ def run_generic(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a LangGraph generic pipeline: guardrails -> generate."""
     from opentelemetry import trace

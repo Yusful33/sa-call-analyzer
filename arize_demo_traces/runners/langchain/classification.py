@@ -30,6 +30,9 @@ def run_classification(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a LangChain LCEL classification pipeline with guardrails."""
     from opentelemetry import trace

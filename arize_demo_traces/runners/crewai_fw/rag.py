@@ -29,6 +29,9 @@ def run_rag(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a CrewAI RAG pipeline with retrieval agent, synthesis agent, guardrails, and evaluation."""
     from opentelemetry import trace

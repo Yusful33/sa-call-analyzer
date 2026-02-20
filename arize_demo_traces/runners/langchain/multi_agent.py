@@ -31,6 +31,9 @@ def run_multi_agent(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a LangChain LCEL multi-agent orchestration with guardrails."""
     from opentelemetry import trace

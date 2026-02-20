@@ -36,6 +36,9 @@ def run_rag(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute an ADK-style RAG agent: guardrails -> plan -> retrieve -> generate."""
     from opentelemetry import trace

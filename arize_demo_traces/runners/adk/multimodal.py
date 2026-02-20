@@ -43,6 +43,9 @@ def run_multimodal(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute an ADK-style multimodal agent: guardrails -> classify -> analyze -> extract -> summarize."""
     from opentelemetry import trace

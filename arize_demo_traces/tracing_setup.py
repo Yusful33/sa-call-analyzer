@@ -2,6 +2,10 @@
 Arize-otel tracing setup + OpenInference auto-instrumentors.
 Call `setup_tracing()` once at app startup.
 Use `get_tracer()` to get a tracer for creating parent spans.
+
+We only attach LangChainInstrumentor (not OpenAIInstrumentor) so each LLM call
+produces a single span (e.g. ChatOpenAI). Enabling both would create duplicate
+ChatOpenAI + ChatCompletion spans with identical token counts and cost.
 """
 
 import os
@@ -10,7 +14,6 @@ from contextlib import contextmanager
 from opentelemetry import trace
 from arize.otel import register
 
-from openinference.instrumentation.openai import OpenAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
 
@@ -39,8 +42,7 @@ def setup_tracing() -> None:
 
     _tracer_provider = register(**kwargs, batch=False)
 
-    # Attach OpenInference auto-instrumentors
-    OpenAIInstrumentor().instrument(tracer_provider=_tracer_provider)
+    # LangChain only; skip OpenAI to avoid duplicate ChatOpenAI + ChatCompletion spans
     LangChainInstrumentor().instrument(tracer_provider=_tracer_provider)
 
     _tracer = trace.get_tracer("arize-demo-trace-service")

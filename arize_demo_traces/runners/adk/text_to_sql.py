@@ -35,6 +35,9 @@ def run_text_to_sql(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute an ADK-style text-to-SQL agent: route -> generate -> validate."""
     from opentelemetry import trace

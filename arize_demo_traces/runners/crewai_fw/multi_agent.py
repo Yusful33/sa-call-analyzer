@@ -30,6 +30,9 @@ def run_multi_agent(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a CrewAI multi-agent orchestration: guardrails -> 4-agent crew."""
     from opentelemetry import trace

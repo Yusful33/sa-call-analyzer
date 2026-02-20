@@ -28,6 +28,9 @@ def run_text_to_sql(
     guard: CostGuard | None = None,
     tracer_provider=None,
     prospect_context=None,
+    degraded_output=None,
+    trace_quality="good",
+    **kwargs,
 ) -> dict:
     """Execute a LangChain LCEL text-to-SQL pipeline: route -> generate -> validate."""
     from opentelemetry import trace

@@ -3,6 +3,7 @@ Shared guardrail and evaluator spans for demo trace pipelines.
 Adds realistic GUARDRAIL and EVALUATOR spans matching production Arize demo patterns.
 """
 
+import contextvars
 import json
 import time
 
@@ -34,7 +35,10 @@ def run_guardrail(tracer, name, input_text, llm, guard=None, system_prompt=None)
         chain = prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        result = chain.invoke({"input": input_text})
+        # Run invoke in current context so LangChain-created spans parent to this GUARDRAIL span
+        # (avoids orphaned ChatOpenAI/RunnableSequence when client uses another thread).
+        ctx = contextvars.copy_context()
+        result = ctx.run(chain.invoke, {"input": input_text})
         passed = not result.strip().upper().startswith("FAIL")
         span.set_attribute("output.value", result)
         span.set_attribute("guardrail.passed", passed)
@@ -84,7 +88,8 @@ def run_evaluator(tracer, name, question, response, llm, guard=None, criteria="q
         chain = prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        result = chain.invoke({"question": question, "response": response[:1000]})
+        ctx = contextvars.copy_context()
+        result = ctx.run(chain.invoke, {"question": question, "response": response[:1000]})
         span.set_attribute("output.value", result)
         try:
             parsed = json.loads(result.strip())
