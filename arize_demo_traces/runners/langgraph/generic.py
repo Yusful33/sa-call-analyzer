@@ -13,7 +13,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
 
 
@@ -67,7 +67,7 @@ def run_generic(
         chain = prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        answer = chain.invoke({"question": state["query"]})
+        answer = invoke_chain_in_context(chain, {"question": state["query"]})
         return {"answer": answer}
 
     # --- Build graph ---
@@ -90,7 +90,7 @@ def run_generic(
             "metadata.use_case": "generic",
         },
     ) as span:
-        result = graph.invoke({
+        result = run_in_context(graph.invoke, {
             "query": query,
             "answer": "",
             "guardrail_passed": False,

@@ -13,7 +13,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_in_context
 from ...use_cases.mcp import (
     QUERIES,
     MCP_SERVERS,
@@ -77,7 +77,7 @@ def run_mcp(
         if guard:
             guard.check()
         messages = prompt.format_messages(servers=servers_info, query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"discovered_tools": result}
 
@@ -91,7 +91,7 @@ def run_mcp(
         messages = prompt.format_messages(
             query=state["query"], tools=state["discovered_tools"]
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"execution_plan": result}
 
@@ -110,7 +110,7 @@ def run_mcp(
             query=state["query"],
             results=_json.dumps(state["tool_results"], indent=2, default=str),
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"response": result}
 
@@ -140,7 +140,7 @@ def run_mcp(
             "metadata.use_case": "mcp-tool-use",
         },
     ) as span:
-        result = graph.invoke({
+        result = run_in_context(graph.invoke, {
             "query": query,
             "discovered_tools": "",
             "execution_plan": "",

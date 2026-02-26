@@ -18,7 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, invoke_llm_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
@@ -86,7 +86,7 @@ def run_rag(
             plan_chain = plan_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            plan = plan_chain.invoke({"input": query})
+            plan = invoke_chain_in_context(plan_chain, {"input": query})
             plan_span.set_attribute("output.value", plan)
             plan_span.set_attribute("output.mime_type", "text/plain")
             plan_span.set_status(Status(StatusCode.OK))
@@ -106,7 +106,7 @@ def run_rag(
         ) as retriever_span:
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-            docs = retriever.invoke(query)
+            docs = run_in_context(retriever.invoke, query)
             context = format_docs(docs)
             retriever_span.set_attribute("output.value", context[:1000])
             retriever_span.set_attribute("output.mime_type", "text/plain")
@@ -129,7 +129,7 @@ def run_rag(
             if guard:
                 guard.check()
             messages = answer_prompt.format_messages(context=context, question=query)
-            response = llm.invoke(messages)
+            response = invoke_llm_in_context(llm, messages)
             answer = response.content if hasattr(response, "content") else str(response)
             answer_span.set_attribute("output.value", answer)
             answer_span.set_attribute("output.mime_type", "text/plain")

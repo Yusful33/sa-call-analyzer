@@ -11,8 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Copy application code
 COPY . .
 
-# Install uv for faster installs, then install dependencies
-RUN pip install uv && uv pip install --system .
+# Install uv for faster installs, then install dependencies.
+# Clear uv cache after install to keep image smaller (if build fails with "No space left on device", run: docker system prune -a).
+RUN pip install uv && uv pip install --system . && uv cache clean
 
 # Disable CrewAI's interactive tracing prompt (adds 20s delay per crew)
 RUN mkdir -p /root/.config/crewai && \

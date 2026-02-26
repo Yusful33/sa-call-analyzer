@@ -1,25 +1,16 @@
 """
 ADK-style chatbot agent with manual OpenTelemetry spans.
-Mimics Google Agent Development Kit trace patterns without requiring ADK installation.
-Uses real LLM calls inside manually created OTel spans with OpenInference attributes.
-
-Trace structure:
-  support_agent.run (AGENT)
-    -> guardrails (GUARDRAIL group)
-    -> generate_content (LLM) - analyze query and plan tool calls
-    -> tool execution (TOOL spans) - execute relevant tools
-    -> generate_content (LLM) - synthesize final answer
+Uses common_runner_utils for query sampling.
 """
-
-import random
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
-from ...use_cases.chatbot import QUERIES, GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_in_context, tool_definitions_json
+from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ..common_runner_utils import get_query_for_run
 
 
 def run_chatbot(
@@ -36,25 +27,33 @@ def run_chatbot(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import chatbot as chatbot_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.chatbot.adk")
 
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(chatbot_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
     tool_map = {t.name: t for t in TOOLS}
 
-    with tracer.start_as_current_span(
-        "support_agent.run",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "adk",
-            "metadata.use_case": "multiturn-chatbot-with-tools",
-        },
-    ) as agent_span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "adk",
+        "metadata.use_case": "multiturn-chatbot-with-tools",
+        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("support_agent.run", attributes=attrs) as agent_span:
 
         # ---- Guardrails ----
         for g in GUARDRAILS:
@@ -87,7 +86,7 @@ def run_chatbot(
             plan_chain = plan_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            plan = plan_chain.invoke({"input": query})
+            plan = invoke_chain_in_context(plan_chain, {"input": query})
             plan_span.set_attribute("output.value", plan)
             plan_span.set_attribute("output.mime_type", "text/plain")
             plan_span.set_status(Status(StatusCode.OK))
@@ -134,7 +133,7 @@ def run_chatbot(
                 if tool_fn:
                     if guard:
                         guard.check()
-                    result = tool_fn.invoke(tool_args)
+                    result = run_in_context(tool_fn.invoke, tool_args)
                     tool_results.append({"tool": tool_name, "args": tool_args, "result": result})
                     tool_span.set_attribute("output.value", str(result))
                     tool_span.set_attribute("output.mime_type", "text/plain")
@@ -165,7 +164,7 @@ def run_chatbot(
             synth_chain = synth_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            answer = synth_chain.invoke({
+            answer = invoke_chain_in_context(synth_chain, {
                 "question": query,
                 "tool_results": tool_output_text,
             })

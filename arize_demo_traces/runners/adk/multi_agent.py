@@ -24,7 +24,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
     QUERIES,
     GUARDRAILS,
@@ -94,7 +94,7 @@ def run_multi_agent(
             plan_chain = plan_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            plan = plan_chain.invoke({"input": query})
+            plan = invoke_chain_in_context(plan_chain, {"input": query})
             plan_span.set_attribute("output.value", plan)
             plan_span.set_attribute("output.mime_type", "text/plain")
             plan_span.set_status(Status(StatusCode.OK))
@@ -124,7 +124,7 @@ def run_multi_agent(
                 research_chain = research_prompt | llm | StrOutputParser()
                 if guard:
                     guard.check()
-                research_output = research_chain.invoke({"plan": plan, "input": query})
+                research_output = invoke_chain_in_context(research_chain, {"plan": plan, "input": query})
                 research_llm_span.set_attribute("output.value", research_output)
                 research_llm_span.set_attribute("output.mime_type", "text/plain")
                 research_llm_span.set_status(Status(StatusCode.OK))
@@ -157,7 +157,7 @@ def run_multi_agent(
                 analysis_chain = analysis_prompt | llm | StrOutputParser()
                 if guard:
                     guard.check()
-                analysis_output = analysis_chain.invoke({"research": research_output, "input": query})
+                analysis_output = invoke_chain_in_context(analysis_chain, {"research": research_output, "input": query})
                 analysis_llm_span.set_attribute("output.value", analysis_output)
                 analysis_llm_span.set_attribute("output.mime_type", "text/plain")
                 analysis_llm_span.set_status(Status(StatusCode.OK))
@@ -189,7 +189,7 @@ def run_multi_agent(
                 writer_chain = writer_prompt | llm | StrOutputParser()
                 if guard:
                     guard.check()
-                writer_output = writer_chain.invoke({
+                writer_output = invoke_chain_in_context(writer_chain, {
                     "analysis": analysis_output,
                     "research": research_output,
                     "input": query,
@@ -225,7 +225,7 @@ def run_multi_agent(
                 review_chain = review_prompt | llm | StrOutputParser()
                 if guard:
                     guard.check()
-                review_output = review_chain.invoke({"document": writer_output, "input": query})
+                review_output = invoke_chain_in_context(review_chain, {"document": writer_output, "input": query})
                 review_llm_span.set_attribute("output.value", review_output)
                 review_llm_span.set_attribute("output.mime_type", "text/plain")
                 review_llm_span.set_status(Status(StatusCode.OK))

@@ -778,10 +778,10 @@
         <div class="card">
             <div class="tabs-container">
                 <div class="tabs">
-                    <button class="tab" onclick="switchTab('hypothesis', event)">🔬 Hypothesis Research</button>
-                    <button class="tab active" onclick="switchTab('prospect', event)">📊 Prospect Overview</button>
-                    <button class="tab" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
-                    <button class="tab" onclick="switchTab('gong', event)">Single Call Analysis</button>
+                    <button class="tab" data-tab="hypothesis" onclick="switchTab('hypothesis', event)">🔬 Hypothesis Research</button>
+                    <button class="tab active" data-tab="prospect" onclick="switchTab('prospect', event)">📊 Prospect Overview</button>
+                    <button class="tab" data-tab="demo" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
+                    <button class="tab" data-tab="gong" onclick="switchTab('gong', event)">Single Call Analysis</button>
                 </div>
 
                 <div class="tab-content-wrapper">
@@ -1035,11 +1035,11 @@
         function switchTab(tab, evt) {
             currentTab = tab;
 
-            // Update tab buttons
+            // Update tab buttons (use currentTarget so we get the button, not a child node like text)
             const tabButtons = document.querySelectorAll('.tab');
             tabButtons.forEach(btn => btn.classList.remove('active'));
-            const target = (evt && evt.target) || tabButtons[['hypothesis','prospect','demo','gong'].indexOf(tab)];
-            if (target) target.classList.add('active');
+            const target = (evt && evt.currentTarget) || Array.from(tabButtons).find(btn => btn.getAttribute('data-tab') === tab) || tabButtons[['hypothesis','prospect','demo','gong'].indexOf(tab)];
+            if (target && target.classList) target.classList.add('active');
 
             // Update tab content
             document.getElementById('gong-tab').classList.toggle('active', tab === 'gong');
@@ -1357,6 +1357,9 @@
         }
 
         function renderHypothesisResults(data) {
+            if (!data || !data.result) {
+                return '<div style="color: red; padding: 20px;">Invalid response: no result data.</div>';
+            }
             const r = data.result;
             const research = r.research || {};
             const hypotheses = r.hypotheses || [];

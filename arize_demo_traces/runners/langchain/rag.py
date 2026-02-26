@@ -4,16 +4,14 @@ Uses prompt | llm | parser chains, auto-instrumented by LangChainInstrumentor.
 """
 
 import json as _json
-import random
 from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_in_context, run_tool_call
 from ...use_cases.rag import (
-    QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
@@ -21,6 +19,7 @@ from ...use_cases.rag import (
     search_documents,
     fetch_document_metadata,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_rag(
@@ -37,24 +36,31 @@ def run_rag(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import rag as rag_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.rag")
 
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(rag_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "user_interaction",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langchain",
-            "metadata.use_case": "retrieval-augmented-search",
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langchain",
+        "metadata.use_case": "retrieval-augmented-search",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("user_interaction", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
         with tracer.start_as_current_span(
@@ -80,7 +86,7 @@ def run_rag(
             run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-            retrieved = retriever.invoke(query)
+            retrieved = run_in_context(retriever.invoke, query)
             if retrieved:
                 run_tool_call(tracer, "fetch_document_metadata", retrieved[0].metadata.get("source", ""),
                               fetch_document_metadata, guard=guard, source=retrieved[0].metadata.get("source", "unknown"))
@@ -103,7 +109,7 @@ def run_rag(
             if guard:
                 guard.check()
             messages = prompt.format_messages(context=context, question=query)
-            response = llm.invoke(messages)
+            response = invoke_llm_in_context(llm, messages)
             answer = response.content if hasattr(response, "content") else str(response)
             step.set_attribute("output.value", answer)
             step.set_status(Status(StatusCode.OK))

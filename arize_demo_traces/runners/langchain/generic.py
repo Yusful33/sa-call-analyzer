@@ -1,17 +1,16 @@
 """
 LangChain LCEL generic LLM pipeline with guardrails.
-Uses prompt | llm | parser chains, auto-instrumented by LangChainInstrumentor.
+Uses common_runner_utils for query sampling.
 """
-
-import random
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
+from ...use_cases.generic import GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ..common_runner_utils import get_query_for_run
 
 
 def run_generic(
@@ -28,24 +27,31 @@ def run_generic(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import generic as generic_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.generic")
 
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(generic_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "llm_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langchain",
-            "metadata.use_case": "generic",
-        },
-    ) as span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langchain",
+        "metadata.use_case": "generic",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("llm_pipeline", attributes=attrs) as span:
 
         # === GUARDRAIL ===
         for g in GUARDRAILS:
@@ -70,7 +76,7 @@ def run_generic(
             chain = prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            answer = chain.invoke({"question": query})
+            answer = invoke_chain_in_context(chain, {"question": query})
             step.set_attribute("output.value", answer)
             step.set_status(Status(StatusCode.OK))
 

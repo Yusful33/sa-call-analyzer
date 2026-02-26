@@ -102,6 +102,14 @@ def get_queries_for_prospect(prospect_context: dict | None) -> list[str]:
     return INDUSTRY_QUERIES.get(key, INDUSTRY_QUERIES["default"])
 
 
+def sample_query(prospect_context=None, rng=None, **kwargs):
+    """Contract: sample_query(prospect_context, rng) -> str. Uses get_queries_for_prospect and rng for determinism."""
+    queries = get_queries_for_prospect(prospect_context)
+    if rng is not None:
+        return rng.choice(queries)
+    return random.choice(queries)
+
+
 def get_context_preamble(prospect_context: dict | None) -> str:
     """Return a short preamble for system prompts so the demo is framed for the prospect."""
     if not prospect_context:

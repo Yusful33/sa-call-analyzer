@@ -13,7 +13,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_in_context, run_tool_call
 from ...use_cases.text_to_sql import (
     SYSTEM_PROMPT_SQL_GEN,
     SYSTEM_PROMPT_SQL_VALIDATE,
@@ -66,7 +66,7 @@ def run_text_to_sql(
         route_chain = route_prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        query_type = route_chain.invoke({"query": state["query"]})
+        query_type = invoke_chain_in_context(route_chain, {"query": state["query"]})
         return {"query_type": query_type.strip()}
 
     def generate_sql_node(state: TextToSQLState) -> dict:
@@ -79,7 +79,7 @@ def run_text_to_sql(
         sql_chain = sql_prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        generated_sql = sql_chain.invoke({"question": state["query"]})
+        generated_sql = invoke_chain_in_context(sql_chain, {"question": state["query"]})
         return {"generated_sql": generated_sql}
 
     def validate_sql_node(state: TextToSQLState) -> dict:
@@ -90,7 +90,7 @@ def run_text_to_sql(
         validate_chain = validate_prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        validation = validate_chain.invoke({"sql": state["generated_sql"]})
+        validation = invoke_chain_in_context(validate_chain, {"sql": state["generated_sql"]})
         run_tool_call(tracer, "execute_query", state["generated_sql"],
                       execute_query, guard=guard, sql=state["generated_sql"])
         return {"validation": validation}
@@ -117,7 +117,7 @@ def run_text_to_sql(
             "metadata.use_case": "text-to-sql-bi-agent",
         },
     ) as span:
-        result = graph.invoke({
+        result = run_in_context(graph.invoke, {
             "query": query,
             "query_type": "",
             "generated_sql": "",

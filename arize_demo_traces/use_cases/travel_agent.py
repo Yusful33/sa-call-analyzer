@@ -6,6 +6,9 @@ import random
 import re
 from datetime import datetime, timedelta
 
+from .contracts import QuerySpec, RunPlan, StepSpec
+from .common import weighted_sample
+
 # Queries that trigger only flight_search (no hotel wording). Good for evaluators to see single-tool traces.
 QUERIES_FLIGHT_ONLY = [
     "Best way to get from San Francisco to Barcelona in June? Prefer non-stop or one short layover.",
@@ -32,6 +35,33 @@ QUERIES_BOTH = [
 # Union of all (backward compat); order doesn't matter for random.choice.
 QUERIES = list(QUERIES_FLIGHT_ONLY + QUERIES_HOTEL_ONLY + QUERIES_BOTH)
 
+# Pools and weights for weighted_sample (contract: sample_query returns QuerySpec with intent)
+_QUERY_POOLS = {
+    "flight_only": QUERIES_FLIGHT_ONLY,
+    "hotel_only": QUERIES_HOTEL_ONLY,
+    "both": QUERIES_BOTH,
+}
+_DEFAULT_WEIGHTS = {"flight_only": 0.35, "hotel_only": 0.25, "both": 0.40}
+
+
+def sample_query(
+    prospect_context=None,
+    rng: random.Random | None = None,
+    *,
+    flight_only_weight: float = 0.35,
+    hotel_only_weight: float = 0.25,
+    both_weight: float = 0.40,
+    **kwargs,
+) -> QuerySpec:
+    """
+    Sample a query so traces include a mix of single-tool and both-tool calls.
+    Returns QuerySpec with intent (pool name) and tags for trace metadata.
+    """
+    weights = {"flight_only": flight_only_weight, "hotel_only": hotel_only_weight, "both": both_weight}
+    query_text, pool_name = weighted_sample(_QUERY_POOLS, weights=weights, rng=rng)
+    tags = ["single_tool"] if pool_name in ("flight_only", "hotel_only") else ["both_tools"]
+    return QuerySpec(text=query_text, intent=pool_name, tags=tags, meta={"pool": pool_name})
+
 
 def sample_travel_query(
     *,
@@ -40,15 +70,16 @@ def sample_travel_query(
     both_weight: float = 0.40,
 ) -> str:
     """
-    Sample a query so traces include a mix of single-tool and both-tool calls.
-    Use these weights so evaluators see both patterns (e.g. "only call hotel when user asks for accommodation").
+    Backward-compat: sample a query and return the string only.
+    Prefer sample_query(..., rng=...) for determinism and intent metadata.
     """
-    r = random.random()
-    if r < flight_only_weight and QUERIES_FLIGHT_ONLY:
-        return random.choice(QUERIES_FLIGHT_ONLY)
-    if r < flight_only_weight + hotel_only_weight and QUERIES_HOTEL_ONLY:
-        return random.choice(QUERIES_HOTEL_ONLY)
-    return random.choice(QUERIES_BOTH) if QUERIES_BOTH else random.choice(QUERIES)
+    spec = sample_query(
+        rng=None,
+        flight_only_weight=flight_only_weight,
+        hotel_only_weight=hotel_only_weight,
+        both_weight=both_weight,
+    )
+    return spec.text
 
 # Defaults when query doesn't specify (we use flexible search and state assumptions)
 DEFAULT_ORIGIN = "NYC"
@@ -195,6 +226,37 @@ def parse_travel_query(query: str) -> dict:
         "guests": guests,
         "assumptions": assumptions,
     }
+
+
+# Contract alias for runners that call parse_query(module, query)
+parse_query = parse_travel_query
+
+
+def get_run_plan(query: str, prospect_context=None) -> RunPlan:
+    """
+    Return a framework-agnostic run plan: which steps are enabled and with what params.
+    Runners translate this to their framework (LangChain tool calls, LangGraph edges, etc.).
+    """
+    params = parse_travel_query(query)
+    run_flight, run_hotel = select_tools_for_query(query)
+    steps = [
+        StepSpec(
+            name="flight_search",
+            enabled=run_flight,
+            params={"origin": params["origin"], "destination": params["destination"], "date_out": params["date_out"]},
+        ),
+        StepSpec(
+            name="hotel_search",
+            enabled=run_hotel,
+            params={
+                "city": params["city"],
+                "check_in": params["check_in"],
+                "check_out": params["check_out"],
+                "guests": params["guests"],
+            },
+        ),
+    ]
+    return RunPlan(query=query, steps=steps, meta={"assumptions": params.get("assumptions", [])})
 
 
 def build_options_table(flight_json_str: str, hotel_json_str: str) -> str:

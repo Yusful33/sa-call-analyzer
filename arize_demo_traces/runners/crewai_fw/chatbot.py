@@ -1,17 +1,15 @@
 """
 CrewAI chatbot pipeline with routing and support agents.
-Uses real CrewAI Crew, Agent, Task objects to generate authentic trace patterns
-when instrumented by CrewAIInstrumentor.
+Uses common_runner_utils for query sampling.
 """
-
-import random
 
 from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
-from ...use_cases.chatbot import QUERIES, GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...trace_enrichment import run_guardrail, tool_definitions_json
+from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ..common_runner_utils import get_query_for_run
 
 
 def run_chatbot(
@@ -28,23 +26,31 @@ def run_chatbot(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import chatbot as chatbot_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.chatbot.crewai")
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(chatbot_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "chatbot_pipeline",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "multiturn-chatbot-with-tools",
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "multiturn-chatbot-with-tools",
+        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("chatbot_pipeline", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
         for g in GUARDRAILS:

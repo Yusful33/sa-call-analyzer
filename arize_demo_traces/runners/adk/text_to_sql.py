@@ -17,7 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_tool_call
 from ...use_cases.text_to_sql import (
     SYSTEM_PROMPT_SQL_GEN,
     SYSTEM_PROMPT_SQL_VALIDATE,
@@ -80,7 +80,7 @@ def run_text_to_sql(
             route_chain = route_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            raw_route = route_chain.invoke({"query": query})
+            raw_route = invoke_chain_in_context(route_chain, {"query": query})
             query_type = (raw_route or "").strip() if isinstance(raw_route, str) else "ANALYTICAL"
             if not query_type:
                 query_type = "ANALYTICAL"
@@ -107,7 +107,7 @@ def run_text_to_sql(
             sql_chain = sql_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            generated_sql = sql_chain.invoke({"question": query})
+            generated_sql = invoke_chain_in_context(sql_chain, {"question": query})
             sql_span.set_attribute("output.value", generated_sql)
             sql_span.set_attribute("output.mime_type", "text/plain")
             sql_span.set_status(Status(StatusCode.OK))
@@ -129,7 +129,7 @@ def run_text_to_sql(
             validate_chain = validate_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            validation = validate_chain.invoke({"sql": generated_sql})
+            validation = invoke_chain_in_context(validate_chain, {"sql": generated_sql})
             validate_span.set_attribute("output.value", validation)
             validate_span.set_attribute("output.mime_type", "text/plain")
             validate_span.set_status(Status(StatusCode.OK))

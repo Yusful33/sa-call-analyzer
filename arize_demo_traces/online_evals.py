@@ -212,6 +212,25 @@ If ANY criteria are NOT met, classify as "fail".
 
 Respond with ONLY "pass" or "fail".""",
     },
+    "guardrails": {
+        "name": "guardrail_result_consistency",
+        "template": """You are an expert evaluator assessing a guardrails pipeline output.
+
+**Input (checked by guardrails):** {{input}}
+
+**Guardrail Pipeline Output:** {{output}}
+
+Evaluate whether the output meets ALL of the following criteria:
+1. The output is a clear summary of guardrail results (e.g. "PASS"/"FAIL" per check or "All checks passed")
+2. The output does not contradict itself (e.g. claiming "All checks passed" while also listing a FAIL)
+3. The output does not contain fabricated or generic error messages that don't match the actual guardrail checks run
+4. If any guardrail failed, the output should reflect that (not claim all passed)
+
+If ALL criteria are met, classify as "pass".
+If ANY criteria are NOT met, classify as "fail".
+
+Respond with ONLY "pass" or "fail".""",
+    },
 }
 
 # Fallback for any use case not explicitly mapped
@@ -234,6 +253,38 @@ If ANY criteria are NOT met, classify as "fail".
 
 Respond with ONLY "pass" or "fail".""",
 }
+
+
+def get_suggested_evals(use_case: str | None = None) -> list[dict]:
+    """Return suggested eval task configs for a use case (for display / optional creation).
+    Does not call the API; use this after trace data is generated to let the user
+    choose whether to create these evals in Arize.
+    """
+    if use_case:
+        config = _EVAL_TEMPLATES.get(use_case, _EVAL_TEMPLATE_FALLBACK)
+        query_filter = (
+            f"attributes.openinference.span.kind = 'CHAIN' "
+            f"AND attributes.metadata.use_case = '{use_case}'"
+        )
+        return [
+            {
+                "use_case": use_case,
+                "eval_name": config["name"],
+                "task_name": f"{config['name']}_<project>",
+                "query_filter": query_filter,
+                "template_preview": (config["template"][:200] + "...") if len(config["template"]) > 200 else config["template"],
+            }
+        ]
+    # Suggest one generic fallback when no use_case
+    return [
+        {
+            "use_case": None,
+            "eval_name": _EVAL_TEMPLATE_FALLBACK["name"],
+            "task_name": f"{_EVAL_TEMPLATE_FALLBACK['name']}_<project>",
+            "query_filter": "attributes.openinference.span.kind = 'CHAIN'",
+            "template_preview": (_EVAL_TEMPLATE_FALLBACK["template"][:200] + "..."),
+        }
+    ]
 
 
 def _graphql_request(
@@ -307,27 +358,67 @@ def _get_project_id(space_id: str, project_name: str, api_key: str | None = None
     return None
 
 
+def _get_llm_integration_id(space_id: str, api_key: str | None = None, preferred_provider: str = "openAI") -> str | None:
+    """Look up an LLM integration ID for the space (required by createEvalTask llmConfig).
+    Returns the first integration ID found, or one matching preferred_provider if available.
+    """
+    query = """
+    query GetSpaceIntegrations($spaceId: ID!) {
+      node(id: $spaceId) {
+        ... on Space {
+          llmIntegrations(first: 20) {
+            edges {
+              node {
+                id
+                provider
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = _graphql_request(query, {"spaceId": space_id}, api_key=api_key)
+        edges = (
+            data.get("data", {})
+            .get("node", {})
+            .get("llmIntegrations", {})
+            .get("edges", [])
+        )
+        # Prefer matching provider (e.g. openAI)
+        for edge in edges:
+            node = edge.get("node", {})
+            if (node.get("provider") or "").lower() == (preferred_provider or "").lower():
+                return node.get("id")
+        # Otherwise first available
+        if edges:
+            return edges[0].get("node", {}).get("id")
+    except Exception as e:
+        print(f"Warning: Failed to list LLM integrations: {e}")
+    return None
+
+
 def _create_eval_task(
     project_id: str,
     task_name: str,
     eval_name: str,
     eval_template: str,
     query_filter: str,
+    integration_id: str,
     api_key: str | None = None,
 ) -> dict:
     """Create a single online eval task via the Arize GraphQL API.
-    Uses an inlined mutation (input embedded in the query) so the server
-    always receives the input even when variable binding fails.
+    llmConfig is sent via variables so integrationId and JSONObject fields
+    (invocationParameters, providerParameters) are correctly typed.
     """
-    # Escape template for embedding in GraphQL string literal
     template_escaped = _escape_graphql_string(eval_template)
     name_escaped = _escape_graphql_string(eval_name)
     task_name_escaped = _escape_graphql_string(task_name)
     query_filter_escaped = _escape_graphql_string(query_filter)
-    # Inline the full input in the mutation so we don't rely on variable binding
-    # (some environments return "variable $input was not provided a runtime value" otherwise)
+
     create_mutation = (
-        'mutation CreateOnlineEvalTask { createEvalTask(input: {'
+        'mutation CreateOnlineEvalTask($llmConfig: OnlineTaskLLMConfigInput!) { createEvalTask(input: {'
         f'modelId: "{_escape_graphql_string(project_id)}", '
         "samplingRate: 1, "
         f'queryFilter: "{query_filter_escaped}", '
@@ -340,11 +431,25 @@ def _create_eval_task(
         "includeExplanations: true, "
         "useFunctionCallingIfAvailable: false"
         "}], runContinuously: true, "
-        "llmConfig: { modelName: GPT_4o_MINI, provider: openAI, temperature: 0 }"
+        "llmConfig: $llmConfig"
         "}) { evalTask { id name samplingRate queryFilter } } }"
     )
 
-    result = _graphql_request(create_mutation, variables=None, api_key=api_key)
+    llm_config = {
+        "integrationId": integration_id,
+        "modelName": "GPT_4o_MINI",
+        "provider": "openAI",
+        "temperature": 0,
+        "invocationParameters": {},
+        "providerParameters": {},
+    }
+
+    result = _graphql_request(
+        create_mutation,
+        variables={"llmConfig": llm_config},
+        api_key=api_key,
+        operation_name="CreateOnlineEvalTask",
+    )
     eval_task = result.get("data", {}).get("createEvalTask", {}).get("evalTask", {})
     return eval_task
 
@@ -401,6 +506,7 @@ def create_and_run_online_eval(
     space_id: str | None = None,
     api_key: str | None = None,
     task_name: str | None = None,
+    integration_id: str | None = None,
     *,
     delay_seconds_before_backfill: int = 15,
     minutes_back: int = 60,
@@ -424,6 +530,8 @@ def create_and_run_online_eval(
         space_id: Arize space ID (defaults to ARIZE_SPACE_ID env var).
         api_key: Arize API key (defaults to ARIZE_API_KEY env var).
         task_name: Name for the eval task (auto-generated if not provided).
+        integration_id: Arize LLM integration ID for the eval judge. If not set,
+            looked up from the space (requires at least one LLM integration in Arize).
         delay_seconds_before_backfill: Seconds to wait after creating the task
             before running the backfill (allows Arize to index newly sent spans).
         minutes_back: Backfill time window: evaluate spans from this many minutes
@@ -451,7 +559,19 @@ def create_and_run_online_eval(
             )
         }
 
-    # Step 2: Pick the eval template for this use case
+    # Step 2: Resolve LLM integration ID (required by createEvalTask llmConfig)
+    if not integration_id:
+        integration_id = _get_llm_integration_id(space_id, api_key=api_key)
+    if not integration_id:
+        return {
+            "error": (
+                "No LLM integration found in this space. Create an OpenAI (or other) integration "
+                "in Arize: Settings > Integrations > AI Provider Integrations. "
+                "Then retry creating the eval task."
+            )
+        }
+
+    # Step 3: Pick the eval template for this use case
     eval_config = _EVAL_TEMPLATES.get(use_case or "", _EVAL_TEMPLATE_FALLBACK)
     eval_name = eval_config["name"]
     eval_template = eval_config["template"]
@@ -467,7 +587,7 @@ def create_and_run_online_eval(
 
     task_name = task_name or f"{eval_name}_{project_name}"
 
-    # Step 3: Create the eval task
+    # Step 4: Create the eval task
     try:
         eval_task = _create_eval_task(
             project_id=project_id,
@@ -475,6 +595,7 @@ def create_and_run_online_eval(
             eval_name=eval_name,
             eval_template=eval_template,
             query_filter=query_filter,
+            integration_id=integration_id,
             api_key=api_key,
         )
         task_id = eval_task.get("id")
@@ -485,7 +606,7 @@ def create_and_run_online_eval(
     except Exception as e:
         return {"error": f"Failed to create eval task: {e}"}
 
-    # Step 4: Wait for Arize to index newly sent spans, then run backfill
+    # Step 5: Wait for Arize to index newly sent spans, then run backfill
     if delay_seconds_before_backfill > 0:
         time.sleep(delay_seconds_before_backfill)
 

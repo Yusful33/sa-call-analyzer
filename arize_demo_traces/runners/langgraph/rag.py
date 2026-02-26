@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
@@ -71,7 +71,7 @@ def run_rag(
             guard.check()
         vectorstore = get_vectorstore()
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        docs = retriever.invoke(state["query"])
+        docs = run_in_context(retriever.invoke, state["query"])
         if docs:
             run_tool_call(tracer, "fetch_document_metadata", docs[0].metadata.get("source", ""),
                           fetch_document_metadata, guard=guard,
@@ -86,7 +86,7 @@ def run_rag(
         if guard:
             guard.check()
         messages = prompt.format_messages(context=state["context"], question=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         answer = response.content if hasattr(response, "content") else str(response)
         return {"answer": answer}
 
@@ -112,7 +112,7 @@ def run_rag(
             "metadata.use_case": "retrieval-augmented-search",
         },
     ) as span:
-        result = graph.invoke({
+        result = run_in_context(graph.invoke, {
             "query": query,
             "context": "",
             "answer": "",

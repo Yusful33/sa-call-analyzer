@@ -1,6 +1,10 @@
 """Chatbot with tools use-case: shared prompts, queries, tools, guardrails, evaluators."""
 
+import random
+
 from langchain_core.tools import tool
+
+from .common import industry_key
 
 
 # ---- Tools ----
@@ -44,6 +48,56 @@ QUERIES = [
     "How do I set up monitoring for my LLM app?",
     "Calculate cost for 500000 tokens with gpt-4o-mini.",
 ]
+
+# Industry-tailored support-style queries for prospect-aware demos
+INDUSTRY_QUERIES: dict[str, list[str]] = {
+    "default": QUERIES,
+    "technology": QUERIES,
+    "retail": [
+        "What is our return policy for in-store and online purchases?",
+        "Look up account ACC-12345 and tell me their loyalty tier and recent orders.",
+        "How do I check inventory levels for a specific SKU or store?",
+        "What are the current promotions and how do I apply them at checkout?",
+        "How do I set up a new store location in the system?",
+    ],
+    "financial": [
+        "What is our policy for disputed charges and chargebacks?",
+        "Look up account ACC-12345 and tell me their account status and limits.",
+        "What compliance certifications do we have for data handling?",
+        "How do I run a fraud report for the last 30 days?",
+        "What are the fee schedules for different account tiers?",
+    ],
+    "healthcare": [
+        "What is our policy for patient data requests and portability?",
+        "Look up account ACC-12345 and tell me their contract and compliance status.",
+        "What HIPAA or BAA documentation do we have on file?",
+        "How do I request access to the clinical support portal?",
+        "What are the SLAs for critical support incidents?",
+    ],
+    "travel": [
+        "What is our cancellation and refund policy for bookings?",
+        "Look up account ACC-12345 and tell me their loyalty status and upcoming trips.",
+        "How do I modify or rebook a reservation?",
+        "What are the current offers and promo codes?",
+        "How do I set up a corporate travel policy?",
+    ],
+}
+
+
+def get_queries_for_prospect(prospect_context: dict | None) -> list[str]:
+    """Return support-style queries tailored to the prospect's industry."""
+    if not prospect_context:
+        return INDUSTRY_QUERIES["default"]
+    key = industry_key(prospect_context.get("industry"))
+    return INDUSTRY_QUERIES.get(key, INDUSTRY_QUERIES["default"])
+
+
+def sample_query(prospect_context=None, rng=None, **kwargs):
+    """Contract: sample_query(prospect_context, rng) -> str. Industry-aware sampling."""
+    queries = get_queries_for_prospect(prospect_context)
+    if rng is not None:
+        return rng.choice(queries)
+    return random.choice(queries)
 
 SYSTEM_PROMPT = "You are a helpful customer support agent. Use the available tools to answer questions accurately. Always use tools when relevant information might be available."
 

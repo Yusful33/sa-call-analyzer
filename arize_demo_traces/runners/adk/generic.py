@@ -16,7 +16,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
 from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
 
 
@@ -80,7 +80,7 @@ def run_generic(
             chain = prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            answer = chain.invoke({"question": query})
+            answer = invoke_chain_in_context(chain, {"question": query})
             llm_span.set_attribute("output.value", answer)
             llm_span.set_attribute("output.mime_type", "text/plain")
             llm_span.set_status(Status(StatusCode.OK))

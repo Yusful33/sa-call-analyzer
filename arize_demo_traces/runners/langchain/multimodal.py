@@ -12,6 +12,7 @@ from langchain_core.output_parsers import StrOutputParser
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import (
+    invoke_chain_in_context,
     run_guardrail,
     run_local_guardrail,
     run_tool_call,
@@ -105,7 +106,7 @@ def run_multimodal(
             classify_chain = classify_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            classification = classify_chain.invoke({
+            classification = invoke_chain_in_context(classify_chain, {
                 "image_description": image_description,
                 "query": query_text,
             })
@@ -125,7 +126,7 @@ def run_multimodal(
             analyze_chain = analyze_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            analysis = analyze_chain.invoke({
+            analysis = invoke_chain_in_context(analyze_chain, {
                 "image_description": image_description,
                 "query": query_text,
             })
@@ -144,7 +145,7 @@ def run_multimodal(
             extract_chain = extract_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            extraction = extract_chain.invoke({
+            extraction = invoke_chain_in_context(extract_chain, {
                 "image_description": image_description,
                 "analysis": analysis,
             })
@@ -164,7 +165,7 @@ def run_multimodal(
             summarize_chain = summarize_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            summary = summarize_chain.invoke({
+            summary = invoke_chain_in_context(summarize_chain, {
                 "query": query_text,
                 "classification": classification,
                 "analysis": analysis,

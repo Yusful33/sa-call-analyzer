@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail
 from ...use_cases.mcp import (
     QUERIES,
     MCP_SERVERS,
@@ -90,7 +90,7 @@ def run_mcp(
             if guard:
                 guard.check()
             messages = discover_prompt.format_messages(servers=servers_info, query=query)
-            response = llm.invoke(messages)
+            response = invoke_llm_in_context(llm, messages)
             discovered = response.content if hasattr(response, "content") else str(response)
             discover_span.set_attribute("output.value", discovered)
             discover_span.set_attribute("output.mime_type", "text/plain")
@@ -112,7 +112,7 @@ def run_mcp(
             if guard:
                 guard.check()
             messages = plan_prompt.format_messages(query=query, tools=discovered)
-            response = llm.invoke(messages)
+            response = invoke_llm_in_context(llm, messages)
             plan = response.content if hasattr(response, "content") else str(response)
             plan_span.set_attribute("output.value", plan)
             plan_span.set_attribute("output.mime_type", "text/plain")
@@ -154,7 +154,7 @@ def run_mcp(
                 query=query,
                 results=_json.dumps(tool_results, indent=2, default=str),
             )
-            response = llm.invoke(messages)
+            response = invoke_llm_in_context(llm, messages)
             synthesized = response.content if hasattr(response, "content") else str(response)
             synth_span.set_attribute("output.value", synthesized)
             synth_span.set_attribute("output.mime_type", "text/plain")

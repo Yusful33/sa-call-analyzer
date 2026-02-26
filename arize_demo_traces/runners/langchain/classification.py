@@ -1,19 +1,15 @@
 """
 LangChain LCEL classification pipeline with guardrails.
-Uses manual OTel spans with LCEL chains (prompt | llm | StrOutputParser) for each step.
-Auto-instrumented by LangChainInstrumentor for authentic LangChain trace patterns.
+Uses common_runner_utils for query sampling.
 """
-
-import random
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
 from ...use_cases.classification import (
-    QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT_CLASSIFY,
     SYSTEM_PROMPT_SENTIMENT,
@@ -22,6 +18,7 @@ from ...use_cases.classification import (
     lookup_routing_rules,
     search_response_templates,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_classification(
@@ -38,24 +35,31 @@ def run_classification(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import classification as classification_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.classification")
 
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(classification_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "classification_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langchain",
-            "metadata.use_case": "classification-routing",
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langchain",
+        "metadata.use_case": "classification-routing",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("classification_pipeline", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
         with tracer.start_as_current_span(
@@ -83,7 +87,7 @@ def run_classification(
             classify_chain = classify_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            category = classify_chain.invoke({"query": query})
+            category = invoke_chain_in_context(classify_chain, {"query": query})
             step.set_attribute("output.value", category)
             step.set_status(Status(StatusCode.OK))
 
@@ -99,7 +103,7 @@ def run_classification(
             sentiment_chain = sentiment_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            sentiment = sentiment_chain.invoke({"query": query})
+            sentiment = invoke_chain_in_context(sentiment_chain, {"query": query})
             step.set_attribute("output.value", sentiment)
             step.set_status(Status(StatusCode.OK))
 
@@ -115,7 +119,7 @@ def run_classification(
             extract_chain = extract_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            entities = extract_chain.invoke({"query": query})
+            entities = invoke_chain_in_context(extract_chain, {"query": query})
             step.set_attribute("output.value", entities)
             step.set_status(Status(StatusCode.OK))
 
@@ -135,7 +139,7 @@ def run_classification(
             response_chain = response_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            response = response_chain.invoke({
+            response = invoke_chain_in_context(response_chain, {
                 "query": query,
                 "classification": category,
                 "sentiment": sentiment,

@@ -14,9 +14,11 @@ from langgraph.graph import StateGraph, END
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import (
+    invoke_llm_in_context,
     run_guardrail,
     run_local_guardrail,
     run_tool_call,
+    run_in_context,
 )
 from ...use_cases.multimodal import (
     QUERIES,
@@ -102,7 +104,7 @@ def run_multimodal(
             image_description=state["image_description"],
             query=state["query_text"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"classification": result}
 
@@ -120,7 +122,7 @@ def run_multimodal(
             image_description=state["image_description"],
             query=state["query_text"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"analysis": result}
 
@@ -135,7 +137,7 @@ def run_multimodal(
             image_description=state["image_description"],
             analysis=state["analysis"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         run_tool_call(tracer, "extract_structured_data", result[:200],
                       extract_structured_data, guard=guard, text=result[:500])
@@ -154,7 +156,7 @@ def run_multimodal(
             analysis=state["analysis"],
             extraction=state["extraction"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"summary": result}
 
@@ -184,7 +186,7 @@ def run_multimodal(
             "metadata.use_case": "multimodal-ai",
         },
     ) as span:
-        result = graph.invoke({
+        result = run_in_context(graph.invoke, {
             "query_text": query_text,
             "image_description": image_description,
             "classification": "",

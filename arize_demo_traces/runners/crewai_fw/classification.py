@@ -1,10 +1,7 @@
 """
 CrewAI classification pipeline with classifier and responder agents.
-Uses real CrewAI Crew, Agent, Task objects to generate authentic trace patterns
-when instrumented by CrewAIInstrumentor.
+Uses common_runner_utils for query sampling.
 """
-
-import random
 
 from crewai import Agent, Crew, Task, Process
 
@@ -12,7 +9,6 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import run_guardrail, run_tool_call
 from ...use_cases.classification import (
-    QUERIES,
     CATEGORIES,
     GUARDRAILS,
     SYSTEM_PROMPT_CLASSIFY,
@@ -22,6 +18,7 @@ from ...use_cases.classification import (
     lookup_routing_rules,
     search_response_templates,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_classification(
@@ -38,10 +35,17 @@ def run_classification(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import classification as classification_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.classification.crewai")
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(classification_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
@@ -49,15 +53,18 @@ def run_classification(
         f"- {k}: {v['description']}" for k, v in CATEGORIES.items()
     )
 
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "classification-routing",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
     with tracer.start_as_current_span(
         "classification_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "classification-routing",
-        },
+        attributes=attrs,
     ) as root_span:
 
         # === GUARDRAILS ===

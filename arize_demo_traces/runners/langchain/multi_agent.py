@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
     QUERIES,
     GUARDRAILS,
@@ -84,7 +84,7 @@ def run_multi_agent(
             supervisor_chain = supervisor_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            plan = supervisor_chain.invoke({"query": query})
+            plan = invoke_chain_in_context(supervisor_chain, {"query": query})
             step.set_attribute("output.value", plan)
             step.set_status(Status(StatusCode.OK))
 
@@ -101,7 +101,7 @@ def run_multi_agent(
             research_chain = research_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            research_output = research_chain.invoke({"query": query})
+            research_output = invoke_chain_in_context(research_chain, {"query": query})
             step.set_attribute("output.value", research_output)
             step.set_status(Status(StatusCode.OK))
 
@@ -118,7 +118,7 @@ def run_multi_agent(
             analysis_chain = analysis_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            analysis_output = analysis_chain.invoke({"query": query, "research": research_output})
+            analysis_output = invoke_chain_in_context(analysis_chain, {"query": query, "research": research_output})
             step.set_attribute("output.value", analysis_output)
             step.set_status(Status(StatusCode.OK))
 
@@ -134,7 +134,7 @@ def run_multi_agent(
             writer_chain = writer_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            draft = writer_chain.invoke({
+            draft = invoke_chain_in_context(writer_chain, {
                 "query": query,
                 "research": research_output,
                 "analysis": analysis_output,
@@ -154,7 +154,7 @@ def run_multi_agent(
             reviewer_chain = reviewer_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            final_output = reviewer_chain.invoke({"query": query, "draft": draft})
+            final_output = invoke_chain_in_context(reviewer_chain, {"query": query, "draft": draft})
             step.set_attribute("output.value", final_output)
             step.set_status(Status(StatusCode.OK))
 

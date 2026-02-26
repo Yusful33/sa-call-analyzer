@@ -28,6 +28,7 @@ dependencies = [
     "chromadb>=0.5.0",
     "langchain-chroma>=0.1.0",
     "openinference-instrumentation-openai>=0.1.0",
+    "langchain-aws>=0.2.0",
     # Hypothesis tool dependencies
     "langgraph>=0.2.0",
     "beautifulsoup4>=4.12.0",

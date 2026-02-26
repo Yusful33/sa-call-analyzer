@@ -20,6 +20,7 @@ from langchain_core.output_parsers import StrOutputParser
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import (
+    invoke_chain_in_context,
     run_guardrail,
     run_local_guardrail,
     run_tool_call,
@@ -106,7 +107,7 @@ def run_multimodal(
             classify_chain = classify_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            classification = classify_chain.invoke({
+            classification = invoke_chain_in_context(classify_chain, {
                 "image_description": image_description,
                 "image_type": image_type,
             })
@@ -133,7 +134,7 @@ def run_multimodal(
             analyze_chain = analyze_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            analysis = analyze_chain.invoke({"input": text_query})
+            analysis = invoke_chain_in_context(analyze_chain, {"input": text_query})
             analyze_span.set_attribute("output.value", analysis)
             analyze_span.set_attribute("output.mime_type", "text/plain")
             analyze_span.set_status(Status(StatusCode.OK))
@@ -154,7 +155,7 @@ def run_multimodal(
             extract_chain = extract_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            extracted_data = extract_chain.invoke({"image_description": image_description})
+            extracted_data = invoke_chain_in_context(extract_chain, {"image_description": image_description})
             extract_span.set_attribute("output.value", extracted_data)
             extract_span.set_attribute("output.mime_type", "text/plain")
             extract_span.set_status(Status(StatusCode.OK))
@@ -178,7 +179,7 @@ def run_multimodal(
             summarize_chain = summarize_prompt | llm | StrOutputParser()
             if guard:
                 guard.check()
-            summary = summarize_chain.invoke({
+            summary = invoke_chain_in_context(summarize_chain, {
                 "extracted_data": extracted_data,
                 "input": text_query,
             })

@@ -1,5 +1,6 @@
 """
 CrewAI travel agent pipeline with guardrails and tool calls.
+Uses common_runner_utils for query sampling and run plan; attaches intent to span.
 """
 
 import json
@@ -14,11 +15,9 @@ from ...use_cases.travel_agent import (
     SYSTEM_PROMPT,
     flight_search,
     hotel_search,
-    parse_travel_query,
     build_options_table,
-    select_tools_for_query,
-    sample_travel_query,
 )
+from ..common_runner_utils import get_query_for_run, get_run_plan_if_available
 
 
 def run_travel_agent(
@@ -35,24 +34,31 @@ def run_travel_agent(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import travel_agent as travel_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.travel_agent.crewai")
     if not query:
-        query = sample_travel_query()
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(travel_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "travel_agent.run",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "travel-agent",
-            "metadata.trace_quality": trace_quality,
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "travel-agent",
+        "metadata.trace_quality": trace_quality,
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("travel_agent.run", attributes=attrs) as pipeline_span:
 
         for g in GUARDRAILS:
             run_guardrail(
@@ -60,8 +66,27 @@ def run_travel_agent(
                 system_prompt=g["system_prompt"],
             )
 
-        params = parse_travel_query(query)
-        run_flight, run_hotel = select_tools_for_query(query)
+        run_plan = get_run_plan_if_available(travel_use_case, query, prospect_context=prospect_context)
+        if run_plan:
+            step_map = {s.name: s for s in run_plan.steps}
+            flight_step = step_map.get("flight_search")
+            hotel_step = step_map.get("hotel_search")
+            run_flight = flight_step.enabled if flight_step else True
+            run_hotel = hotel_step.enabled if hotel_step else True
+            params = {
+                "origin": flight_step.params.get("origin", "NYC") if flight_step else "NYC",
+                "destination": flight_step.params.get("destination", "Paris") if flight_step else "Paris",
+                "date_out": flight_step.params.get("date_out", "2025-03-15") if flight_step else "2025-03-15",
+                "city": hotel_step.params.get("city", "Paris") if hotel_step else "Paris",
+                "check_in": hotel_step.params.get("check_in", "2025-03-15") if hotel_step else "2025-03-15",
+                "check_out": hotel_step.params.get("check_out", "2025-03-17") if hotel_step else "2025-03-17",
+                "guests": hotel_step.params.get("guests", 2) if hotel_step else 2,
+                "assumptions": run_plan.meta.get("assumptions", []),
+            }
+        else:
+            from ...use_cases.travel_agent import parse_travel_query, select_tools_for_query
+            params = parse_travel_query(query)
+            run_flight, run_hotel = select_tools_for_query(query)
         flight_result = run_tool_call(
             tracer, "flight_search", query,
             lambda: flight_search(params["origin"], params["destination"], params["date_out"]),

@@ -97,6 +97,12 @@ _BAD_TRAVEL_AGENT = [
     "Greece beach holiday: I found a lovely 2-star hostel in Athens city center, no pool, 45 minutes from the coast by bus. Perfect for families. Total: $3,200 for 7 days. [Note: user asked for family-friendly hotel with pool; price and details fabricated]",
 ]
 
+_BAD_GUARDRAILS = [
+    "content_safety_check: PASS; jailbreak_check: FAIL: attempted prompt extraction; toxicity_check: PASS; pii_detection: FAIL: email detected. [Note: eval should flag incorrect or misleading guardrail summary]",
+    "FAIL: Input rejected by safety filter. [Note: generic fail that doesn't match actual guardrail results]",
+    "All checks passed [Note: one or more guardrails actually failed]",
+]
+
 # Map use-case slugs to their bad output pools
 _BAD_OUTPUTS_BY_USE_CASE = {
     "retrieval-augmented-search": _BAD_RAG,
@@ -108,6 +114,7 @@ _BAD_OUTPUTS_BY_USE_CASE = {
     "generic-llm-chain": _BAD_GENERIC,
     "multiturn-chatbot-with-tools": _BAD_CHATBOT,
     "travel-agent": _BAD_TRAVEL_AGENT,
+    "guardrails": _BAD_GUARDRAILS,
 }
 
 # Fallback for any use case not explicitly mapped

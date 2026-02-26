@@ -1,10 +1,13 @@
 """RAG use-case: shared prompts, queries, documents, retrieval, guardrails, evaluators."""
 
+import random
 from typing import List
 
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
+
+from .common import industry_key
 
 
 QUERIES = [
@@ -17,6 +20,62 @@ QUERIES = [
     "How do I set up LLM monitoring?",
     "How do multi-agent systems work?",
 ]
+
+# Industry-tailored RAG questions for prospect-aware demos (answers still from SAMPLE_DOCS where relevant)
+INDUSTRY_QUERIES: dict[str, list[str]] = {
+    "default": QUERIES,
+    "technology": QUERIES,
+    "retail": [
+        "What is the refund policy for enterprise accounts?",
+        "What was last quarter's revenue?",
+        "What compliance certifications are supported?",
+        "How do I set up monitoring for my LLM app?",
+        "What are best practices for inventory and demand forecasting?",
+        "How do loyalty and promotions affect customer retention?",
+        "What metrics matter for store performance and shrink?",
+        "How do I configure SSO for store and HQ systems?",
+    ],
+    "financial": [
+        "What compliance certifications are supported?",
+        "What was last quarter's revenue?",
+        "How do I configure SSO with Okta?",
+        "What are best practices for fraud detection and risk modeling?",
+        "What are key considerations for regulatory reporting?",
+        "How do I set up monitoring for transaction systems?",
+        "What metrics matter for deposits and lending?",
+    ],
+    "healthcare": [
+        "What compliance certifications are supported?",
+        "How do I configure SSO for clinical systems?",
+        "What are best practices for patient data and HIPAA?",
+        "How do I set up monitoring for clinical applications?",
+        "What metrics matter for quality of care and readmissions?",
+    ],
+    "travel": [
+        "What is the refund policy for enterprise accounts?",
+        "What was last quarter's revenue?",
+        "How do I configure SSO with Okta?",
+        "What are best practices for dynamic pricing and distribution?",
+        "How do I set up monitoring for booking systems?",
+        "What metrics matter for occupancy and RevPAR?",
+    ],
+}
+
+
+def get_queries_for_prospect(prospect_context: dict | None) -> list[str]:
+    """Return RAG queries tailored to the prospect's industry."""
+    if not prospect_context:
+        return INDUSTRY_QUERIES["default"]
+    key = industry_key(prospect_context.get("industry"))
+    return INDUSTRY_QUERIES.get(key, INDUSTRY_QUERIES["default"])
+
+
+def sample_query(prospect_context=None, rng=None, **kwargs):
+    """Contract: sample_query(prospect_context, rng) -> str. Industry-aware sampling."""
+    queries = get_queries_for_prospect(prospect_context)
+    if rng is not None:
+        return rng.choice(queries)
+    return random.choice(queries)
 
 SAMPLE_DOCS = [
     Document(page_content="Enterprise accounts are eligible for a full refund within 30 days of purchase. After 30 days, a prorated refund may be issued depending on usage metrics and contract terms.", metadata={"source": "refund-policy.md"}),

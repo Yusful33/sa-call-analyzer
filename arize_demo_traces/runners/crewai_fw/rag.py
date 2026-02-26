@@ -11,7 +11,7 @@ from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import run_guardrail, run_tool_call, run_in_context
 from ...use_cases.rag import (
     QUERIES,
     GUARDRAILS,
@@ -75,7 +75,7 @@ def run_rag(
                 guard.check()
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-            retrieved = retriever.invoke(query)
+            retrieved = run_in_context(retriever.invoke, query)
             context = format_docs(retrieved)
             retrieval_span.set_attribute("retrieval.documents", _json.dumps(
                 [{"content": d.page_content[:200], "source": d.metadata.get("source", "")} for d in retrieved]

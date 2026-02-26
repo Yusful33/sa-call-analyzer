@@ -15,6 +15,7 @@ CLASSIFICATION = "classification-routing"
 MULTIMODAL = "multimodal-ai"
 MCP = "mcp-tool-use"
 TRAVEL_AGENT = "travel-agent"
+GUARDRAILS_UC = "guardrails"
 
 # Framework name constants
 LANGGRAPH = "langgraph"
@@ -93,6 +94,9 @@ def _get_langgraph_runner(use_case: str) -> Callable | None:
     elif use_case == TRAVEL_AGENT:
         from .langgraph.travel_agent import run_travel_agent
         return run_travel_agent
+    elif use_case == GUARDRAILS_UC:
+        from .langgraph.guardrails import run_guardrails
+        return run_guardrails
     else:
         from .langgraph.generic import run_generic
         return run_generic
@@ -123,6 +127,9 @@ def _get_langchain_runner(use_case: str) -> Callable | None:
     elif use_case == TRAVEL_AGENT:
         from .langchain.travel_agent import run_travel_agent
         return run_travel_agent
+    elif use_case == GUARDRAILS_UC:
+        from .langchain.guardrails import run_guardrails
+        return run_guardrails
     else:
         from .langchain.generic import run_generic
         return run_generic
@@ -153,6 +160,9 @@ def _get_crewai_runner(use_case: str) -> Callable | None:
     elif use_case == TRAVEL_AGENT:
         from .crewai_fw.travel_agent import run_travel_agent
         return run_travel_agent
+    elif use_case == GUARDRAILS_UC:
+        from .crewai_fw.guardrails import run_guardrails
+        return run_guardrails
     else:
         from .crewai_fw.generic import run_generic
         return run_generic
@@ -183,6 +193,9 @@ def _get_adk_runner(use_case: str) -> Callable | None:
     elif use_case == TRAVEL_AGENT:
         from .adk.travel_agent import run_travel_agent
         return run_travel_agent
+    elif use_case == GUARDRAILS_UC:
+        from .adk.guardrails import run_guardrails
+        return run_guardrails
     else:
         from .adk.generic import run_generic
         return run_generic

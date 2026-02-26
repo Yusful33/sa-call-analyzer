@@ -5,7 +5,6 @@ entity extraction, and response generation.
 Auto-instrumented by LangChainInstrumentor for authentic LangGraph trace patterns.
 """
 
-import random
 from typing import TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,9 +12,8 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.classification import (
-    QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT_CLASSIFY,
     SYSTEM_PROMPT_SENTIMENT,
@@ -24,6 +22,7 @@ from ...use_cases.classification import (
     lookup_routing_rules,
     search_response_templates,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 class ClassificationState(TypedDict):
@@ -50,11 +49,18 @@ def run_classification(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import classification as classification_use_case
+
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.classification.langgraph")
 
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(classification_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
@@ -76,7 +82,7 @@ def run_classification(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"category": result}
 
@@ -88,7 +94,7 @@ def run_classification(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"sentiment": result}
 
@@ -100,7 +106,7 @@ def run_classification(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"entities": result}
 
@@ -121,7 +127,7 @@ def run_classification(
             sentiment=state["sentiment"],
             entities=state["entities"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         result = response.content if hasattr(response, "content") else str(response)
         return {"response": result}
 
@@ -141,17 +147,17 @@ def run_classification(
     graph = workflow.compile()
 
     # --- Execute with root span ---
-    with tracer.start_as_current_span(
-        "classification_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langgraph",
-            "metadata.use_case": "classification-routing",
-        },
-    ) as span:
-        result = graph.invoke({
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langgraph",
+        "metadata.use_case": "classification-routing",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("classification_pipeline", attributes=attrs) as span:
+        result = run_in_context(graph.invoke, {
             "query": query,
             "category": "",
             "confidence": "",

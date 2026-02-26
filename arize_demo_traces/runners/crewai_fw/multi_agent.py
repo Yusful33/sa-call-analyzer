@@ -10,7 +10,7 @@ from crewai import Agent, Crew, Task, Process
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import run_guardrail, run_tool_call, run_in_context
 from ...use_cases.multi_agent import (
     QUERIES,
     AGENTS,
@@ -149,7 +149,9 @@ def run_multi_agent(
 
         if guard:
             guard.check()
-        result = crew.kickoff()
+        # Run in current trace context so CrewAI-instrumented LLM spans parent to this root
+        # (avoids orphan "completion" traces when CrewAI runs in same thread).
+        result = run_in_context(crew.kickoff)
         answer = str(result)
 
         root_span.set_attribute("output.value", answer)
