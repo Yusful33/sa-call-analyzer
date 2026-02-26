@@ -11,6 +11,56 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 
+def tool_definitions_json(tools) -> str:
+    """
+    Serialize a list of LangChain tools to a JSON array of tool definitions
+    (name, description, parameters schema) for attachment to a parent span.
+    Enables evals to use tool definitions without inferring from child spans.
+    """
+    definitions = []
+    for t in tools:
+        entry = {
+            "name": getattr(t, "name", str(t)),
+            "description": getattr(t, "description", "") or "",
+        }
+        args_schema = getattr(t, "args_schema", None)
+        if args_schema is not None and hasattr(args_schema, "model_json_schema"):
+            try:
+                entry["parameters"] = args_schema.model_json_schema()
+            except Exception:
+                entry["parameters"] = {}
+        else:
+            entry["parameters"] = {}
+        definitions.append(entry)
+    return json.dumps(definitions)
+
+
+def run_in_context(fn, *args, **kwargs):
+    """
+    Run fn(*args, **kwargs) in the current trace context so any spans created
+    (e.g. by LangChain/LangGraph instrumentors) are parented to the current span.
+    Prevents orphaned spans when runners are executed in worker threads.
+    """
+    return contextvars.copy_context().run(lambda: fn(*args, **kwargs))
+
+
+def invoke_chain_in_context(chain, input_dict):
+    """
+    Run chain.invoke in the current trace context so LangChain-instrumented spans
+    (RunnableSequence, ChatOpenAI, etc.) are parented to the current span.
+    Prevents orphaned spans when runners are executed in worker threads.
+    """
+    return run_in_context(chain.invoke, input_dict)
+
+
+def invoke_llm_in_context(llm, messages):
+    """
+    Run llm.invoke in the current trace context so LLM spans are parented correctly.
+    Prevents orphaned spans when runners are executed in worker threads.
+    """
+    return run_in_context(llm.invoke, messages)
+
+
 def run_guardrail(tracer, name, input_text, llm, guard=None, system_prompt=None):
     """Create a GUARDRAIL span with an LLM safety check."""
     from opentelemetry.trace import Status, StatusCode
@@ -35,12 +85,10 @@ def run_guardrail(tracer, name, input_text, llm, guard=None, system_prompt=None)
         chain = prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        # Run invoke in current context so LangChain-created spans parent to this GUARDRAIL span
-        # (avoids orphaned ChatOpenAI/RunnableSequence when client uses another thread).
-        ctx = contextvars.copy_context()
-        result = ctx.run(chain.invoke, {"input": input_text})
+        result = invoke_chain_in_context(chain, {"input": input_text})
         passed = not result.strip().upper().startswith("FAIL")
         span.set_attribute("output.value", result)
+        span.set_attribute("output.mime_type", "text/plain")
         span.set_attribute("guardrail.passed", passed)
         span.set_status(Status(StatusCode.OK))
         return passed
@@ -88,8 +136,7 @@ def run_evaluator(tracer, name, question, response, llm, guard=None, criteria="q
         chain = prompt | llm | StrOutputParser()
         if guard:
             guard.check()
-        ctx = contextvars.copy_context()
-        result = ctx.run(chain.invoke, {"question": question, "response": response[:1000]})
+        result = invoke_chain_in_context(chain, {"question": question, "response": response[:1000]})
         span.set_attribute("output.value", result)
         try:
             parsed = json.loads(result.strip())

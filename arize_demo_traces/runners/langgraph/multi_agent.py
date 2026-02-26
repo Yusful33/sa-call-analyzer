@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import run_guardrail, run_tool_call
+from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.multi_agent import (
     QUERIES,
     GUARDRAILS,
@@ -75,7 +75,7 @@ def run_multi_agent(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         plan = response.content if hasattr(response, "content") else str(response)
         return {}
 
@@ -89,7 +89,7 @@ def run_multi_agent(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         research = response.content if hasattr(response, "content") else str(response)
         return {"research_output": research}
 
@@ -103,7 +103,7 @@ def run_multi_agent(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"], research=state["research_output"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         analysis = response.content if hasattr(response, "content") else str(response)
         return {"analysis_output": analysis}
 
@@ -119,7 +119,7 @@ def run_multi_agent(
             research=state["research_output"],
             analysis=state["analysis_output"],
         )
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         draft = response.content if hasattr(response, "content") else str(response)
         return {"draft": draft}
 
@@ -131,7 +131,7 @@ def run_multi_agent(
         if guard:
             guard.check()
         messages = prompt.format_messages(query=state["query"], draft=state["draft"])
-        response = llm.invoke(messages)
+        response = invoke_llm_in_context(llm, messages)
         final = response.content if hasattr(response, "content") else str(response)
         return {"final_output": final}
 
@@ -153,17 +153,17 @@ def run_multi_agent(
     graph = workflow.compile()
 
     # --- Execute with root span ---
-    with tracer.start_as_current_span(
-        "multi_agent_orchestration",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langgraph",
-            "metadata.use_case": "multi-agent-orchestration",
-        },
-    ) as span:
-        result = graph.invoke({
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langgraph",
+        "metadata.use_case": "multi-agent-orchestration",
+    }
+    if trace_quality:
+        attrs["metadata.trace_quality"] = trace_quality
+    with tracer.start_as_current_span("multi_agent_orchestration", attributes=attrs) as span:
+        result = run_in_context(graph.invoke, {
             "query": query,
             "research_output": "",
             "analysis_output": "",

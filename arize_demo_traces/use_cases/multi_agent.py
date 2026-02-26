@@ -53,9 +53,15 @@ REVIEWER_PROMPT = "You are a quality reviewer. Review the following document for
 
 # ---- Tools (simulated) ----
 
+# Minimal delay so TOOL spans have non-zero duration in traces (avoids 0s warning in Arize).
+_TOOL_SPAN_MIN_DURATION_SEC = 0.02
+
+
 def search_web(query: str) -> str:
     """Search the web for research information."""
+    import time as _time
     import json as _json
+    _time.sleep(_TOOL_SPAN_MIN_DURATION_SEC)
     return _json.dumps({
         "query": query[:80],
         "results": [
@@ -69,7 +75,9 @@ def search_web(query: str) -> str:
 
 def analyze_metrics(metric_name: str) -> str:
     """Pull and analyze business metrics."""
+    import time as _time
     import json as _json
+    _time.sleep(_TOOL_SPAN_MIN_DURATION_SEC)
     return _json.dumps({
         "metric": metric_name,
         "current_value": 87.3,

@@ -40,10 +40,15 @@ def setup_tracing() -> None:
     if endpoint:
         kwargs["endpoint"] = endpoint
 
-    _tracer_provider = register(**kwargs, batch=False)
+    _tracer_provider = register(**kwargs, batch=True)
 
-    # LangChain only; skip OpenAI to avoid duplicate ChatOpenAI + ChatCompletion spans
-    LangChainInstrumentor().instrument(tracer_provider=_tracer_provider)
+    # LangChain only; skip OpenAI to avoid duplicate ChatOpenAI + ChatCompletion spans.
+    # separate_trace_from_runtime_context=False so instrumented spans parent to our root span
+    # (avoids orphaned spans and ensures traces show correctly in Arize).
+    LangChainInstrumentor().instrument(
+        tracer_provider=_tracer_provider,
+        separate_trace_from_runtime_context=False,
+    )
 
     _tracer = trace.get_tracer("arize-demo-trace-service")
 

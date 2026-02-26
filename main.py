@@ -898,6 +898,7 @@ AVAILABLE_USE_CASES = [
     {"value": "mcp-tool-use", "label": "MCP Tool Use"},
     {"value": "multiturn-chatbot-with-tools", "label": "Chatbot with Tools"},
     {"value": "travel-agent", "label": "Travel Agent"},
+    {"value": "guardrails", "label": "Guardrails"},
     {"value": "generic", "label": "Generic LLM Pipeline"},
 ]
 
@@ -953,6 +954,15 @@ class GenerateDemoResponse(BaseModel):
     eval_created: Optional[bool] = None
     eval_message: Optional[str] = None
     traces_sent_to_arize: Optional[bool] = None  # True when Space ID + API key were set and traces were exported
+    suggested_evals: Optional[list[dict]] = None  # Suggested eval configs; user can create via POST /api/create-online-evals
+
+
+class CreateOnlineEvalsRequest(BaseModel):
+    """Request to create online eval task(s) after trace data has been sent to Arize."""
+    project_name: str
+    use_case: Optional[str] = None
+    arize_space_id: Optional[str] = None
+    arize_api_key: Optional[str] = None
 
 
 def _infer_use_case(overview) -> tuple[str, str, str | None]:
@@ -1172,37 +1182,74 @@ Return only valid JSON, no markdown formatting or code blocks."""
         return None, None, None
 
 
+def _infer_industry_from_account_name(account_name: str) -> str:
+    """Infer industry from company name when no CRM/BigQuery overview is available.
+    Used so demo traces are tailored even without prospect data (e.g. Albertsons -> retail).
+    """
+    if not (account_name or "").strip():
+        return "General"
+    name = account_name.lower().strip()
+    # Known grocery / retail chains
+    if any(k in name for k in ["albertsons", "kroger", "safeway", "publix", "wegmans", "whole foods", "trader joe", "aldi", "lidl", "costco", "walmart", "target", "cvs", "walgreens", "rite aid"]):
+        return "retail"
+    # Financial
+    if any(k in name for k in ["bank", "chase", "wells fargo", "capital one", "american express", "visa", "mastercard", "fidelity", "schwab"]):
+        return "banking"
+    # Insurance
+    if any(k in name for k in ["insurance", "aig", "allstate", "state farm", "geico", "progressive", "liberty mutual"]):
+        return "insurance"
+    # Healthcare / pharma
+    if any(k in name for k in ["health", "pharma", "hospital", "medical", "pfizer", "johnson & johnson", "merck", "united health"]):
+        return "healthcare"
+    # Tech / SaaS
+    if any(k in name for k in ["tech", "software", "cloud", "microsoft", "google", "amazon web", "salesforce", "oracle", "sap", "adobe", "servicenow"]):
+        return "technology"
+    # Travel / hospitality
+    if any(k in name for k in ["airline", "hotel", "marriott", "hilton", "hyatt", "expedia", "booking", "delta", "united airline", "american airline"]):
+        return "travel"
+    return "General"
+
+
 def _build_prospect_demo_context(overview, account_name: str) -> dict | None:
     """Build a short prospect context dict for tailoring demo traces (e.g. text-to-SQL).
 
-    Uses organization and call data: industry, key themes, deal state, account info.
-    Returns None if overview is missing or empty.
+    Uses organization and call data when available; when overview is missing but
+    account_name is set, builds a minimal context with industry inferred from name
+    so traces are still tailored (e.g. Albertsons -> retail queries).
     """
-    if not overview or not account_name:
+    if not (account_name or "").strip():
         return None
-    parts = []
-    industry = None
-    if getattr(overview, "salesforce", None) and overview.salesforce:
-        sf = overview.salesforce
-        if sf.industry:
-            industry = (sf.industry or "").strip()
-        if sf.name:
-            parts.append(f"Company: {sf.name}")
-        if sf.description:
-            parts.append(sf.description.strip()[:300])
-    if getattr(overview, "gong_summary", None) and overview.gong_summary and overview.gong_summary.key_themes:
-        parts.append("Key themes from calls: " + ", ".join(overview.gong_summary.key_themes[:5]))
-    if getattr(overview, "sales_engagement", None) and overview.sales_engagement and overview.sales_engagement.deal_summary:
-        ds = overview.sales_engagement.deal_summary
-        if ds.current_state:
-            parts.append(f"Deal context: {ds.current_state[:200]}")
-        if ds.key_topics_discussed:
-            parts.append("Topics discussed: " + ", ".join(ds.key_topics_discussed[:5]))
-    summary = " ".join(parts).strip() if parts else None
+    if overview:
+        parts = []
+        industry = None
+        if getattr(overview, "salesforce", None) and overview.salesforce:
+            sf = overview.salesforce
+            if sf.industry:
+                industry = (sf.industry or "").strip()
+            if sf.name:
+                parts.append(f"Company: {sf.name}")
+            if sf.description:
+                parts.append(sf.description.strip()[:300])
+        if getattr(overview, "gong_summary", None) and overview.gong_summary and overview.gong_summary.key_themes:
+            parts.append("Key themes from calls: " + ", ".join(overview.gong_summary.key_themes[:5]))
+        if getattr(overview, "sales_engagement", None) and overview.sales_engagement and overview.sales_engagement.deal_summary:
+            ds = overview.sales_engagement.deal_summary
+            if ds.current_state:
+                parts.append(f"Deal context: {ds.current_state[:200]}")
+            if ds.key_topics_discussed:
+                parts.append("Topics discussed: " + ", ".join(ds.key_topics_discussed[:5]))
+        summary = " ".join(parts).strip() if parts else None
+        return {
+            "account_name": account_name,
+            "industry": industry or "General",
+            "summary": summary or f"Prospect: {account_name}.",
+        }
+    # No overview (e.g. no BigQuery): still tailor by inferring industry from account name
+    industry = _infer_industry_from_account_name(account_name)
     return {
         "account_name": account_name,
-        "industry": industry or "General",
-        "summary": summary or f"Prospect: {account_name}.",
+        "industry": industry,
+        "summary": f"Prospect: {account_name}.",
     }
 
 
@@ -1347,7 +1394,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     overview = await asyncio.wait_for(asyncio.to_thread(_bq_context), timeout=15.0)
                 except (asyncio.TimeoutError, Exception):
                     pass
-            prospect_context = _build_prospect_demo_context(overview, request.account_name) if overview else None
+            prospect_context = _build_prospect_demo_context(overview, request.account_name) if request.account_name else None
 
             model = request.model or "gpt-5.2"
 
@@ -1387,12 +1434,15 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     except ImportError:
                         _transport = None
                         _endpoint = None
+                    # Use a dedicated project so only these demo traces appear here (avoids mixing
+                    # with competitive-response or other LLM traces that use the main project).
+                    demo_project_name = f"{project_name}-traces"
                     _reg_kw = dict(
                         space_id=space_id,
                         api_key=api_key,
-                        project_name=project_name,
+                        project_name=demo_project_name,
                         set_global_tracer_provider=False,
-                        batch=False,
+                        batch=True,
                     )
                     if _endpoint is not None:
                         _reg_kw["endpoint"] = _endpoint
@@ -1404,7 +1454,14 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     LangChainInstrumentor().uninstrument()
                     OpenAIInstrumentor().uninstrument()
                     LiteLLMInstrumentor().uninstrument()
-                    LangChainInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
+                    # Use runtime context so instrumented spans parent to our root span.
+                    # Arize shows "Traces" only when spans share a trace_id and parent_span_id
+                    # (one root per trace). Without this, each span would be a root → only Spans tab fills.
+                    LangChainInstrumentor().instrument(
+                        tracer_provider=demo_provider,
+                        skip_dep_check=True,
+                        separate_trace_from_runtime_context=False,
+                    )
                     if instrument_openai:
                         OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
                     LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
@@ -1533,58 +1590,24 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     "progress",
                     {
                         "message": f"Pipeline complete. Traces sent to Arize project: {project_name}. "
-                        "Open the link below to view (may take 30–60 seconds to appear)."
+                        "Open the link below to view (may take 30–60 seconds to appear). "
+                        "You can optionally create online evals from the link or use the Create evals button."
                     },
                 )
             else:
                 yield _sse_event("progress", {"message": "Pipeline complete. (Traces were not sent to Arize — no Space ID or API key.)"})
 
-            # Create online eval task and run backfill on newly sent traces
-            eval_created = False
-            eval_message = None
-            space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
-            api_key_arize = request.arize_api_key or os.getenv("ARIZE_API_KEY")
-            if space_id and api_key_arize and result.get("traces_generated", 0) > 0:
-                yield _sse_event("progress", {"message": "Creating online evaluation task (runs on new spans continuously)..."})
-                try:
-                    from arize_demo_traces.online_evals import create_and_run_online_eval
-                    eval_result = await asyncio.to_thread(
-                        create_and_run_online_eval,
-                        project_name=project_name,
-                        use_case=use_case,
-                        space_id=space_id,
-                        api_key=api_key_arize,
-                        delay_seconds_before_backfill=30,
-                        minutes_back=60,
-                        max_spans=500,
-                    )
-                    if eval_result.get("success"):
-                        eval_created = True
-                        eval_label = eval_result.get("eval_name", eval_result.get("task_name"))
-                        msg = f"Online eval '{eval_label}' created. Backfill run on recent spans (run_id={eval_result.get('run_id') or 'n/a'}). New traces will be evaluated automatically."
-                        if eval_result.get("backfill_task_error"):
-                            err = eval_result["backfill_task_error"]
-                            err_msg = err.get("message", err) if isinstance(err, dict) else str(err)
-                            msg += f" Backfill note: {err_msg}"
-                            eval_message = f"Task created; backfill had an issue: {err_msg}. You can re-run the eval from Arize Online Evals."
-                        elif eval_result.get("note"):
-                            msg += f" {eval_result['note']}"
-                            eval_message = eval_result.get("note")
-                        else:
-                            eval_message = "Eval task created and backfill started. Evaluations may take 1–2 min to appear in Arize."
-                        yield _sse_event("progress", {"message": msg})
-                    elif eval_result.get("error"):
-                        eval_message = eval_result["error"]
-                        yield _sse_event("progress", {"message": f"Online eval setup: {eval_result['error']}"})
-                except Exception as e:
-                    eval_message = f"Online eval setup failed: {e}"
-                    yield _sse_event("progress", {"message": f"Online eval setup skipped: {e}"})
-            elif result.get("traces_generated", 0) > 0 and (not space_id or not api_key_arize):
-                eval_message = "No Arize Space ID or API key provided; traces were not sent to your Arize project and online eval was not created. Set them in Custom Demo or env to see traces in Arize."
+            # Suggest evals; do not auto-create — user can create via POST /api/create-online-evals
+            suggested_evals = None
+            if result.get("traces_generated", 0) > 0:
+                from arize_demo_traces.online_evals import get_suggested_evals
+                suggested_evals = get_suggested_evals(use_case)
 
             arize_url = None
+            space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
+            demo_project_name = f"{project_name}-traces" if (api_key and space_id) else project_name
             if space_id:
-                arize_url = f"https://app.arize.com/?space_id={space_id}&project_id={project_name}"
+                arize_url = f"https://app.arize.com/?space_id={space_id}&project_id={demo_project_name}"
 
             response = GenerateDemoResponse(
                 prospect_name=request.account_name,
@@ -1594,13 +1617,14 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 use_case_reasoning=use_case_reasoning,
                 model_used=model,
                 llm_calls_made=guard.calls_made,
-                project_name=project_name,
+                project_name=demo_project_name,
                 arize_url=arize_url,
                 result=result,
                 error_message=result.get("error") if result else None,
-                eval_created=eval_created,
-                eval_message=eval_message,
+                eval_created=False,
+                eval_message=None,
                 traces_sent_to_arize=demo_provider is not None,
+                suggested_evals=suggested_evals,
             )
             yield _sse_event("done", response.model_dump())
         except Exception as e:
@@ -1625,6 +1649,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
     4. Traces flow to Arize automatically via arize-otel (under demo project)
     """
     project_name = request.project_name or request.account_name.lower().replace(" ", "-") + "-demo"
+    demo_project_name = project_name  # overwritten when we create demo_provider
 
     original_provider = trace.get_tracer_provider()
     demo_provider = None
@@ -1647,12 +1672,15 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             except ImportError:
                 _transport = None
                 _endpoint = None
+            # Use a dedicated project so only these demo traces appear here (avoids mixing
+            # with competitive-response or other LLM traces that use the main project).
+            demo_project_name = f"{project_name}-traces"
             _reg_kw = dict(
                 space_id=space_id,
                 api_key=api_key,
-                project_name=project_name,
+                project_name=demo_project_name,
                 set_global_tracer_provider=False,
-                batch=False,
+                batch=True,
             )
             if _endpoint is not None:
                 _reg_kw["endpoint"] = _endpoint
@@ -1663,7 +1691,11 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             LangChainInstrumentor().uninstrument()
             OpenAIInstrumentor().uninstrument()
             LiteLLMInstrumentor().uninstrument()
-            LangChainInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
+            LangChainInstrumentor().instrument(
+                tracer_provider=demo_provider,
+                skip_dep_check=True,
+                separate_trace_from_runtime_context=False,
+            )
             if instrument_openai:
                 OpenAIInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
             LiteLLMInstrumentor().instrument(tracer_provider=demo_provider, skip_dep_check=True)
@@ -1705,7 +1737,7 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
                 overview = bq.get_prospect_overview(account_name=request.account_name)
             except Exception:
                 pass
-        prospect_context = _build_prospect_demo_context(overview, request.account_name) if overview else None
+        prospect_context = _build_prospect_demo_context(overview, request.account_name) if request.account_name else None
 
         # Step 3: Run the real pipeline multiple times
         num_traces = 10
@@ -1772,41 +1804,15 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
 
         result = {"traces_generated": len(all_results), "results": all_results}
 
-        eval_created = False
-        eval_message = None
-        space_id_val = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
-        api_key_val = request.arize_api_key or os.getenv("ARIZE_API_KEY")
-        if space_id_val and api_key_val and result.get("traces_generated", 0) > 0:
-            try:
-                from arize_demo_traces.online_evals import create_and_run_online_eval
-                eval_result = await asyncio.to_thread(
-                    create_and_run_online_eval,
-                    project_name=project_name,
-                    use_case=use_case,
-                    space_id=space_id_val,
-                    api_key=api_key_val,
-                    delay_seconds_before_backfill=30,
-                    minutes_back=60,
-                    max_spans=500,
-                )
-                if eval_result.get("success"):
-                    eval_created = True
-                    if eval_result.get("backfill_task_error"):
-                        err = eval_result["backfill_task_error"]
-                        err_msg = err.get("message", err) if isinstance(err, dict) else str(err)
-                        eval_message = f"Task created; backfill had an issue: {err_msg}. Re-run the eval from Arize Online Evals."
-                    else:
-                        eval_message = "Eval task created and backfill started. Evaluations may take 1–2 min to appear in Arize."
-                elif eval_result.get("error"):
-                    eval_message = eval_result["error"]
-            except Exception as e:
-                eval_message = f"Online eval setup failed: {e}"
-        elif result.get("traces_generated", 0) > 0 and (not space_id_val or not api_key_val):
-            eval_message = "No Arize Space ID or API key provided; traces were not sent to your Arize project and online eval was not created. Set them in Custom Demo or env to see traces in Arize."
+        suggested_evals = None
+        if result.get("traces_generated", 0) > 0:
+            from arize_demo_traces.online_evals import get_suggested_evals
+            suggested_evals = get_suggested_evals(use_case)
 
         arize_url = None
+        space_id_val = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
         if space_id_val:
-            arize_url = f"https://app.arize.com/?space_id={space_id_val}&project_id={project_name}"
+            arize_url = f"https://app.arize.com/?space_id={space_id_val}&project_id={demo_project_name}"
 
         return GenerateDemoResponse(
             prospect_name=request.account_name,
@@ -1815,13 +1821,14 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
             use_case_reasoning=use_case_reasoning,
             model_used=model,
             llm_calls_made=guard.calls_made,
-            project_name=project_name,
+            project_name=demo_project_name,
             arize_url=arize_url,
             framework=framework,
             result=result,
-            eval_created=eval_created,
-            eval_message=eval_message,
+            eval_created=False,
+            eval_message=None,
             traces_sent_to_arize=demo_provider is not None,
+            suggested_evals=suggested_evals,
         )
     finally:
         if demo_provider is not None:
@@ -1887,6 +1894,38 @@ async def export_script(
         media_type="text/x-python",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/api/create-online-evals")
+async def create_online_evals(request: CreateOnlineEvalsRequest):
+    """
+    Create online eval task(s) in Arize for a project/use case after trace data has been sent.
+    Call this when the user opts in (e.g. after viewing suggested_evals from generate-demo).
+    """
+    space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID", "")
+    api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY", "")
+    if not space_id or not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="ARIZE_SPACE_ID and ARIZE_API_KEY are required (via request body or env).",
+        )
+    try:
+        from arize_demo_traces.online_evals import create_and_run_online_eval
+        result = await asyncio.to_thread(
+            create_and_run_online_eval,
+            project_name=request.project_name,
+            use_case=request.use_case,
+            space_id=space_id,
+            api_key=api_key,
+            delay_seconds_before_backfill=30,
+            minutes_back=60,
+            max_spans=500,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create online eval: {e}")
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ============================================================
