@@ -90,6 +90,12 @@ class CompanyResearch(BaseModel):
         None, description="Brief summary of the company"
     )
 
+    # Prospect's known GenAI product(s) – e.g. Gusto → Gus. Aligns hypotheses with their actual offering.
+    genai_products: list[dict] = Field(
+        default_factory=list,
+        description="Known GenAI product(s) for this prospect: product_name, product_description, use_cases, arize_angles",
+    )
+
     research_completed_at: datetime = Field(default_factory=datetime.utcnow)
 
 

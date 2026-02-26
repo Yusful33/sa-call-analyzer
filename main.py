@@ -94,7 +94,7 @@ if env_path.exists() and arize_space_id_env:
 
 # Initialize observability BEFORE importing CrewAI
 # This ensures our Arize TracerProvider is set up before CrewAI tries to set up its own
-from observability import setup_observability
+from observability import setup_observability, get_tracer, api_span, SPAN_PREFIX
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
 # Now import everything else (including CrewAI)
@@ -247,19 +247,17 @@ async def analyze_transcript(request: AnalyzeRequest):
     
     with context_manager:
         with tracer.start_as_current_span(
-            "analyze_call_request",
+            f"{SPAN_PREFIX}.analyze",
             attributes={
                 "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
                 "request.model": request.model or "default",
-                # OpenInference input - the API request
                 "input.value": json.dumps({
                     "gong_url": request.gong_url,
                     "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
                     "model": request.model
-                }),
+                })[:2000],
                 "input.mime_type": "application/json",
-                # OpenInference span kind - this is a chain orchestrating the workflow
-                "openinference.span.kind": "chain",
+                "openinference.span.kind": "CHAIN",
             }
         ) as span:
             try:
@@ -427,8 +425,8 @@ async def generate_recap_slide(recap_data: RecapSlideData):
     
     Returns the PowerPoint file as a download.
     """
-    with tracer.start_as_current_span("generate_recap_slide") as span:
-        span.set_attribute("openinference.span.kind", "chain")
+    with tracer.start_as_current_span(f"{SPAN_PREFIX}.generate_recap_slide") as span:
+        span.set_attribute("openinference.span.kind", "CHAIN")
         
         try:
             from recap_generator import generate_recap_slide as create_slide
@@ -485,7 +483,8 @@ async def generate_recap_slide(recap_data: RecapSlideData):
 @app.get("/api/example")
 async def get_example_transcript():
     """Get an example transcript for testing"""
-    example = """0:16 | Hakan
+    with api_span("get_example_transcript"):
+        example = """0:16 | Hakan
 yeah, they're so wealthy.
 
 0:17 | Juan
@@ -496,8 +495,7 @@ Yeah, we don't have any technical questions. So, I think we want to hear more ab
 
 2:46 | Juan
 Okay, perfect. Yeah. So the POC essentially would have our team guiding you through the platform."""
-
-    return {"transcript": example}
+        return {"transcript": example}
 
 
 class CallsByAccountRequest(BaseModel):
@@ -538,11 +536,11 @@ async def get_calls_by_account(request: CallsByAccountRequest):
     Uses fuzzy matching to handle variations like "Acme" vs "Acme Corp".
     """
     with tracer.start_as_current_span(
-        "get_calls_by_account",
+        f"{SPAN_PREFIX}.get_calls_by_account",
         attributes={
             "account.name": request.account_name,
             "fuzzy.threshold": request.fuzzy_threshold or 0.85,
-            "openinference.span.kind": "tool",
+            "openinference.span.kind": "TOOL",
         }
     ) as span:
         try:
@@ -650,7 +648,7 @@ async def analyze_prospect(request: AnalyzeProspectRequest):
     analyzes each call with context from prior calls, and returns a timeline view.
     """
     with tracer.start_as_current_span(
-        "analyze_prospect_request",
+        f"{SPAN_PREFIX}.analyze_prospect",
         attributes={
             "prospect.name": request.prospect_name,
             "fuzzy.threshold": request.fuzzy_threshold or 0.85,
@@ -743,7 +741,7 @@ async def analyze_prospect_stream(request: AnalyzeProspectRequest):
         trace.
         """
         with tracer.start_as_current_span(
-            "analyze_prospect_stream_request",
+            f"{SPAN_PREFIX}.analyze_prospect_stream",
             attributes={
                 "prospect.name": request.prospect_name,
                 "fuzzy.threshold": request.fuzzy_threshold or 0.85,
@@ -825,7 +823,7 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
     - sfdc_account_id: Exact match on Salesforce Account ID
     """
     with tracer.start_as_current_span(
-        "get_prospect_overview",
+        f"{SPAN_PREFIX}.get_prospect_overview",
         attributes={
             "lookup.account_name": request.account_name or "",
             "lookup.domain": request.domain or "",
@@ -1295,6 +1293,11 @@ async def classify_demo(request: ClassifyDemoRequest):
     Classify a prospect's use case and framework from CRM/Gong data.
     Returns the classification along with all available options for user override.
     """
+    with api_span("classify_demo", account_name=request.account_name):
+        return await _classify_demo_impl(request)
+
+
+async def _classify_demo_impl(request: ClassifyDemoRequest):
     overview = None
     industry = None
     try:
@@ -1354,6 +1357,15 @@ async def generate_demo_stream(request: GenerateDemoRequest):
     project_name = request.project_name or request.account_name.lower().replace(" ", "-") + "-demo"
 
     async def event_stream():
+        from opentelemetry import context as otel_ctx
+        span = tracer.start_span(
+            f"{SPAN_PREFIX}.generate_demo_stream",
+            attributes={
+                "account.name": request.account_name or "",
+                "openinference.span.kind": "CHAIN",
+            },
+        )
+        token = otel_ctx.attach(trace.set_span_in_context(span))
         try:
             overview = None
             industry = None
@@ -1631,6 +1643,9 @@ async def generate_demo_stream(request: GenerateDemoRequest):
             import traceback
             traceback.print_exc()
             yield _sse_event("error", {"detail": str(e)})
+        finally:
+            span.end()
+            otel_ctx.detach(token)
 
     return StreamingResponse(
         event_stream(),
@@ -1648,6 +1663,11 @@ async def generate_demo_legacy(request: GenerateDemoRequest):
     3. Run a real LLM pipeline
     4. Traces flow to Arize automatically via arize-otel (under demo project)
     """
+    with api_span("generate_demo", account_name=request.account_name or ""):
+        return await _generate_demo_legacy_impl(request)
+
+
+async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
     project_name = request.project_name or request.account_name.lower().replace(" ", "-") + "-demo"
     demo_project_name = project_name  # overwritten when we create demo_provider
 
@@ -1874,26 +1894,27 @@ async def export_script(
     The script includes all necessary code inlined so the customer can
     run it in a fresh environment with just `pip install` + env vars.
     """
-    from scripts.generate_customer_script import generate_script
+    with api_span("export_script", use_case=use_case, framework=framework, project_name=project_name):
+        from scripts.generate_customer_script import generate_script
 
-    try:
-        script_content = generate_script(
-            use_case=use_case,
-            framework=framework,
-            model=model,
-            project_name=project_name,
+        try:
+            script_content = generate_script(
+                use_case=use_case,
+                framework=framework,
+                model=model,
+                project_name=project_name,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate script: {e}")
+
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+        filename = f"{safe_name}_demo.py" if safe_name else "demo.py"
+
+        return Response(
+            content=script_content,
+            media_type="text/x-python",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate script: {e}")
-
-    safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
-    filename = f"{safe_name}_demo.py" if safe_name else "demo.py"
-
-    return Response(
-        content=script_content,
-        media_type="text/x-python",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
 
 
 @app.post("/api/create-online-evals")
@@ -1902,30 +1923,31 @@ async def create_online_evals(request: CreateOnlineEvalsRequest):
     Create online eval task(s) in Arize for a project/use case after trace data has been sent.
     Call this when the user opts in (e.g. after viewing suggested_evals from generate-demo).
     """
-    space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID", "")
-    api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY", "")
-    if not space_id or not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="ARIZE_SPACE_ID and ARIZE_API_KEY are required (via request body or env).",
-        )
-    try:
-        from arize_demo_traces.online_evals import create_and_run_online_eval
-        result = await asyncio.to_thread(
-            create_and_run_online_eval,
-            project_name=request.project_name,
-            use_case=request.use_case,
-            space_id=space_id,
-            api_key=api_key,
-            delay_seconds_before_backfill=30,
-            minutes_back=60,
-            max_spans=500,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create online eval: {e}")
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    with api_span("create_online_evals", project_name=request.project_name or "", use_case=request.use_case or ""):
+        space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID", "")
+        api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY", "")
+        if not space_id or not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="ARIZE_SPACE_ID and ARIZE_API_KEY are required (via request body or env).",
+            )
+        try:
+            from arize_demo_traces.online_evals import create_and_run_online_eval
+            result = await asyncio.to_thread(
+                create_and_run_online_eval,
+                project_name=request.project_name,
+                use_case=request.use_case,
+                space_id=space_id,
+                api_key=api_key,
+                delay_seconds_before_backfill=30,
+                minutes_back=60,
+                max_spans=500,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create online eval: {e}")
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
 
 
 # ============================================================
@@ -1977,9 +1999,8 @@ async def hypothesis_research(request: HypothesisResearchRequest):
     if not request.company_name or len(request.company_name.strip()) < 2:
         raise HTTPException(status_code=400, detail="Company name must be at least 2 characters.")
 
-    tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span(
-        f"hypothesis_research:{request.company_name}",
+        f"{SPAN_PREFIX}.hypothesis_research",
         attributes={
             "openinference.span.kind": "CHAIN",
             "input.value": f"Research {request.company_name}",

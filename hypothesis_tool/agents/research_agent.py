@@ -13,7 +13,10 @@ import operator
 import contextvars
 import asyncio
 from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, Callable, Awaitable
+
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -69,6 +72,10 @@ class AgentState(TypedDict):
     website_blog_results: list[SearchResult]
     news_funding_results: list[SearchResult]
     pain_points_results: list[SearchResult]
+    genai_product_search_results: list[SearchResult]
+
+    # Discovered GenAI product(s) – extracted from research (e.g. Gus for Gusto)
+    discovered_genai_products: list[dict]
 
     # Extracted insights
     signals: list[AIMLSignal]
@@ -218,25 +225,111 @@ class ResearchAgent:
         
         return "\n\n".join(context_parts)
 
+    def _wrap_node(
+        self,
+        node_name: str,
+        node_fn: Callable[[AgentState], Awaitable[dict]],
+    ) -> Callable[[AgentState], Awaitable[dict]]:
+        """Wrap a graph node so every step is visible as a span in the trace."""
+
+        async def _wrapped(state: AgentState) -> dict:
+            tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+            company = state.get("company_name", "") or ""
+            with tracer.start_as_current_span(
+                f"hypothesis_agent.{node_name}",
+                attributes={
+                    "openinference.span.kind": "CHAIN",
+                    "hypothesis_agent.node": node_name,
+                    "company.name": company,
+                    "input.value": f"{node_name} for {company}"[:500],
+                },
+            ) as span:
+                try:
+                    result = await node_fn(state)
+                    # Merge result into state for attribute reading
+                    merged = {**state, **result}
+                    # Output attributes for this step
+                    if "signals" in result:
+                        span.set_attribute("hypothesis_agent.signals_count", len(result.get("signals", [])))
+                    if "confidence_score" in result:
+                        span.set_attribute("hypothesis_agent.confidence_score", float(result.get("confidence_score", 0)))
+                    if "needs_more_research" in result:
+                        span.set_attribute("hypothesis_agent.needs_more_research", bool(result.get("needs_more_research")))
+                    if "research_iteration" in result:
+                        span.set_attribute("hypothesis_agent.research_iteration", int(result.get("research_iteration", 0)))
+                    if "discovered_genai_products" in result and result["discovered_genai_products"]:
+                        names = [p.get("product_name", "") for p in result["discovered_genai_products"] if p.get("product_name")]
+                        if names:
+                            span.set_attribute("hypothesis_agent.genai_product", names[0])
+                    if "hypotheses" in result:
+                        span.set_attribute("hypothesis_agent.hypotheses_count", len(result.get("hypotheses", [])))
+                    if "final_result" in result and result.get("final_result"):
+                        span.set_attribute("output.value", "Hypothesis research complete")
+                    # Search result counts (execute_research / execute_subagent_research)
+                    if "ai_ml_results" in result:
+                        span.set_attribute("hypothesis_agent.ai_ml_results_count", len(result.get("ai_ml_results", [])))
+                    if "genai_product_search_results" in result:
+                        span.set_attribute("hypothesis_agent.genai_search_results_count", len(result.get("genai_product_search_results", [])))
+                    if "linkedin_team_results" in result:
+                        total = (
+                            len(result.get("linkedin_team_results", []))
+                            + len(result.get("job_postings_detailed_results", []))
+                            + len(result.get("website_blog_results", []))
+                            + len(result.get("news_funding_results", []))
+                            + len(result.get("pain_points_results", []))
+                        )
+                        span.set_attribute("hypothesis_agent.subagent_results_count", total)
+                    span.set_status(Status(StatusCode.OK))
+                    return result
+                except Exception as e:
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_attribute("hypothesis_agent.error", str(e)[:500])
+                    raise
+
+        return _wrapped
+
+    def _wrap_router(
+        self,
+        route_name: str,
+        router_fn: Callable[[AgentState], str],
+    ) -> Callable[[AgentState], str]:
+        """Wrap a conditional edge so the decision is visible as a span."""
+
+        def _wrapped(state: AgentState) -> str:
+            tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+            with tracer.start_as_current_span(
+                f"hypothesis_agent.route.{route_name}",
+                attributes={
+                    "openinference.span.kind": "CHAIN",
+                    "hypothesis_agent.router": route_name,
+                    "company.name": state.get("company_name", "") or "",
+                },
+            ) as span:
+                route = router_fn(state)
+                span.set_attribute("hypothesis_agent.route", route)
+                span.set_status(Status(StatusCode.OK))
+                return route
+
+        return _wrapped
+
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph state machine."""
 
         # Create the graph
         workflow = StateGraph(AgentState)
 
-        # Add nodes
-        workflow.add_node("plan_research", self._plan_research)
-        workflow.add_node("execute_research", self._execute_research)
-        workflow.add_node("execute_subagent_research", self._execute_subagent_research)
-        workflow.add_node("analyze_subagent_insights", self._analyze_subagent_insights)
-        workflow.add_node("check_crm", self._check_crm)
-        workflow.add_node("analyze_signals", self._analyze_signals)
-        workflow.add_node("evaluate_confidence", self._evaluate_confidence)
-        # deep_research replaced by subagent research flow
-        workflow.add_node("load_playbook", self._load_playbook)
-        workflow.add_node("generate_hypotheses", self._generate_hypotheses)
-        workflow.add_node("validate_hypotheses", self._validate_hypotheses)
-        workflow.add_node("finalize_result", self._finalize_result)
+        # Add nodes (each wrapped so every step appears as a span in the trace)
+        workflow.add_node("plan_research", self._wrap_node("plan_research", self._plan_research))
+        workflow.add_node("execute_research", self._wrap_node("execute_research", self._execute_research))
+        workflow.add_node("execute_subagent_research", self._wrap_node("execute_subagent_research", self._execute_subagent_research))
+        workflow.add_node("analyze_subagent_insights", self._wrap_node("analyze_subagent_insights", self._analyze_subagent_insights))
+        workflow.add_node("check_crm", self._wrap_node("check_crm", self._check_crm))
+        workflow.add_node("analyze_signals", self._wrap_node("analyze_signals", self._analyze_signals))
+        workflow.add_node("evaluate_confidence", self._wrap_node("evaluate_confidence", self._evaluate_confidence))
+        workflow.add_node("load_playbook", self._wrap_node("load_playbook", self._load_playbook))
+        workflow.add_node("generate_hypotheses", self._wrap_node("generate_hypotheses", self._generate_hypotheses))
+        workflow.add_node("validate_hypotheses", self._wrap_node("validate_hypotheses", self._validate_hypotheses))
+        workflow.add_node("finalize_result", self._wrap_node("finalize_result", self._finalize_result))
 
         # Set entry point
         workflow.set_entry_point("plan_research")
@@ -247,11 +340,10 @@ class ResearchAgent:
         workflow.add_edge("check_crm", "analyze_signals")
         workflow.add_edge("analyze_signals", "evaluate_confidence")
 
-        # Conditional edge: need more research?
-        # If confidence is low, run sub-agent research instead of simple deep research
+        # Conditional edge: need more research? (wrapped so route is visible in trace)
         workflow.add_conditional_edges(
             "evaluate_confidence",
-            self._should_research_more,
+            self._wrap_router("research_more", self._should_research_more),
             {
                 "subagent_research": "execute_subagent_research",
                 "continue": "load_playbook",
@@ -264,10 +356,10 @@ class ResearchAgent:
         workflow.add_edge("load_playbook", "generate_hypotheses")
         workflow.add_edge("generate_hypotheses", "validate_hypotheses")
 
-        # Conditional edge: hypotheses good enough?
+        # Conditional edge: hypotheses good enough? (wrapped so route is visible in trace)
         workflow.add_conditional_edges(
             "validate_hypotheses",
-            self._hypotheses_valid,
+            self._wrap_router("hypotheses_valid", self._hypotheses_valid),
             {
                 "refine": "generate_hypotheses",
                 "finalize": "finalize_result",
@@ -318,7 +410,7 @@ Output a brief research plan (2-3 sentences)."""
         search_term = f"{company} {domain}" if domain else company
         reasoning.append(f"Executing web research for {search_term} (parallel)")
 
-        # Execute all 4 search types in PARALLEL for speed
+        # Execute all 5 search types in PARALLEL (including GenAI product name discovery)
         async def safe_search(coro, name):
             try:
                 return await coro
@@ -331,6 +423,7 @@ Output a brief research plan (2-3 sentences)."""
             safe_search(self.brave_client.search_company_competitors(company), "Competitor"),
             safe_search(self.brave_client.search_company_jobs(company), "Job"),
             safe_search(self.brave_client.search_company_news(company), "News"),
+            safe_search(self.brave_client.search_genai_product_name(company), "GenAI product name"),
             return_exceptions=True
         )
 
@@ -338,6 +431,7 @@ Output a brief research plan (2-3 sentences)."""
         competitor_results = results[1] if not isinstance(results[1], Exception) else {}
         job_results = results[2] if not isinstance(results[2], Exception) else []
         news_results = results[3] if not isinstance(results[3], Exception) else []
+        genai_product_search_results = results[4] if not isinstance(results[4], Exception) else []
 
         # Check if all searches failed
         if not ai_ml_results and not competitor_results and not job_results and not news_results:
@@ -384,6 +478,7 @@ Output a brief research plan (2-3 sentences)."""
             "competitor_results": competitor_results,
             "job_results": job_results,
             "news_results": news_results,
+            "genai_product_search_results": genai_product_search_results,
             "agent_reasoning": reasoning,
             "warnings": warnings,
             "errors": errors,
@@ -417,13 +512,14 @@ Output a brief research plan (2-3 sentences)."""
                 warnings.append(f"{name} research limited: {e.message}")
                 return []
         
-        # Execute ALL 5 sub-agents in PARALLEL
+        # Execute ALL 6 sub-agents in PARALLEL (including GenAI product name discovery)
         results = await asyncio.gather(
             safe_search(self.brave_client.search_linkedin_team(company), "LinkedIn"),
             safe_search(self.brave_client.search_job_postings_detailed(company), "Job postings"),
             safe_search(self.brave_client.search_website_blog(company, domain), "Website/blog"),
             safe_search(self.brave_client.search_news_funding(company), "News/funding"),
             safe_search(self.brave_client.search_pain_points(company), "Pain points"),
+            safe_search(self.brave_client.search_genai_product_name(company), "GenAI product name"),
             return_exceptions=True
         )
         
@@ -432,10 +528,12 @@ Output a brief research plan (2-3 sentences)."""
         website_results = results[2] if not isinstance(results[2], Exception) else []
         news_funding_results = results[3] if not isinstance(results[3], Exception) else []
         pain_results = results[4] if not isinstance(results[4], Exception) else []
+        genai_product_results = results[5] if not isinstance(results[5], Exception) else []
         
         total_subagent_results = (
-            len(linkedin_results) + len(job_detailed_results) + 
-            len(website_results) + len(news_funding_results) + len(pain_results)
+            len(linkedin_results) + len(job_detailed_results) +
+            len(website_results) + len(news_funding_results) + len(pain_results) +
+            len(genai_product_results)
         )
         reasoning.append(f"Sub-agent research complete: {total_subagent_results} results (parallel)")
         
@@ -445,6 +543,7 @@ Output a brief research plan (2-3 sentences)."""
             "website_blog_results": website_results,
             "news_funding_results": news_funding_results,
             "pain_points_results": pain_results,
+            "genai_product_search_results": genai_product_results,
             "agent_reasoning": reasoning,
             "warnings": warnings,
         }
@@ -458,13 +557,14 @@ Output a brief research plan (2-3 sentences)."""
         reasoning = list(state.get("agent_reasoning", []))
         company = state["company_name"]
         
-        # Helper to format results for LLM
-        def format_results(results: list[SearchResult], max_items: int = 5) -> str:
+        # Helper to format results for LLM (max_desc_len used for GenAI product name so names aren't cut off)
+        def format_results(results: list[SearchResult], max_items: int = 5, max_desc_len: int = 150) -> str:
             if not results:
                 return "No results found"
             items = []
             for r in results[:max_items]:
-                items.append(f"- {r.title}: {r.description[:150]}...")
+                d = r.description[:max_desc_len] + ("..." if len(r.description) > max_desc_len else "")
+                items.append(f"- {r.title}: {d}")
             return "\n".join(items)
         
         # Build combined prompt for single LLM call
@@ -489,6 +589,10 @@ Output a brief research plan (2-3 sentences)."""
         if state.get("pain_points_results"):
             sections.append(f"""## Pain Points Research
 {format_results(state['pain_points_results'])}""")
+
+        if state.get("genai_product_search_results"):
+            sections.append(f"""## GenAI Product Name Research (identify the company's AI/GenAI product or assistant by name – look for a specific name e.g. Fillip, Gus, Einstein)
+{format_results(state['genai_product_search_results'], max_items=6, max_desc_len=450)}""")
         
         if not sections:
             reasoning.append("No sub-agent results to analyze")
@@ -504,10 +608,15 @@ Output a brief research plan (2-3 sentences)."""
 Provide a brief analysis for each category found above. For each, extract 2-3 key bullet points:
 
 **Team Insights**: (team size, leadership, hiring patterns, maturity)
-**Job Insights**: (tools/frameworks, production vs research, scale indicators)  
+**Job Insights**: (tools/frameworks, production vs research, scale indicators)
 **Blog Insights**: (AI features, technical challenges, use cases)
 **News Insights**: (announcements, funding, partnerships, strategy)
 **Pain Insights**: (challenges, monitoring gaps, cost concerns)
+
+**CRITICAL - GenAI product name**: From ALL the research above (especially GenAI Product Name Research), identify the COMPANY'S NAMED AI or GenAI product, assistant, or agent if clearly mentioned. Look for a specific product/brand name (e.g. Fillip, Gus, Einstein, Copilot, Now Assist), not a generic phrase. Reply on its own line at the end of your response:
+GENAI_PRODUCT: Product Name - one sentence description of what it does
+If no specific product name is found in the research, reply:
+GENAI_PRODUCT: None
 
 Be concise. Say "Unknown" for categories with no clear signals. Format as bullet points under each heading."""
 
@@ -535,9 +644,30 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
             if "**Pain Insights**" in full_analysis:
                 insights["pain"] = full_analysis
             
+            # Parse GENAI_PRODUCT line to discover the prospect's GenAI product name
+            discovered_genai_products = []
+            for line in full_analysis.splitlines():
+                line = line.strip()
+                if line.upper().startswith("GENAI_PRODUCT:"):
+                    rest = line[len("GENAI_PRODUCT:"):].strip()
+                    if rest.upper() in ("NONE", "N/A", ""):
+                        break
+                    # Format: "Product Name - one sentence description"
+                    if " - " in rest:
+                        name, desc = rest.split(" - ", 1)
+                        discovered_genai_products = [{
+                            "product_name": name.strip(),
+                            "product_description": desc.strip(),
+                        }]
+                    else:
+                        discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                    if discovered_genai_products:
+                        reasoning.append(f"Discovered GenAI product: {discovered_genai_products[0].get('product_name', '')}")
+                    break
+
             # Store the full analysis (all insights combined)
             reasoning.append(f"Analyzed sub-agent research in single LLM call")
-            
+
             # Return the full analysis as all insights (they're combined anyway)
             return {
                 "team_insights": full_analysis if insights["team"] else None,
@@ -545,6 +675,7 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
                 "blog_insights": full_analysis if insights["blog"] else None,
                 "news_insights": full_analysis if insights["news"] else None,
                 "pain_insights": full_analysis if insights["pain"] else None,
+                "discovered_genai_products": discovered_genai_products,
                 "agent_reasoning": reasoning,
             }
             
@@ -556,6 +687,7 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
                 "blog_insights": None,
                 "news_insights": None,
                 "pain_insights": None,
+                "discovered_genai_products": [],
                 "agent_reasoning": reasoning,
             }
 
@@ -567,7 +699,13 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
         crm_data = None
         if self.bq_client:
             try:
-                crm_data = self.bq_client.get_account_by_name(state["company_name"])
+                # Run sync BQ call in a thread with current trace context so BigQuery spans
+                # parent to this workflow (no orphan spans in Arize).
+                ctx = contextvars.copy_context()
+                crm_data = await asyncio.to_thread(
+                    ctx.run,
+                    lambda: self.bq_client.get_account_by_name(state["company_name"]),
+                )
                 if crm_data:
                     reasoning.append(
                         f"Found in CRM: {crm_data.get('industry', 'Unknown industry')}"
@@ -631,12 +769,51 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
         if detected_tools:
             reasoning.append(f"Detected tools: {', '.join(detected_tools)}")
 
+        # Extract GenAI product name from GenAI product search results (so we have it even when subagents skip)
+        discovered_genai_products = []
+        genai_results = state.get("genai_product_search_results") or []
+        if genai_results:
+            try:
+                # Use longer snippets (500 chars) so product names like "Fillip" aren't cut off
+                max_desc = 500
+                text = "\n".join(
+                    f"- {r.title}: {(r.description[:max_desc] + ('...' if len(r.description) > max_desc else ''))}"
+                    for r in genai_results[:8]
+                )
+                prompt = f"""From these search results about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
+Look for a specific product or brand name (e.g. Fillip, Gus, Einstein, Copilot, Now Assist), not a generic phrase like "AI tool" or "assistant".
+Reply with exactly one line:
+GENAI_PRODUCT: Product Name - one sentence description
+If no specific product name is found, reply:
+GENAI_PRODUCT: None
+
+Search results:
+{text}"""
+                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                content = (response.content if hasattr(response, "content") else str(response)).strip()
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.upper().startswith("GENAI_PRODUCT:"):
+                        rest = line[len("GENAI_PRODUCT:"):].strip()
+                        if rest.upper() not in ("NONE", "N/A", ""):
+                            if " - " in rest:
+                                name, desc = rest.split(" - ", 1)
+                                discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
+                            else:
+                                discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                            if discovered_genai_products:
+                                reasoning.append(f"Discovered GenAI product: {discovered_genai_products[0].get('product_name', '')}")
+                        break
+            except Exception:
+                pass
+
         return {
             "signals": signals,
             "competitor_evidence": competitor_evidence,
             "competitive_situation": competitive_situation,
             "detected_tools": detected_tools,
             "company_summary": summary,
+            "discovered_genai_products": discovered_genai_products,
             "agent_reasoning": reasoning,
         }
 
@@ -881,12 +1058,33 @@ Top pain points:
 
         # Get value drivers for context
         value_driver_context = self._get_relevant_value_drivers(state.get("industry"))
+
+        # Prospect's discovered GenAI product(s) – identified from research (e.g. Gus for Gusto)
+        genai_products = state.get("discovered_genai_products") or []
+        genai_section = ""
+        if genai_products:
+            parts = []
+            for p in genai_products:
+                name = p.get("product_name", "").strip()
+                desc = (p.get("product_description") or "").strip()
+                if name:
+                    parts.append(f"Product: {name}\nDescription: {desc}" if desc else f"Product: {name}")
+            if parts:
+                genai_section = (
+                    "\nPROSPECT'S GENAI PRODUCT (discovered from research – align hypotheses to this):\n"
+                    "==============================================================================\n"
+                    + "\n---\n".join(parts) +
+                    "\n==============================================================================\n"
+                    "CRITICAL: Reference the prospect's product by name in your hypotheses. "
+                    "Frame Arize value in terms of observability, evaluation, and safety for that product.\n\n"
+                )
         
         # Build sub-agent insights section (they're combined in one analysis now)
         # Just use team_insights since they all contain the full combined analysis
         subagent_text = state.get("team_insights") or "No detailed sub-agent research performed (initial research was sufficient)"
         
         prompt = f"""Generate 2-3 hypotheses about where Arize could help {state['company_name']}.
+{genai_section}
 
 ARIZE FOCUS AREAS (prioritize LLM/GenAI use cases):
 1. LLM Observability - tracing, prompt/response monitoring, token usage, latency
@@ -1174,7 +1372,7 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
         warnings = list(state.get("warnings", []))
         errors = list(state.get("errors", []))
 
-        # Build CompanyResearch
+        # Build CompanyResearch (include known GenAI products so hypotheses align with their offering)
         research = CompanyResearch(
             company_name=state["company_name"],
             domain=state.get("company_domain"),
@@ -1189,15 +1387,22 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
             competitor_evidence=state.get("competitor_evidence", []),
             exists_in_crm=state.get("crm_data") is not None,
             company_summary=state.get("company_summary"),
+            genai_products=state.get("discovered_genai_products") or [],
         )
 
         # Add similar customers to first hypothesis
         hypotheses = list(state.get("hypotheses", []))
         if hypotheses and self.bq_client and state.get("industry"):
             try:
-                similar = self.bq_client.get_similar_customers(
-                    industry=state["industry"],
-                    employee_count=state["crm_data"].get("number_of_employees") if state.get("crm_data") else None,
+                # Run sync BQ call in a thread with current trace context so BigQuery spans parent correctly.
+                ctx = contextvars.copy_context()
+                emp = state["crm_data"].get("number_of_employees") if state.get("crm_data") else None
+                similar = await asyncio.to_thread(
+                    ctx.run,
+                    lambda: self.bq_client.get_similar_customers(
+                        industry=state["industry"],
+                        employee_count=emp,
+                    ),
                 )
                 hypotheses[0].similar_customers = [
                     SimilarCustomer(
@@ -1310,7 +1515,9 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
             "website_blog_results": [],
             "news_funding_results": [],
             "pain_points_results": [],
-            # Extracted insights
+            "genai_product_search_results": [],
+            # Extracted insights (discovered_genai_products set by _analyze_subagent_insights)
+            "discovered_genai_products": [],
             "signals": [],
             "competitor_evidence": [],
             "competitive_situation": CompetitiveSituation.UNKNOWN,

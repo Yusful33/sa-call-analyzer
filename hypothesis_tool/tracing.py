@@ -38,8 +38,12 @@ def setup_arize_tracing() -> Any | None:
             project_name=settings.arize_project_name,
         )
         
-        # Instrument LangChain (which includes LangGraph)
-        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+        # Instrument LangChain (which includes LangGraph). Use runtime context so
+        # LLM spans parent to our hypothesis_agent.* node spans (one trace per request).
+        LangChainInstrumentor().instrument(
+            tracer_provider=tracer_provider,
+            separate_trace_from_runtime_context=False,
+        )
         
         print(f"Arize tracing enabled - project: {settings.arize_project_name}")
         print(f"View traces at: https://app.arize.com/")

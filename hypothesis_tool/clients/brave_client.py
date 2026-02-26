@@ -462,15 +462,15 @@ class BraveSearchClient:
 
     async def search_pain_points(self, company_name: str) -> list[SearchResult]:
         """Search for potential pain points the company might have.
-        
+
         Hypothesis Formation: Pain Points
         - Technical challenges mentioned in blogs/talks
         - Scale/performance issues
         - Compliance/security concerns with AI
-        
+
         Args:
             company_name: Company name
-            
+
         Returns:
             List of results indicating potential pain points
         """
@@ -479,7 +479,6 @@ class BraveSearchClient:
             f'"{company_name}" AI ML challenges scaling production monitoring',
             f'"{company_name}" LLM accuracy cost optimization compliance',
         ]
-        
         all_results = []
         for query in queries:
             try:
@@ -488,13 +487,45 @@ class BraveSearchClient:
                 await asyncio.sleep(0.1)
             except SearchAPIError:
                 continue
-        
-        # Deduplicate
         seen_urls = set()
         unique_results = []
         for r in all_results:
             if r.url not in seen_urls:
                 seen_urls.add(r.url)
                 unique_results.append(r)
-        
+        return unique_results
+
+    async def search_genai_product_name(self, company_name: str) -> list[SearchResult]:
+        """Search for the company's named AI/GenAI product or assistant (e.g. Gus, Einstein).
+
+        Hypothesis Formation: Identify the prospect's actual GenAI offering by name
+        so hypotheses can reference it and frame Arize value in their terms.
+
+        Args:
+            company_name: Company name
+
+        Returns:
+            List of results that may mention the product name
+        """
+        queries = [
+            f'"{company_name}" AI assistant name product',
+            f'"{company_name}" GenAI product launch',
+            f'"{company_name}" AI agent name',
+            f'"{company_name}" AI tool name announced',
+            f'"{company_name}" name of AI product',
+        ]
+        all_results = []
+        for query in queries:
+            try:
+                results = await self.search(query, count=4, freshness="pm")
+                all_results.extend(results)
+                await asyncio.sleep(0.1)
+            except SearchAPIError:
+                continue
+        seen_urls = set()
+        unique_results = []
+        for r in all_results:
+            if r.url not in seen_urls:
+                seen_urls.add(r.url)
+                unique_results.append(r)
         return unique_results

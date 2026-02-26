@@ -26,6 +26,7 @@ from openinference.instrumentation.langchain import LangChainInstrumentor
 from openinference.instrumentation.litellm import LiteLLMInstrumentor
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from span_processor_fixed import CleaningSpanProcessor
 
 # Enable debug logging for OpenTelemetry
@@ -132,11 +133,14 @@ def setup_observability(
         )
         print("   ✅ OpenAI instrumentor initialized")
 
-        # Instrument LangChain (AFTER processor registered)
+        # Instrument LangChain (AFTER processor registered).
+        # separate_trace_from_runtime_context=False so LLM/chain spans parent to our
+        # API spans (one trace per request, no orphan spans).
         langchain_instrumentor = LangChainInstrumentor()
         langchain_instrumentor.instrument(
             tracer_provider=tracer_provider,
-            skip_dep_check=True
+            skip_dep_check=True,
+            separate_trace_from_runtime_context=False,
         )
 
         # Instrument LiteLLM (captures actual LLM calls with token counts)
@@ -145,6 +149,15 @@ def setup_observability(
             tracer_provider=tracer_provider,
             skip_dep_check=True
         )
+
+        # Propagate trace context to new threads (BigQuery, thread pools, etc. create
+        # threads that otherwise would have no parent span → orphan spans in Arize).
+        try:
+            from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+            ThreadingInstrumentor().instrument()
+            print("   ✅ ThreadingInstrumentor enabled (trace context propagates to new threads)")
+        except ImportError:
+            print("   ⚠️  ThreadingInstrumentor not available (pip install opentelemetry-instrumentation-threading)")
 
         # DEBUG: Verify instrumentation worked
         print("\n🔍 Instrumentation Verification:")
@@ -199,6 +212,39 @@ def setup_observability(
 def get_tracer(name: str = "sa-call-analyzer"):
     """Get a tracer for manual instrumentation."""
     return trace.get_tracer(name)
+
+
+# Span name prefix for all API and workflow steps (filter in Arize by "sa_call_analyzer")
+SPAN_PREFIX = "sa_call_analyzer"
+
+
+def api_span(route_name: str, kind: str = "CHAIN", **attributes):
+    """
+    Context manager for a top-level API span. Use for every route so the full
+    app workflow is visible in Arize with consistent naming.
+
+    Example:
+        with api_span("analyze", account_name=request.account_name):
+            ...
+    """
+    from contextlib import contextmanager
+    tracer = trace.get_tracer("sa-call-analyzer-api")
+    name = f"{SPAN_PREFIX}.{route_name}"
+    attrs = {
+        "openinference.span.kind": kind.upper(),
+        **attributes,
+    }
+    @contextmanager
+    def _ctx():
+        with tracer.start_as_current_span(name, attributes=attrs) as span:
+            try:
+                yield span
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                if hasattr(span, "record_exception"):
+                    span.record_exception(e)
+                raise
+    return _ctx()
 
 
 def force_flush_spans():
