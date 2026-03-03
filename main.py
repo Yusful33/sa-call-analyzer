@@ -2015,10 +2015,17 @@ async def hypothesis_research(request: HypothesisResearchRequest):
     Research a company using AI agent and generate data-driven hypotheses.
     Uses web search (Brave), CRM data (BigQuery), and LLM analysis.
     """
-    agent = _get_hypothesis_agent()
+    try:
+        if not request.company_name or len(request.company_name.strip()) < 2:
+            raise HTTPException(status_code=400, detail="Company name must be at least 2 characters.")
 
-    if not request.company_name or len(request.company_name.strip()) < 2:
-        raise HTTPException(status_code=400, detail="Company name must be at least 2 characters.")
+        agent = _get_hypothesis_agent()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Hypothesis research init error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Research service unavailable: {str(e)[:200]}")
 
     # Use api_span so the root span is created with the current provider's tracer (set by middleware).
     # That way root and all LangGraph/LLM child spans share the same trace_id and the Traces tab shows the tree.
@@ -2046,6 +2053,8 @@ async def hypothesis_research(request: HypothesisResearchRequest):
                 "result": result_dict,
                 "agent_reasoning": reasoning,
             }
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
             print(f"Hypothesis research error: {traceback.format_exc()}")
@@ -2057,7 +2066,7 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             elif "timeout" in error_detail.lower():
                 raise HTTPException(status_code=504, detail="Request timed out. Try again.")
             else:
-                raise HTTPException(status_code=500, detail=f"Research failed: {error_detail}")
+                raise HTTPException(status_code=500, detail=f"Research failed: {error_detail[:200]}")
 
 
 if __name__ == "__main__":
