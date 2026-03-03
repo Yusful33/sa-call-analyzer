@@ -24,7 +24,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from ..clients.bigquery_client import BigQueryClient
+from ..clients.arize_prompt_client import get_plan_research_prompt
 from ..clients.brave_client import BraveSearchClient, SearchResult
+from ..clients.page_fetcher import fetch_page_text
 from ..analyzers.signal_extractor import SignalExtractor
 from ..models.hypothesis import (
     HypothesisResult,
@@ -375,16 +377,29 @@ class ResearchAgent:
     # =========================================================================
 
     async def _plan_research(self, state: AgentState) -> dict:
-        """Plan what research to conduct based on company name."""
-
-        prompt = f"""You are a sales research assistant. Plan what research to conduct for: {state['company_name']}
-
+        """Plan what research to conduct using the Sales Research Assistant prompt from Arize (Company Name parameter)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        company_name = state.get("company_name", "") or ""
+        settings = get_settings()
+        prompt: str | None = None
+        try:
+            if settings.arize_api_key:
+                prompt = await get_plan_research_prompt(company_name)
+                logger.info("plan_research: using Arize Sales Research Assistant prompt for company=%s", company_name)
+            else:
+                logger.warning("plan_research: ARIZE_API_KEY not set, using fallback prompt")
+        except Exception as e:
+            logger.warning("plan_research: Arize prompt fetch failed (%s), using fallback: %s", type(e).__name__, e)
+            prompt = None
+        if not prompt:
+            # Fallback when Arize is not configured or fetch fails
+            prompt = f"""You are a sales research assistant. Plan what research to conduct for: {company_name}
 Consider:
 1. What AI/ML signals should we look for?
 2. What competitors might they be using?
 3. What job postings would indicate ML maturity?
 4. What recent news is relevant?
-
 Output a brief research plan (2-3 sentences)."""
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -770,16 +785,35 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
             reasoning.append(f"Detected tools: {', '.join(detected_tools)}")
 
         # Extract GenAI product name from GenAI product search results (so we have it even when subagents skip)
+        #
+        # Why we might miss a product name (e.g. Fillip for FINRA):
+        # 1. Search: Brave returns results for 5 queries; if no result's title/description snippet contains
+        #    the product name, we never send it to the LLM.
+        # 2. Snippet length: We send only the first 500 chars of each result description. If the name
+        #    appears later in the article (or in the page body but not in Brave's snippet), we don't see it.
+        # 3. LLM: The model might output GENAI_PRODUCT: None if it doesn't spot the name in the snippet,
+        #    or might not follow the format (we only parse the first GENAI_PRODUCT: line).
+        # 4. Subagent path: If subagent research runs, it also does extraction with 450-char snippets and
+        #    overwrites discovered_genai_products; that path might have different results.
+        # Set HYPOTHESIS_DEBUG_GENAI_PRODUCT=1 (or config.debug=True) to see in agent_reasoning what
+        # was sent to the LLM and what it replied, so you can tell which step failed.
         discovered_genai_products = []
         genai_results = state.get("genai_product_search_results") or []
+        debug_genai = __import__("os").environ.get("HYPOTHESIS_DEBUG_GENAI_PRODUCT", "").strip() in ("1", "true", "yes")
+        try:
+            from ..config import get_settings
+            debug_genai = debug_genai or get_settings().debug
+        except Exception:
+            pass
         if genai_results:
             try:
-                # Use longer snippets (500 chars) so product names like "Fillip" aren't cut off
                 max_desc = 500
                 text = "\n".join(
                     f"- {r.title}: {(r.description[:max_desc] + ('...' if len(r.description) > max_desc else ''))}"
                     for r in genai_results[:8]
                 )
+                if debug_genai:
+                    reasoning.append(f"GenAI search: {len(genai_results)} results; snippet sent to LLM (first 400 chars): {text[:400]}...")
                 prompt = f"""From these search results about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
 Look for a specific product or brand name (e.g. Fillip, Gus, Einstein, Copilot, Now Assist), not a generic phrase like "AI tool" or "assistant".
 Reply with exactly one line:
@@ -791,6 +825,9 @@ Search results:
 {text}"""
                 response = await self.llm.ainvoke([HumanMessage(content=prompt)])
                 content = (response.content if hasattr(response, "content") else str(response)).strip()
+                if debug_genai:
+                    first_line = content.splitlines()[0].strip() if content.splitlines() else content[:80]
+                    reasoning.append(f"GenAI extraction LLM reply: {first_line}")
                 for line in content.splitlines():
                     line = line.strip()
                     if line.upper().startswith("GENAI_PRODUCT:"):
@@ -804,6 +841,61 @@ Search results:
                             if discovered_genai_products:
                                 reasoning.append(f"Discovered GenAI product: {discovered_genai_products[0].get('product_name', '')}")
                         break
+
+                # Two-phase: if snippet extraction returned None but snippet suggests an AI product was announced, fetch page(s) and re-run extraction
+                if not discovered_genai_products and genai_results:
+                    snippet_combined = text.lower()
+                    suggests_ai_product = (
+                        "ai" in snippet_combined
+                        and any(
+                            kw in snippet_combined
+                            for kw in (
+                                "tool",
+                                "platform",
+                                "assistant",
+                                "announced",
+                                "launch",
+                                "product",
+                                "introduced",
+                                "unveil",
+                            )
+                        )
+                    )
+                    if suggests_ai_product:
+                        fetched_parts = []
+                        for r in genai_results[:2]:
+                            page_text = await fetch_page_text(r.url, max_chars=3500)
+                            if page_text:
+                                fetched_parts.append(f"Title: {r.title}\nContent: {page_text}")
+                        if fetched_parts:
+                            fetched_text = "\n\n---\n\n".join(fetched_parts)
+                            phase2_prompt = f"""From this article content about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
+Look for a specific product or brand name (e.g. Fillip, Gus, Einstein, Copilot), not a generic phrase like "AI tool".
+Reply with exactly one line:
+GENAI_PRODUCT: Product Name - one sentence description
+If no specific product name is found, reply:
+GENAI_PRODUCT: None
+
+Article content:
+{fetched_text[:8000]}"""
+                            try:
+                                phase2_response = await self.llm.ainvoke([HumanMessage(content=phase2_prompt)])
+                                phase2_content = (phase2_response.content if hasattr(phase2_response, "content") else str(phase2_response)).strip()
+                                for line in phase2_content.splitlines():
+                                    line = line.strip()
+                                    if line.upper().startswith("GENAI_PRODUCT:"):
+                                        rest = line[len("GENAI_PRODUCT:"):].strip()
+                                        if rest.upper() not in ("NONE", "N/A", ""):
+                                            if " - " in rest:
+                                                name, desc = rest.split(" - ", 1)
+                                                discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
+                                            else:
+                                                discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                                            if discovered_genai_products:
+                                                reasoning.append(f"Discovered GenAI product (from fetched page): {discovered_genai_products[0].get('product_name', '')}")
+                                        break
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
@@ -1549,7 +1641,8 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
             "processing_time": None,
         }
 
-        # Run the graph
+        # Run the graph under a "LangGraph" span so the trace tree matches Arize's expected
+        # shape: root -> LangGraph -> hypothesis_agent.* -> ChatAnthropic (and BigQuery) children.
         #
         # IMPORTANT: Prevent orphaned root spans.
         # LangGraph may schedule node execution in separate asyncio Tasks and/or executors.
@@ -1557,8 +1650,17 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
         # is explicitly propagated to the task running the graph.
         #
         ctx = contextvars.copy_context()
-        task = asyncio.create_task(self.graph.ainvoke(initial_state), context=ctx)
-        final_state = await task
+        tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+
+        with tracer.start_as_current_span(
+            "LangGraph",
+            attributes={
+                "openinference.span.kind": "CHAIN",
+                "company.name": company_name,
+            },
+        ):
+            task = asyncio.create_task(self.graph.ainvoke(initial_state), context=ctx)
+            final_state = await task
 
         return final_state["final_result"], final_state.get("agent_reasoning", [])
 

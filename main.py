@@ -94,7 +94,16 @@ if env_path.exists() and arize_space_id_env:
 
 # Initialize observability BEFORE importing CrewAI
 # This ensures our Arize TracerProvider is set up before CrewAI tries to set up its own
-from observability import setup_observability, get_tracer, api_span, SPAN_PREFIX
+from observability import (
+    setup_observability,
+    get_tracer,
+    api_span,
+    SPAN_PREFIX,
+    get_component_for_path,
+    get_provider_for_component,
+    set_request_tracer_provider,
+    get_current_project_name,
+)
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
 # Now import everything else (including CrewAI)
@@ -129,6 +138,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def arize_project_middleware(request, call_next):
+    """Set the active Arize tracer provider by component so each of the 4 components writes to its own project."""
+    if request.url.path.startswith("/api/"):
+        component = get_component_for_path(request.url.path)
+        provider = get_provider_for_component(component)
+        if provider is not None:
+            set_request_tracer_provider(provider)  # update proxy's current provider (instrumentors use the proxy)
+    return await call_next(request)
+
 
 # Initialize tracer for main API
 tracer = trace.get_tracer("sa-call-analyzer-api")
@@ -1999,14 +2020,20 @@ async def hypothesis_research(request: HypothesisResearchRequest):
     if not request.company_name or len(request.company_name.strip()) < 2:
         raise HTTPException(status_code=400, detail="Company name must be at least 2 characters.")
 
-    with tracer.start_as_current_span(
-        f"{SPAN_PREFIX}.hypothesis_research",
-        attributes={
-            "openinference.span.kind": "CHAIN",
+    # Use api_span so the root span is created with the current provider's tracer (set by middleware).
+    # That way root and all LangGraph/LLM child spans share the same trace_id and the Traces tab shows the tree.
+    with api_span(
+        "hypothesis_research",
+        **{
             "input.value": f"Research {request.company_name}",
             "company.name": request.company_name,
         },
-    ):
+    ) as span:
+        if os.environ.get("ARIZE_TRACE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+            project = get_current_project_name()
+            ctx = span.get_span_context() if hasattr(span, "get_span_context") else None
+            trace_id = format(ctx.trace_id, "032x") if ctx and hasattr(ctx, "trace_id") else None
+            print(f"[ARIZE_TRACE_DEBUG] hypothesis_research → project={project!r} trace_id={trace_id}")
         try:
             result, reasoning = await agent.research(
                 company_name=request.company_name.strip(),

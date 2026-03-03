@@ -18,6 +18,7 @@ KEY INSIGHT:
 """
 import os
 import logging
+import contextvars
 from typing import Optional
 from arize.otel import register
 # NOTE: CrewAI Instrumentor disabled - creates separate root traces for each Crew.kickoff()
@@ -27,7 +28,59 @@ from openinference.instrumentation.litellm import LiteLLMInstrumentor
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace import TracerProvider as TracerProviderBase
 from span_processor_fixed import CleaningSpanProcessor
+
+
+# Per-request provider so concurrent requests don't overwrite each other (LLM spans stay in the right project).
+_request_tracer_provider: contextvars.ContextVar[Optional["TracerProviderBase"]] = contextvars.ContextVar(
+    "request_tracer_provider", default=None
+)
+
+
+class _ProxyTracer(trace.Tracer):
+    """
+    Tracer that delegates to the current request's provider on each span creation.
+    LangChain/OpenInference instrumentors cache the tracer at instrument() time; by
+    returning a _ProxyTracer we ensure every start_span/start_as_current_span
+    uses the provider from context (so ChatAnthropic and other LLM spans go to the
+    right project and have correct parent/trace_id).
+    """
+
+    def __init__(self, proxy_provider: "_ProxyTracerProvider", name: str, version: str = "") -> None:
+        self._proxy = proxy_provider
+        self._name = name
+        self._version = version
+
+    def _get_tracer(self) -> "trace.Tracer":
+        provider = _request_tracer_provider.get()
+        if provider is None:
+            provider = self._proxy._default
+        return provider.get_tracer(self._name, self._version)
+
+    def start_span(self, name: str, *args: object, **kwargs: object) -> "trace.Span":
+        return self._get_tracer().start_span(name, *args, **kwargs)
+
+    def start_as_current_span(self, name: str, *args: object, **kwargs: object):
+        return self._get_tracer().start_as_current_span(name, *args, **kwargs)
+
+
+class _ProxyTracerProvider(TracerProviderBase):
+    """Delegates to the per-request provider (from context) so each request's spans stay in one project."""
+
+    def __init__(self, default_provider: TracerProviderBase):
+        self._default = default_provider
+
+    def get_tracer(self, name: str, version: str = "", *args, **kwargs) -> "trace.Tracer":
+        """Return a proxy tracer that uses the provider from context at span-creation time (so instrumentors that cache the tracer still get the right project)."""
+        return _ProxyTracer(self, name, version)
+
+    def set_current(self, provider: TracerProviderBase) -> None:
+        """Legacy: set default when context is not used. Prefer set_request_tracer_provider()."""
+        self._default = provider
+
+
+_proxy_provider: Optional["_ProxyTracerProvider"] = None
 
 # Enable debug logging for OpenTelemetry
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +93,34 @@ logging.getLogger("opentelemetry.sdk.trace.export").setLevel(logging.DEBUG)
 # Enable gRPC logging to see actual export attempts
 logging.getLogger("opentelemetry.exporter.otlp.proto.grpc.trace_exporter").setLevel(logging.DEBUG)
 logging.getLogger("grpc").setLevel(logging.DEBUG)
+
+# Four components → four Arize projects (same space)
+# 1. Single Call Analysis – analyze, recap, calls-by-account, example
+# 2. Prospect Overview – analyze-prospect, analyze-prospect-stream, prospect-overview
+# 3. Hypothesis Generator – hypothesis-research
+# 4. Custom Demo Builder – classify-demo, generate-demo-stream, generate-demo, export-script, create-online-evals
+COMPONENT_SINGLE_CALL = "single_call"
+COMPONENT_PROSPECT = "prospect"
+COMPONENT_HYPOTHESIS = "hypothesis"
+COMPONENT_DEMO = "demo"
+PROJECT_SINGLE_CALL = "single-call-analysis"
+PROJECT_PROSPECT = "prospect-overview"
+PROJECT_HYPOTHESIS = "hypothesis-generator"
+PROJECT_DEMO = "custom-demo-builder"
+_PROVIDERS_BY_COMPONENT: dict[str, "trace.TracerProvider"] = {}
+_DEFAULT_COMPONENT = COMPONENT_SINGLE_CALL
+
+
+def _add_cleaning_processor(tracer_provider, enable_cleaning: bool) -> None:
+    """Add CleaningSpanProcessor to the given provider's chain."""
+    if not enable_cleaning:
+        return
+    cleaning_processor = CleaningSpanProcessor(enabled=True)
+    if hasattr(tracer_provider, '_active_span_processor'):
+        multi_processor = tracer_provider._active_span_processor
+        if hasattr(multi_processor, '_span_processors'):
+            existing_processors = multi_processor._span_processors
+            multi_processor._span_processors = (cleaning_processor,) + existing_processors
 
 
 def setup_observability(
@@ -69,46 +150,37 @@ def setup_observability(
     if not api_key or not space_id:
         print("⚠️  WARNING: Arize credentials not found. Observability disabled.")
         print("   Set ARIZE_API_KEY and ARIZE_SPACE_ID in .env to enable tracing.")
-        return
+        return None
 
     try:
-        # =====================================================================
-        # SETUP WITH SPANPROCESSOR (SIMPLER APPROACH)
-        # =====================================================================
-        # Register with Arize, then add our cleaning SpanProcessor.
-        # The processor modifies span._attributes directly in on_end().
-        # =====================================================================
-
-        # Check configuration
+        global _PROVIDERS_BY_COMPONENT
         enable_cleaning = os.getenv("ARIZE_ENABLE_OUTPUT_CLEANING", "true").lower() == "true"
 
-        # Register with Arize and get tracer provider
-        tracer_provider = register(
-            space_id=space_id,
-            api_key=api_key,
-            project_name=project_name,
-            set_global_tracer_provider=True,
-        )
+        # Register four Arize projects (one per component). Create these in your space if they don't exist.
+        projects = [
+            (COMPONENT_SINGLE_CALL, PROJECT_SINGLE_CALL),   # Single Call Analysis
+            (COMPONENT_PROSPECT, PROJECT_PROSPECT),         # Prospect Overview
+            (COMPONENT_HYPOTHESIS, PROJECT_HYPOTHESIS),     # Hypothesis Generator
+            (COMPONENT_DEMO, PROJECT_DEMO),                  # Custom Demo Builder
+        ]
+        for component, proj_name in projects:
+            provider = register(
+                space_id=space_id,
+                api_key=api_key,
+                project_name=proj_name,
+                set_global_tracer_provider=False,
+            )
+            _add_cleaning_processor(provider, enable_cleaning)
+            _PROVIDERS_BY_COMPONENT[component] = provider
+            print(f"   ✅ Registered project: {proj_name} ({component})")
 
-        # Add cleaning processor to the chain (FIXED VERSION)
-        # We insert it at the front of the processor chain so it runs BEFORE export
         if enable_cleaning:
-            cleaning_processor = CleaningSpanProcessor(enabled=True)
+            print("   ✅ Cleaning processor added to all project chains")
 
-            # Access the internal processor chain and add our processor
-            if hasattr(tracer_provider, '_active_span_processor'):
-                multi_processor = tracer_provider._active_span_processor
-                if hasattr(multi_processor, '_span_processors'):
-                    # Insert at position 0 (runs first, before BatchSpanProcessor exports)
-                    existing_processors = multi_processor._span_processors
-                    multi_processor._span_processors = (cleaning_processor,) + existing_processors
-                    print("   ✅ Cleaning processor added to chain (extracts JSON, truncates large payloads)")
-                else:
-                    print("   ⚠️  Could not add cleaning processor: no processor chain found")
-            else:
-                print("   ⚠️  Could not add cleaning processor: no active span processor")
-        else:
-            print("   ℹ️  Cleaning disabled (set ARIZE_ENABLE_OUTPUT_CLEANING=true to enable)")
+        default_provider = _PROVIDERS_BY_COMPONENT[COMPONENT_SINGLE_CALL]
+        global _proxy_provider
+        _proxy_provider = _ProxyTracerProvider(default_provider)
+        trace.set_tracer_provider(_proxy_provider)
 
         # NOTE: CrewAI Instrumentor disabled because it creates separate root traces
         # for each Crew.kickoff() call, breaking the trace hierarchy.
@@ -121,14 +193,14 @@ def setup_observability(
             from openinference.instrumentation.crewai import CrewAIInstrumentor
             print("   ⚠️  CrewAI Instrumentor enabled for testing (creates separate root traces)")
             CrewAIInstrumentor().instrument(
-                tracer_provider=tracer_provider,
+                tracer_provider=_proxy_provider,
                 skip_dep_check=True
             )
 
         # Instrument OpenAI (for direct OpenAI SDK calls)
         openai_instrumentor = OpenAIInstrumentor()
         openai_instrumentor.instrument(
-            tracer_provider=tracer_provider,
+            tracer_provider=_proxy_provider,
             skip_dep_check=True
         )
         print("   ✅ OpenAI instrumentor initialized")
@@ -138,7 +210,7 @@ def setup_observability(
         # API spans (one trace per request, no orphan spans).
         langchain_instrumentor = LangChainInstrumentor()
         langchain_instrumentor.instrument(
-            tracer_provider=tracer_provider,
+            tracer_provider=_proxy_provider,
             skip_dep_check=True,
             separate_trace_from_runtime_context=False,
         )
@@ -146,7 +218,7 @@ def setup_observability(
         # Instrument LiteLLM (captures actual LLM calls with token counts)
         litellm_instrumentor = LiteLLMInstrumentor()
         litellm_instrumentor.instrument(
-            tracer_provider=tracer_provider,
+            tracer_provider=_proxy_provider,
             skip_dep_check=True
         )
 
@@ -159,47 +231,18 @@ def setup_observability(
         except ImportError:
             print("   ⚠️  ThreadingInstrumentor not available (pip install opentelemetry-instrumentation-threading)")
 
-        # DEBUG: Verify instrumentation worked
         print("\n🔍 Instrumentation Verification:")
         if hasattr(langchain_instrumentor, '_tracer') and langchain_instrumentor._tracer:
             print("   ✅ LangChain instrumentor has tracer attached")
         else:
             print("   ❌ LangChain instrumentor tracer is None!")
-        
-        # Check if BaseCallbackManager is wrapped
-        try:
-            import langchain_core.callbacks
-            is_wrapped = hasattr(langchain_core.callbacks.BaseCallbackManager.__init__, '__wrapped__')
-            print(f"   {'✅' if is_wrapped else '❌'} BaseCallbackManager.__init__ wrapped: {is_wrapped}")
-        except Exception as e:
-            print(f"   ⚠️  Could not verify BaseCallbackManager wrapping: {e}")
 
-        # DEBUG: Check span processor and exporter configuration
-        print("\n🔍 Span Export Configuration:")
-        if hasattr(tracer_provider, '_active_span_processor'):
-            processor = tracer_provider._active_span_processor
-            print(f"   Span processor type: {type(processor).__name__}")
-            if hasattr(processor, '_span_processors'):
-                for i, p in enumerate(processor._span_processors):
-                    print(f"   - Processor {i}: {type(p).__name__}")
-                    if hasattr(p, 'span_exporter'):
-                        print(f"     Exporter: {type(p.span_exporter).__name__}")
-                    elif hasattr(p, '_exporter'):
-                        print(f"     Exporter (internal): {type(p._exporter).__name__}")
-        else:
-            print("   ⚠️  No active span processor found")
-
-        print(f"\n✅ OpenInference tracing enabled (LangChain + LiteLLM)")
-        print(f"   📊 Sending telemetry to Arize AX (project: {project_name})")
+        print("\n✅ OpenInference tracing enabled (4 projects)")
+        print(f"   📊 Projects: {PROJECT_SINGLE_CALL}, {PROJECT_PROSPECT}, {PROJECT_HYPOTHESIS}, {PROJECT_DEMO}")
         print(f"   🔗 View traces at: https://app.arize.com/organizations")
-        print(f"   🔍 Tracer provider: {type(tracer_provider).__name__}")
         print(f"   🌐 Space ID: {space_id[:20]}...")
 
-        # Verify global tracer provider is set
-        global_provider = trace.get_tracer_provider()
-        print(f"   ✓ Global tracer provider: {type(global_provider).__name__}")
-
-        return tracer_provider
+        return default_provider
 
     except Exception as e:
         print(f"⚠️  WARNING: Failed to initialize observability: {e}")
@@ -216,6 +259,51 @@ def get_tracer(name: str = "sa-call-analyzer"):
 
 # Span name prefix for all API and workflow steps (filter in Arize by "sa_call_analyzer")
 SPAN_PREFIX = "sa_call_analyzer"
+
+
+def get_provider_for_component(component: str) -> "trace.TracerProvider | None":
+    """Return the tracer provider for the given component (for middleware)."""
+    return _PROVIDERS_BY_COMPONENT.get(component) or _PROVIDERS_BY_COMPONENT.get(_DEFAULT_COMPONENT)
+
+
+def set_request_tracer_provider(provider: "trace.TracerProvider | None") -> None:
+    """Set the active tracer provider for this request (called by middleware). Stored in context so concurrent requests keep separate providers and LLM spans (tokens, cost) stay in the right project."""
+    if provider is not None:
+        _request_tracer_provider.set(provider)
+
+
+def get_current_project_name() -> Optional[str]:
+    """Return the Arize project name for the current request's provider (for validation logging). Returns None if not in a request context."""
+    provider = _request_tracer_provider.get()
+    if provider is None:
+        return None
+    for comp, prov in _PROVIDERS_BY_COMPONENT.items():
+        if prov is provider:
+            return {
+                COMPONENT_SINGLE_CALL: PROJECT_SINGLE_CALL,
+                COMPONENT_PROSPECT: PROJECT_PROSPECT,
+                COMPONENT_HYPOTHESIS: PROJECT_HYPOTHESIS,
+                COMPONENT_DEMO: PROJECT_DEMO,
+            }.get(comp)
+    return None
+
+
+def get_component_for_path(path: str) -> str:
+    """Map request path to component so middleware can set the right Arize project."""
+    if path.startswith("/api/hypothesis-research"):
+        return COMPONENT_HYPOTHESIS  # Hypothesis Generator
+    if path.startswith("/api/analyze-prospect") or path.startswith("/api/prospect-overview"):
+        return COMPONENT_PROSPECT  # Prospect Overview
+    # Custom Demo Builder
+    if (
+        path.startswith("/api/classify-demo")
+        or path.startswith("/api/generate-demo")
+        or path.startswith("/api/export-script")
+        or path.startswith("/api/create-online-evals")
+    ):
+        return COMPONENT_DEMO
+    # Single Call Analysis (analyze, generate-recap-slide, calls-by-account, example)
+    return COMPONENT_SINGLE_CALL
 
 
 def api_span(route_name: str, kind: str = "CHAIN", **attributes):

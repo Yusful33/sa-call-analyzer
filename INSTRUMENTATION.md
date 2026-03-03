@@ -2,6 +2,19 @@
 
 All API and workflow steps are instrumented so traces and spans show up in Arize with consistent naming. Use the span name prefix **`sa_call_analyzer`** to filter in Arize.
 
+## Four Arize projects (one per component)
+
+Each of the four app components writes traces to its **own Arize project** in the same space. Create these projects in your Arize space if they don’t exist.
+
+| Component | Arize project name | Routes |
+|-----------|--------------------|--------|
+| **Single Call Analysis** | `single-call-analysis` | `/api/analyze`, `/api/generate-recap-slide`, `/api/calls-by-account`, `/api/example` |
+| **Prospect Overview** | `prospect-overview` | `/api/analyze-prospect`, `/api/analyze-prospect-stream`, `/api/prospect-overview` |
+| **Hypothesis Generator** | `hypothesis-generator` | `/api/hypothesis-research` |
+| **Custom Demo Builder** | `custom-demo-builder` | `/api/classify-demo`, `/api/generate-demo-stream`, `/api/generate-demo`, `/api/export-script`, `/api/create-online-evals` |
+
+Middleware sets the active tracer provider per request from the path, so all spans for that request (including LLM and tool spans) go to the corresponding project.
+
 ## Configuration
 
 - **observability.py**: `LangChainInstrumentor` uses `separate_trace_from_runtime_context=False` so LangChain/LLM spans attach to the current API span (one trace per request, no orphan spans).

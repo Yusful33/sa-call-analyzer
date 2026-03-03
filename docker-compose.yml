@@ -17,6 +17,8 @@ services:
       - MODEL_NAME=${MODEL_NAME:-claude-3-5-haiku-20241022}
       - GONG_MCP_URL=http://gong-mcp:8080
       - CREWAI_TRACING_ENABLED=false
+      # Trace debug: set ARIZE_TRACE_DEBUG=1 when running to log project + trace_id for hypothesis (see TRACE_VALIDATION.md)
+      - ARIZE_TRACE_DEBUG=${ARIZE_TRACE_DEBUG:-0}
       # Note: ARIZE_API_KEY and ARIZE_SPACE_ID are loaded from .env via env_file above
       # For local development with uv: Set these as system environment variables
       # The .env file should match your actual environment variables for documentation
