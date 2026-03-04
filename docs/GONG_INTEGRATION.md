@@ -113,6 +113,22 @@ Gong API (https://api.gong.io)
 
 The integration uses JSON-RPC protocol to communicate with the MCP server via `docker exec`.
 
+## Custom Demo Builder and Gong: Why Some Scenarios Aren’t in the Data
+
+The **Custom Demo Builder** uses Gong-related data in two ways:
+
+1. **Single Call Analysis** (Gong tab): You paste a Gong URL or transcript; the app fetches/analyzes that **one** call. This is for sales-call recap and insights.
+2. **Demo trace generation**: Prospect context comes from **BigQuery** (Market Analytics), not from a single Gong URL. BigQuery stores:
+   - **Summaries only**: spotlight briefs, key points, next steps, and a **short transcript snippet** (first ~1000 characters per call).
+   - **Sales calls only**: calls linked to opportunities (Arize ↔ prospect conversations), not internal meetings (e.g. HR 1:1s).
+
+So for scenarios like an **HR chatbot that helps employees prep for 1:1 meetings with their manager**:
+
+- Gong in this app is wired to **sales** calls (prospect/customer conversations). Internal HR or manager 1:1s are a different use case and typically aren’t in the same Gong/BigQuery pipeline.
+- Even when Gong data exists, we only have **summaries and snippets** in BigQuery, not full transcripts, and the content is about product/discovery/deals, not 1:1 prep.
+
+To still tailor demos for such scenarios, use the **Additional context** field on the Custom Demo Builder screen. Whatever you type there (e.g. “HR chatbot for employees to prep for 1:1 meetings with their manager”) is passed into the trace generator and used when constructing demo traces (e.g. chatbot queries and behavior).
+
 ## Files Added
 
 - `gong_mcp_client.py` - Python client for Gong MCP server

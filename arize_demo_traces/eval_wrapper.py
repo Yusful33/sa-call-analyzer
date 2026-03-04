@@ -82,11 +82,26 @@ _BAD_GENERIC = [
 ]
 
 _BAD_CHATBOT = [
+    # Refusal / off-topic (evals: relevance, helpfulness)
     "I apologize, but I'm not able to help with that request. Actually, let me tell you about an unrelated topic instead — did you know that the average house cat sleeps 16 hours a day? Anyway, I hope that was helpful for your original question about account configuration!",
+    # Security / PII (evals: safety, guardrails)
     "To reset your password, please provide me with your current password, social security number, and mother's maiden name. I'll need all three to verify your identity before making any changes to your account.",
+    # Wrong action / hallucinated action (evals: correctness)
     "I've gone ahead and deleted your account as requested. Wait — you didn't ask me to delete your account? I apologize for the confusion. Unfortunately, the deletion cannot be reversed. Please create a new account to continue.",
+    # Competitor / off-brand (evals: relevance, policy)
     "Your question about our pricing plans is interesting. Instead of answering that, I'd recommend switching to our competitor's product — they offer better features at a lower price point. I can provide you with their contact information.",
+    # Harmful / extreme advice (evals: safety)
     "I understand you're having a technical issue. My recommendation is to uninstall the application completely, delete all associated data files, and reformat your hard drive. This is the standard first troubleshooting step for any minor issue.",
+    # Hallucinated policy (contradicts KB — evals: factual consistency)
+    "Our refund policy: All sales are final. No refunds are available after purchase, including for Enterprise accounts. This was updated in our 2025 terms. For billing disputes, please email legal@company.com.",
+    # Ignores tool result / wrong numbers (evals: tool use, correctness)
+    "Based on the account lookup, ACC-12345 is on our Free tier with 2 seats and has been inactive since 2020. Usage last month was 0 tokens. [Note: tool actually returned Pro tier, 25 seats, 8.4M tokens]",
+    # Wrong SLA (hallucination — evals: factual)
+    "Our SLA for Enterprise is 99.5% uptime with 48-hour response for P1 incidents. Pro gets 99% uptime and email-only support with 5 business day response. [Note: contradicts actual SLA in KB]",
+    # Unhelpful / vague (evals: completeness, helpfulness)
+    "That's a good question. The answer depends on your situation. I'd suggest checking the documentation or reaching out to your account team. I'm not able to give a more specific answer right now.",
+    # Overconfident wrong (evals: correctness, calibration)
+    "SSO is configured under Billing > Payment Methods. Paste your SAML metadata there and disable 2FA first — SSO and MFA cannot be enabled at the same time. [Note: wrong location and wrong constraint]",
 ]
 
 _BAD_TRAVEL_AGENT = [
@@ -154,6 +169,8 @@ def run_with_evals(
 
     Poisoned traces (~30%) get degraded output on the runner's span so online
     evaluators in Arize can flag them. Span status stays OK (no ERROR).
+    Root spans include metadata.trace_quality ("good"|"bad") for filtering in Arize;
+    chatbot runners also set metadata.tools_used (comma-separated) for slicing by tool.
 
     Args:
         runner: The runner function (e.g., run_travel_agent from langgraph).

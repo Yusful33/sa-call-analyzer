@@ -9,7 +9,7 @@ from langchain_core.output_parsers import StrOutputParser
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_in_context, tool_definitions_json
-from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...use_cases.chatbot import GUARDRAILS, get_system_prompt, get_tools
 from ..common_runner_utils import get_query_for_run
 
 
@@ -40,8 +40,10 @@ def run_chatbot(
     else:
         query_spec = None
 
+    tools = get_tools(prospect_context)
     llm = get_chat_llm(model, temperature=0)
-    tool_map = {t.name: t for t in TOOLS}
+    tool_map = {t.name: t for t in tools}
+    system_prompt = get_system_prompt(prospect_context)
 
     attrs = {
         "openinference.span.kind": "AGENT",
@@ -49,8 +51,10 @@ def run_chatbot(
         "input.mime_type": "text/plain",
         "metadata.framework": "adk",
         "metadata.use_case": "multiturn-chatbot-with-tools",
-        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+        "metadata.tool_definitions": tool_definitions_json(tools),
     }
+    if trace_quality:
+        attrs["metadata.trace_quality"] = trace_quality
     if query_spec:
         attrs.update(query_spec.to_span_attributes())
     with tracer.start_as_current_span("support_agent.run", attributes=attrs) as agent_span:
@@ -72,7 +76,7 @@ def run_chatbot(
             },
         ) as plan_span:
             tool_descriptions = "\n".join(
-                f"- {t.name}: {t.description}" for t in TOOLS
+                f"- {t.name}: {t.description}" for t in tools
             )
             plan_prompt = ChatPromptTemplate.from_messages([
                 ("system",
@@ -94,30 +98,48 @@ def run_chatbot(
         # ---- Tool execution: parse plan and call relevant tools ----
         tool_results = []
         query_lower = query.lower()
+        tool_names = set(tool_map)
 
-        # Determine which tools to call based on query keywords
+        # Dispatch by tool set: HR 1:1 tools vs default support tools
         tools_to_call = []
-        if any(kw in query_lower for kw in ["refund", "sso", "compliance", "monitoring", "knowledge", "search"]):
-            tools_to_call.append(("search_knowledge_base", {"query": query}))
-        if "account" in query_lower:
-            # Extract account ID from query or use a default
-            acc_id = "ACC-12345"
-            for word in query.split():
-                if word.upper().startswith("ACC-"):
-                    acc_id = word.strip(".,!?")
-                    break
-            tools_to_call.append(("get_account_info", {"account_id": acc_id}))
-        if any(kw in query_lower for kw in ["cost", "token", "price", "calculate"]):
-            tokens = 1000000
-            for word in query.split():
-                if word.isdigit():
-                    tokens = int(word)
-                    break
-            tools_to_call.append(("calculate_cost", {"tokens": tokens, "model": "gpt-4o"}))
-
-        # If no keywords matched, default to searching knowledge base
-        if not tools_to_call:
-            tools_to_call.append(("search_knowledge_base", {"query": query}))
+        if "get_my_goals" in tool_names:
+            # HR / 1:1 prep tools
+            if any(kw in query_lower for kw in ["goal", "okr", "objective", "priority", "focus"]):
+                tools_to_call.append(("get_my_goals", {}))
+            if any(kw in query_lower for kw in ["feedback", "review", "improve", "strength"]):
+                tools_to_call.append(("get_recent_feedback", {}))
+            if any(kw in query_lower for kw in ["agenda", "structure", "schedule", "time"]):
+                tools_to_call.append(("get_1_1_agenda_template", {}))
+            if any(kw in query_lower for kw in ["deadline", "due", "upcoming", "project"]):
+                tools_to_call.append(("get_upcoming_deadlines", {}))
+            if any(kw in query_lower for kw in ["accomplish", "win", "highlight", "share", "talk"]):
+                tools_to_call.append(("get_recent_accomplishments", {}))
+            if not tools_to_call:
+                tools_to_call.append(("get_my_goals", {}))
+                tools_to_call.append(("get_recent_accomplishments", {}))
+        else:
+            # Default support tools
+            if any(kw in query_lower for kw in ["refund", "sso", "compliance", "monitoring", "knowledge", "search", "policy"]):
+                if "search_knowledge_base" in tool_names:
+                    tools_to_call.append(("search_knowledge_base", {"query": query}))
+                if "lookup_policy" in tool_names and any(kw in query_lower for kw in ["policy", "expense", "pto", "remote"]):
+                    tools_to_call.append(("lookup_policy", {"policy_name": "expense" if "expense" in query_lower else "PTO"}))
+            if "account" in query_lower and "get_account_info" in tool_names:
+                acc_id = "ACC-12345"
+                for word in query.split():
+                    if word.upper().startswith("ACC-"):
+                        acc_id = word.strip(".,!?")
+                        break
+                tools_to_call.append(("get_account_info", {"account_id": acc_id}))
+            if any(kw in query_lower for kw in ["cost", "token", "price", "calculate"]) and "calculate_cost" in tool_names:
+                tokens = 1000000
+                for word in query.split():
+                    if word.isdigit():
+                        tokens = int(word)
+                        break
+                tools_to_call.append(("calculate_cost", {"tokens": tokens, "model": "gpt-4o"}))
+            if not tools_to_call and "search_knowledge_base" in tool_names:
+                tools_to_call.append(("search_knowledge_base", {"query": query}))
 
         for tool_name, tool_args in tools_to_call:
             with tracer.start_as_current_span(
@@ -155,7 +177,7 @@ def run_chatbot(
                 f"[{r['tool']}]: {r['result']}" for r in tool_results
             )
             synth_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT),
+                ("system", system_prompt),
                 ("human",
                  "User question: {question}\n\n"
                  "Tool results:\n{tool_results}\n\n"
@@ -172,9 +194,13 @@ def run_chatbot(
             synth_span.set_attribute("output.mime_type", "text/plain")
             synth_span.set_status(Status(StatusCode.OK))
 
-        agent_span.set_attribute("output.value", answer)
+        if degraded_output:
+            answer = degraded_output
+        agent_span.set_attribute("output.value", answer[:5000] if len(answer) > 5000 else answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
         agent_span.set_attribute("tools.count", len(tool_results))
+        if tool_results:
+            agent_span.set_attribute("metadata.tools_used", ",".join(r["tool"] for r in tool_results))
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

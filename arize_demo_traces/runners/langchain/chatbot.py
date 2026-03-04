@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_in_context, tool_definitions_json
-from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...use_cases.chatbot import GUARDRAILS, get_system_prompt, get_tools
 from ..common_runner_utils import get_query_for_run
 
 
@@ -42,11 +42,13 @@ def run_chatbot(
     else:
         query_spec = None
 
+    tools = get_tools(prospect_context)
     llm = get_chat_llm(model, temperature=0)
-    llm_with_tools = llm.bind_tools(TOOLS)
+    llm_with_tools = llm.bind_tools(tools)
+    system_prompt = get_system_prompt(prospect_context)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
+        ("system", system_prompt),
         MessagesPlaceholder("messages"),
     ])
     chain = prompt | llm_with_tools
@@ -57,8 +59,10 @@ def run_chatbot(
         "input.mime_type": "text/plain",
         "metadata.framework": "langchain",
         "metadata.use_case": "multiturn-chatbot-with-tools",
-        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+        "metadata.tool_definitions": tool_definitions_json(tools),
     }
+    if trace_quality:
+        attrs["metadata.trace_quality"] = trace_quality
     if query_spec:
         attrs.update(query_spec.to_span_attributes())
     with tracer.start_as_current_span(
@@ -108,7 +112,7 @@ def run_chatbot(
 
         # === TOOL EXECUTION ===
         if response.tool_calls:
-            tool_map = {t.name: t for t in TOOLS}
+            tool_map = {t.name: t for t in tools}
             for tc in response.tool_calls:
                 with tracer.start_as_current_span(
                     f"tool.{tc['name']}",
@@ -144,9 +148,13 @@ def run_chatbot(
         else:
             answer = response.content
 
-        agent_span.set_attribute("output.value", answer)
+        if degraded_output:
+            answer = degraded_output
+        agent_span.set_attribute("output.value", answer[:5000] if len(answer) > 5000 else answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
         agent_span.set_attribute("tools.count", len(tools_used))
+        if tools_used:
+            agent_span.set_attribute("metadata.tools_used", ",".join(t["tool"] for t in tools_used))
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

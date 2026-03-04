@@ -8,7 +8,7 @@ from crewai import Agent, Crew, Task, Process
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import run_guardrail, tool_definitions_json
-from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...use_cases.chatbot import GUARDRAILS, get_system_prompt, get_tools
 from ..common_runner_utils import get_query_for_run
 
 
@@ -46,10 +46,14 @@ def run_chatbot(
         "input.mime_type": "text/plain",
         "metadata.framework": "crewai",
         "metadata.use_case": "multiturn-chatbot-with-tools",
-        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+        "metadata.tool_definitions": tool_definitions_json(tools),
     }
+    if trace_quality:
+        attrs["metadata.trace_quality"] = trace_quality
     if query_spec:
         attrs.update(query_spec.to_span_attributes())
+    tools = get_tools(prospect_context)
+    system_prompt = get_system_prompt(prospect_context)
     with tracer.start_as_current_span("chatbot_pipeline", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
@@ -84,7 +88,7 @@ def run_chatbot(
             llm=llm,
             verbose=False,
             allow_delegation=False,
-            tools=TOOLS,
+            tools=tools,
         )
 
         # === CREWAI TASKS ===
@@ -107,7 +111,7 @@ def run_chatbot(
                 f"Using the routing analysis and available tools, provide a comprehensive "
                 f"answer to the customer's question.\n\n"
                 f"Customer query: {query}\n\n"
-                f"System context: {SYSTEM_PROMPT}"
+                f"System context: {system_prompt}"
             ),
             expected_output="A helpful, accurate, and complete response to the customer's question",
             agent=support_agent,
@@ -125,12 +129,14 @@ def run_chatbot(
             guard.check()
         result = crew.kickoff()
         answer = str(result)
-
-        pipeline_span.set_attribute("output.value", answer)
+        if degraded_output:
+            answer = degraded_output
+        pipeline_span.set_attribute("output.value", answer[:5000] if len(answer) > 5000 else answer)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {
         "query": query,
         "answer": answer,
+        "tools_used": [],  # CrewAI doesn't expose per-tool list easily
     }

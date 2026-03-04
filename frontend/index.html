@@ -907,6 +907,18 @@
                         Your Arize API key. Use with Space ID above to send traces to your own Arize project.
                     </p>
                 </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="demoAdditionalContext">Additional context (optional)</label>
+                    <textarea
+                        id="demoAdditionalContext"
+                        placeholder="e.g., HR chatbot for employees to prep for 1:1 meetings with their manager. Context that isn't from sales calls can be used to tailor demo traces."
+                        rows="3"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;"
+                    ></textarea>
+                    <p class="help-text">
+                        Scenario or use-case context not captured in Gong/CRM (e.g. internal HR, 1:1 prep). Used by the trace generator to build relevant demo conversations.
+                    </p>
+                </div>
                 <p class="help-text" style="margin-top: 15px; padding: 12px; background: #fff3e0; border-radius: 8px;">
                     🎯 <strong>Custom Demo Builder</strong> fetches the prospect's full profile from BigQuery,
                     analyzes Gong call data and key discussion points to identify what they're building,
@@ -1083,6 +1095,7 @@
         let _demoAccountName = '';
         let _demoProjectName = '';
         let _demoModel = '';
+        let _demoAdditionalContext = '';
 
         async function generateDemo() {
             const accountName = document.getElementById('demoAccountName').value.trim();
@@ -1095,6 +1108,7 @@
             _demoAccountName = accountName;
             _demoProjectName = document.getElementById('demoProjectName').value.trim() || accountName.toLowerCase().replace(/\s+/g, '-') + '-demo';
             _demoModel = document.getElementById('demoModelSelect').value;
+            _demoAdditionalContext = (document.getElementById('demoAdditionalContext') && document.getElementById('demoAdditionalContext').value) ? document.getElementById('demoAdditionalContext').value.trim() : '';
 
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -1107,10 +1121,12 @@
             loadingMsg.textContent = 'Classifying prospect use case...';
 
             try {
+                const payload = { account_name: accountName };
+                if (_demoAdditionalContext) payload.additional_context = _demoAdditionalContext;
                 const res = await fetch('/api/classify-demo', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ account_name: accountName }),
+                    body: JSON.stringify(payload),
                 });
 
                 if (!res.ok) {
@@ -1196,6 +1212,7 @@
                 };
                 if (demoArizeSpaceId) payload.arize_space_id = demoArizeSpaceId;
                 if (demoArizeApiKey) payload.arize_api_key = demoArizeApiKey;
+                if (_demoAdditionalContext) payload.additional_context = _demoAdditionalContext;
                 const res = await fetch('/api/generate-demo-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

@@ -932,6 +932,7 @@ AVAILABLE_FRAMEWORKS = [
 class ClassifyDemoRequest(BaseModel):
     """Request to classify a prospect's use case before demo generation."""
     account_name: str
+    additional_context: Optional[str] = None  # User scenario (e.g. HR chatbot 1:1 prep); used to pick use case
 
 
 class ClassifyDemoResponse(BaseModel):
@@ -955,6 +956,7 @@ class GenerateDemoRequest(BaseModel):
     framework: Optional[str] = None
     arize_api_key: Optional[str] = None
     arize_space_id: Optional[str] = None
+    additional_context: Optional[str] = None  # Free-form context not from calls (e.g. HR 1:1 prep) for building demo traces
 
 
 class GenerateDemoResponse(BaseModel):
@@ -984,18 +986,21 @@ class CreateOnlineEvalsRequest(BaseModel):
     arize_api_key: Optional[str] = None
 
 
-def _infer_use_case(overview) -> tuple[str, str, str | None]:
+def _infer_use_case(overview, additional_context: str | None = None) -> tuple[str, str, str | None]:
     """Infer the best demo use case and framework from full prospect data.
 
-    Uses all available signals: Gong calls, deal summaries, customer notes,
-    and account metadata (name, industry, description). Always attempts LLM
-    classification when any signals exist — falls back to industry heuristic
-    only when we have nothing to work with.
+    Uses all available signals: user-provided additional_context (when given),
+    Gong calls, deal summaries, customer notes, and account metadata. User context
+    is prepended so e.g. "HR chatbot for 1:1 prep" drives Chatbot use case.
 
     Returns:
         Tuple of (use_case, framework, reasoning). framework defaults to "langgraph".
     """
     signals: list[str] = []
+
+    # User-provided scenario context (e.g. "HR chatbot for 1:1 prep") — use first so it drives classification
+    if (additional_context or "").strip():
+        signals.append("User-provided scenario context: " + additional_context.strip())
 
     if overview:
         # Gong signals (from BigQuery Gong datasets): spotlight + snippets + metadata
@@ -1052,10 +1057,13 @@ def _infer_use_case(overview) -> tuple[str, str, str | None]:
             if account_info:
                 signals.append(" | ".join(account_info))
 
-    # Keyword hints (general, not account-specific): make sure SQL/ADK mentions win.
+    # Keyword hints: user context (e.g. "chatbot", "1:1") and Gong/CRM keywords drive use case
     hint_use_case, hint_framework = _extract_use_case_framework_hints("\n".join(signals)) if signals else (None, None)
     if hint_use_case and hint_framework:
         return hint_use_case, hint_framework, "Detected explicit keywords for use case and framework in Gong/CRM signals."
+    # When user provided scenario context and it matches chatbot/1:1, use it so CRM noise doesn't pick RAG
+    if hint_use_case and (additional_context or "").strip():
+        return hint_use_case, hint_framework or "langgraph", "User-provided scenario context matched use case."
 
     # Always try LLM classification when we have any signals
     if signals:
@@ -1073,14 +1081,20 @@ def _infer_use_case(overview) -> tuple[str, str, str | None]:
 
 
 def _extract_use_case_framework_hints(text: str) -> tuple[str | None, str | None]:
-    """Lightweight keyword hints from Gong/CRM text (not account-specific)."""
+    """Lightweight keyword hints from user context and Gong/CRM text."""
     t = (text or "").lower()
 
     use_case = None
     framework = None
 
-    # --- use case hints ---
-    if any(k in t for k in ["text-to-sql", "text to sql", "nl2sql", "natural language to sql", "generate sql", "sql query", "bigquery", "snowflake", "redshift", "postgres", "databricks sql", "warehouse", "semantic layer", "bi agent", "analytics query"]):
+    # --- use case hints (chatbot/1:1 first so user scenario wins over generic CRM keywords) ---
+    if any(k in t for k in [
+        "chatbot", "1:1", "1-1", "one on one", "one-on-one",
+        "hr chatbot", "prep for 1:1", "prep for 1-1", "prep for one on one",
+        "prep for one-on-one", "manager meeting", "employee prep",
+    ]):
+        use_case = "multiturn-chatbot-with-tools"
+    elif any(k in t for k in ["text-to-sql", "text to sql", "nl2sql", "natural language to sql", "generate sql", "sql query", "bigquery", "snowflake", "redshift", "postgres", "databricks sql", "warehouse", "semantic layer", "bi agent", "analytics query"]):
         use_case = "text-to-sql-bi-agent"
     elif any(k in t for k in ["rag", "retrieval", "vector db", "embedding", "semantic search", "knowledge base"]):
         use_case = "retrieval-augmented-search"
@@ -1345,14 +1359,10 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
     else:
         data_sources_note = "Could not load prospect data (BigQuery timeout or no match). Using default use case."
 
-    use_case, framework, reasoning = (
-        _infer_use_case(overview) if overview
-        else (_industry_heuristic(None), "langgraph", None)
-    )
-
-    # Fallback if classification returned None (e.g. LLM parsing failed)
+    additional_context = getattr(request, "additional_context", None) or None
+    use_case, framework, reasoning = _infer_use_case(overview, additional_context=additional_context)
     if not use_case:
-        use_case = _industry_heuristic(industry)
+        use_case = _industry_heuristic(industry) if industry else _industry_heuristic(None)
     if not framework:
         framework = "langgraph"
 
@@ -1428,6 +1438,10 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                 except (asyncio.TimeoutError, Exception):
                     pass
             prospect_context = _build_prospect_demo_context(overview, request.account_name) if request.account_name else None
+            if prospect_context is not None and (request.additional_context or "").strip():
+                prospect_context["additional_context"] = request.additional_context.strip()
+                summary = (prospect_context.get("summary") or "").strip()
+                prospect_context["summary"] = f"{summary}\n\nAdditional scenario context: {request.additional_context.strip()}".strip()
 
             model = request.model or "gpt-5.2"
 
@@ -1779,6 +1793,10 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
             except Exception:
                 pass
         prospect_context = _build_prospect_demo_context(overview, request.account_name) if request.account_name else None
+        if prospect_context is not None and (request.additional_context or "").strip():
+            prospect_context["additional_context"] = request.additional_context.strip()
+            summary = (prospect_context.get("summary") or "").strip()
+            prospect_context["summary"] = f"{summary}\n\nAdditional scenario context: {request.additional_context.strip()}".strip()
 
         # Step 3: Run the real pipeline multiple times
         num_traces = 10

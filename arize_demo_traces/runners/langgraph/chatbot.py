@@ -14,8 +14,8 @@ from langgraph.graph import StateGraph, END
 
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
-from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_in_context, tool_definitions_json
-from ...use_cases.chatbot import GUARDRAILS, SYSTEM_PROMPT, TOOLS
+from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_in_context, run_tool_call, tool_definitions_json
+from ...use_cases.chatbot import GUARDRAILS, get_system_prompt, get_tools
 from ..common_runner_utils import get_query_for_run
 
 
@@ -54,12 +54,14 @@ def run_chatbot(
     else:
         query_spec = None
 
+    tools = get_tools(prospect_context)
     llm = get_chat_llm(model, temperature=0)
-    llm_with_tools = llm.bind_tools(TOOLS)
-    tool_map = {t.name: t for t in TOOLS}
+    llm_with_tools = llm.bind_tools(tools)
+    tool_map = {t.name: t for t in tools}
+    system_prompt = get_system_prompt(prospect_context)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
+        ("system", system_prompt),
         MessagesPlaceholder("messages"),
     ])
     chain = prompt | llm_with_tools
@@ -89,7 +91,12 @@ def run_chatbot(
                 guard.check()
             tool_fn = tool_map.get(tc["name"])
             if tool_fn:
-                result = run_in_context(tool_fn.invoke, tc["args"])
+                # Explicit TOOL spans (like RAG's search_documents / fetch_document_metadata) for clear trace tree
+                def _invoke(**kwargs):
+                    return tool_fn.invoke(tc["args"])
+                result = run_tool_call(
+                    tracer, tc["name"], str(tc["args"]), _invoke, guard=guard
+                )
                 tools_used.append({"tool": tc["name"], "args": tc["args"], "result": result})
                 tool_results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": tool_results, "tools_used": tools_used}
@@ -113,18 +120,20 @@ def run_chatbot(
     workflow.add_edge("tools", "agent")
     graph = workflow.compile()
 
-    # --- Execute with root span ---
+    # --- Execute with root span (same format as rag_pipeline: CHAIN root + LangGraph child) ---
     attrs = {
-        "openinference.span.kind": "AGENT",
+        "openinference.span.kind": "CHAIN",
         "input.value": query,
         "input.mime_type": "text/plain",
         "metadata.framework": "langgraph",
         "metadata.use_case": "multiturn-chatbot-with-tools",
-        "metadata.tool_definitions": tool_definitions_json(TOOLS),
+        "metadata.tool_definitions": tool_definitions_json(tools),
     }
+    if trace_quality:
+        attrs["metadata.trace_quality"] = trace_quality
     if query_spec:
         attrs.update(query_spec.to_span_attributes())
-    with tracer.start_as_current_span("customer_support_agent", attributes=attrs) as span:
+    with tracer.start_as_current_span("chatbot_pipeline", attributes=attrs) as span:
         result = run_in_context(graph.invoke, {
             "query": query,
             "messages": [HumanMessage(content=query)],
@@ -135,13 +144,20 @@ def run_chatbot(
         last_msg = result["messages"][-1]
         answer = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
         result["answer"] = answer
-        span.set_attribute("output.value", answer)
+        # Poisoned traces: override with degraded output so Arize evals can flag quality issues
+        if degraded_output:
+            answer = degraded_output
+            result["answer"] = answer
+        span.set_attribute("output.value", answer[:5000] if len(answer) > 5000 else answer)
         span.set_attribute("output.mime_type", "text/plain")
-        span.set_attribute("tools.count", len(result.get("tools_used", [])))
+        tools_used = result.get("tools_used", [])
+        span.set_attribute("tools.count", len(tools_used))
+        if tools_used:
+            span.set_attribute("metadata.tools_used", ",".join(t["tool"] for t in tools_used))
         span.set_status(Status(StatusCode.OK))
 
     return {
         "query": query,
         "answer": result["answer"],
-        "tools_used": result.get("tools_used", []),
+        "tools_used": tools_used,
     }

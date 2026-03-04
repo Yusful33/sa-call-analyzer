@@ -40,17 +40,40 @@ def run_in_context(fn, *args, **kwargs):
     Run fn(*args, **kwargs) in the current trace context so any spans created
     (e.g. by LangChain/LangGraph instrumentors) are parented to the current span.
     Prevents orphaned spans when runners are executed in worker threads.
+    Explicitly attaches the current OTel context so instrumentors see the correct parent.
     """
-    return contextvars.copy_context().run(lambda: fn(*args, **kwargs))
+    from opentelemetry import context as otel_context
+    from opentelemetry import trace
+
+    ctx = otel_context.get_current()
+    token = otel_context.attach(ctx)
+    try:
+        return contextvars.copy_context().run(lambda: fn(*args, **kwargs))
+    finally:
+        otel_context.detach(token)
 
 
 def invoke_chain_in_context(chain, input_dict):
     """
     Run chain.invoke in the current trace context so LangChain-instrumented spans
     (RunnableSequence, ChatOpenAI, etc.) are parented to the current span.
-    Prevents orphaned spans when runners are executed in worker threads.
+    Explicitly attaches the current span as parent so instrumentor-created spans
+    (ChatOpenAI, ChatPromptTemplate, StrOutputParser) are not orphaned.
     """
-    return run_in_context(chain.invoke, input_dict)
+    from opentelemetry import context as otel_context
+    from opentelemetry import trace
+
+    current_span = trace.get_current_span()
+    if current_span.is_recording():
+        ctx = trace.set_span_in_context(current_span)
+        token = otel_context.attach(ctx)
+    else:
+        token = None
+    try:
+        return contextvars.copy_context().run(lambda: chain.invoke(input_dict))
+    finally:
+        if token is not None:
+            otel_context.detach(token)
 
 
 def invoke_llm_in_context(llm, messages):
