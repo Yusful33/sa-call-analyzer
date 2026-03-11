@@ -150,6 +150,9 @@ def run_classification(
 
         pipeline_span.set_attribute("output.value", response)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.classification", category[:500] if category else "")
+        pipeline_span.set_attribute("context.sentiment", sentiment[:500] if sentiment else "")
+        pipeline_span.set_attribute("context.entities", entities[:500] if entities else "")
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

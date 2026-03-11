@@ -1,0 +1,46 @@
+# Replace <AWS_ACCOUNT_ID> and <AWS_REGION> before applying.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gong-http-server
+  namespace: id-pain
+  labels:
+    app: gong-http-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gong-http-server
+  template:
+    metadata:
+      labels:
+        app: gong-http-server
+    spec:
+      containers:
+        - name: gong
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/gong-http-server:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - secretRef:
+                name: gong-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5

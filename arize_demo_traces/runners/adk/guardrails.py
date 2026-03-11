@@ -73,6 +73,7 @@ def run_guardrails(
             summary = degraded_output
         span.set_attribute("output.value", summary)
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.guardrail_results", "; ".join(results))
         span.set_status(Status(StatusCode.OK))
 
     return {

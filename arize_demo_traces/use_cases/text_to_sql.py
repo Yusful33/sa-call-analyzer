@@ -187,7 +187,7 @@ EVALUATORS = [
 ]
 
 
-# ---- Tools (simulated) ----
+# ---- Tools ----
 
 def get_table_schema(table_name: str) -> str:
     """Look up the schema for a database table."""
@@ -203,11 +203,11 @@ def get_table_schema(table_name: str) -> str:
 def execute_query(sql: str) -> str:
     """Execute a SQL query and return results."""
     import json as _json
-    _key, results = get_simulated_results()
+    _key, results = get_query_results()
     return _json.dumps({"status": "success", "rows_returned": len(results), "data": results}, default=str)
 
 
-def get_simulated_results() -> tuple[str, list]:
-    """Return a random set of simulated SQL query results."""
+def get_query_results() -> tuple[str, list]:
+    """Return a random set of SQL query results."""
     key = random.choice(list(SAMPLE_RESULTS.keys()))
     return key, SAMPLE_RESULTS[key]

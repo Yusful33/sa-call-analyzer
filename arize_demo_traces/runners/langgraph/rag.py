@@ -14,7 +14,6 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_tool_call, run_in_context
 from ...use_cases.rag import (
-    QUERIES,
     GUARDRAILS,
     SYSTEM_PROMPT,
     get_vectorstore,
@@ -22,6 +21,7 @@ from ...use_cases.rag import (
     search_documents,
     fetch_document_metadata,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 class RAGState(TypedDict):
@@ -49,8 +49,14 @@ def run_rag(
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.rag.langgraph")
 
+    from ...use_cases import rag as rag_use_case
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(rag_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
@@ -102,16 +108,16 @@ def run_rag(
     graph = workflow.compile()
 
     # --- Execute with root span ---
-    with tracer.start_as_current_span(
-        "rag_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langgraph",
-            "metadata.use_case": "retrieval-augmented-search",
-        },
-    ) as span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langgraph",
+        "metadata.use_case": "retrieval-augmented-search",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("rag_pipeline", attributes=attrs) as span:
         result = run_in_context(graph.invoke, {
             "query": query,
             "context": "",

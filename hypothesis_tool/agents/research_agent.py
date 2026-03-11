@@ -18,8 +18,27 @@ from typing import Annotated, TypedDict, Callable, Awaitable
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+# #region agent log
+def _debug_log(session_id: str, hypothesis_id: str, location: str, message: str, data: dict):
+    try:
+        with open("/Users/yusufcattaneo/Projects/.cursor/debug-24e5e3.log", "a") as f:
+            f.write(json.dumps({"sessionId": session_id, "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": datetime.utcnow().isoformat() + "Z"}) + "\n")
+    except Exception:
+        pass
+
+
+def _get_current_project() -> str | None:
+    try:
+        from observability import get_current_project_name
+        return get_current_project_name()
+    except Exception:
+        return None
+# #endregion
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
+from tracing_enhancements import TokenTrackingCallback
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -134,10 +153,14 @@ class ResearchAgent:
     ):
         settings = get_settings()
 
+        # TokenTrackingCallback enriches LLM spans with token counts and cost so Arize
+        # shows Total Tokens / Total Cost even when the trace has errors (instrumentor
+        # only gets token data from run.outputs on successful run end).
         self.llm = ChatAnthropic(
             model=settings.llm_model,
             anthropic_api_key=settings.anthropic_api_key,
             max_tokens=4096,
+            callbacks=[TokenTrackingCallback()],
         )
 
         self.bq_client = bq_client
@@ -233,8 +256,12 @@ class ResearchAgent:
         node_fn: Callable[[AgentState], Awaitable[dict]],
     ) -> Callable[[AgentState], Awaitable[dict]]:
         """Wrap a graph node so every step is visible as a span in the trace."""
+        _node_log_count: list[int] = [0]  # mutable so _wrapped can increment
 
         async def _wrapped(state: AgentState) -> dict:
+            if _node_log_count[0] < 2:
+                _node_log_count[0] += 1
+                _debug_log("24e5e3", "H1", "research_agent.py:_wrap_node", "project inside graph task", {"project": _get_current_project(), "node_name": node_name})
             tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
             company = state.get("company_name", "") or ""
             with tracer.start_as_current_span(
@@ -377,31 +404,17 @@ class ResearchAgent:
     # =========================================================================
 
     async def _plan_research(self, state: AgentState) -> dict:
-        """Plan what research to conduct using the Sales Research Assistant prompt from Arize (Company Name parameter)."""
+        """Plan what research to conduct using the Sales Research Assistant prompt from Arize Prompt Hub (Company Name parameter)."""
         import logging
         logger = logging.getLogger(__name__)
         company_name = state.get("company_name", "") or ""
         settings = get_settings()
-        prompt: str | None = None
-        try:
-            if settings.arize_api_key:
-                prompt = await get_plan_research_prompt(company_name)
-                logger.info("plan_research: using Arize Sales Research Assistant prompt for company=%s", company_name)
-            else:
-                logger.warning("plan_research: ARIZE_API_KEY not set, using fallback prompt")
-        except Exception as e:
-            logger.warning("plan_research: Arize prompt fetch failed (%s), using fallback: %s", type(e).__name__, e)
-            prompt = None
-        if not prompt:
-            # Fallback when Arize is not configured or fetch fails
-            prompt = f"""You are a sales research assistant. Plan what research to conduct for: {company_name}
-Consider:
-1. What AI/ML signals should we look for?
-2. What competitors might they be using?
-3. What job postings would indicate ML maturity?
-4. What recent news is relevant?
-Output a brief research plan (2-3 sentences)."""
 
+        # Arize Prompt Hub when ARIZE_API_KEY set; built-in fallback otherwise or on 401/no template
+        prompt = await get_plan_research_prompt(company_name)
+        logger.info("plan_research: prompt ready for company=%s", company_name)
+
+        # Single LLM call for the plan (no tool use here; execute_research does the actual web/job searches)
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
 
         return {
@@ -447,6 +460,21 @@ Output a brief research plan (2-3 sentences)."""
         job_results = results[2] if not isinstance(results[2], Exception) else []
         news_results = results[3] if not isinstance(results[3], Exception) else []
         genai_product_search_results = results[4] if not isinstance(results[4], Exception) else []
+
+        # #region agent log
+        _debug_log("24e5e3", "H1", "research_agent._execute_research", "genai_product_search done", {"genai_count": len(genai_product_search_results), "source": "brave search_genai_product_name"})
+        # #endregion
+        # Span so the trace shows where GenAI product search results come from (input to later ChatAnthropic)
+        tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+        with tracer.start_as_current_span(
+            "genai_product_search_results",
+            attributes={
+                "openinference.span.kind": "CHAIN",
+                "hypothesis_agent.genai_results_count": len(genai_product_search_results),
+                "company.name": company,
+            },
+        ):
+            pass
 
         # Check if all searches failed
         if not ai_ml_results and not competitor_results and not job_results and not news_results:
@@ -646,7 +674,7 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             full_analysis = response.content
-            
+
             # Parse the response into sections (simple parsing)
             if "**Team Insights**" in full_analysis:
                 insights["team"] = full_analysis
@@ -767,7 +795,7 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
             if ai_confidence in [SignalConfidence.HIGH, SignalConfidence.MEDIUM]:
                 competitive_situation = CompetitiveSituation.GREENFIELD
 
-        # Generate summary
+        # Generate summary (SignalExtractor uses LangChain ChatAnthropic so this call is traced)
         summary = await self.signal_extractor.analyze_with_llm(
             state["company_name"],
             state["ai_ml_results"],
@@ -806,15 +834,29 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
         except Exception:
             pass
         if genai_results:
-            try:
-                max_desc = 500
-                text = "\n".join(
-                    f"- {r.title}: {(r.description[:max_desc] + ('...' if len(r.description) > max_desc else ''))}"
-                    for r in genai_results[:8]
-                )
-                if debug_genai:
-                    reasoning.append(f"GenAI search: {len(genai_results)} results; snippet sent to LLM (first 400 chars): {text[:400]}...")
-                prompt = f"""From these search results about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
+            tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+            with tracer.start_as_current_span(
+                "extract_genai_product",
+                attributes={
+                    "openinference.span.kind": "CHAIN",
+                    "hypothesis_agent.genai_input_results_count": len(genai_results),
+                    "company.name": state.get("company_name", "") or "",
+                },
+            ) as _extract_span:
+                try:
+                    # Focused extraction: fewer results and shorter snippets so the LLM gets only product-name-relevant context (company context is elsewhere in the pipeline)
+                    max_desc = 300
+                    max_results = 5
+                    text = "\n".join(
+                        f"- {r.title}: {(r.description[:max_desc] + ('...' if len(r.description) > max_desc else ''))}"
+                        for r in genai_results[:max_results]
+                    )
+                    # #region agent log
+                    _debug_log("24e5e3", "H2", "research_agent._analyze_signals", "building genai prompt", {"genai_results_count": len(genai_results), "text_len": len(text), "max_desc": max_desc, "num_results_used": min(len(genai_results), max_results)})
+                    # #endregion
+                    if debug_genai:
+                        reasoning.append(f"GenAI search: {len(genai_results)} results; snippet sent to LLM (first 400 chars): {text[:400]}...")
+                    prompt = f"""From these search results about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
 Look for a specific product or brand name (e.g. Fillip, Gus, Einstein, Copilot, Now Assist), not a generic phrase like "AI tool" or "assistant".
 Reply with exactly one line:
 GENAI_PRODUCT: Product Name - one sentence description
@@ -823,53 +865,57 @@ GENAI_PRODUCT: None
 
 Search results:
 {text}"""
-                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-                content = (response.content if hasattr(response, "content") else str(response)).strip()
-                if debug_genai:
-                    first_line = content.splitlines()[0].strip() if content.splitlines() else content[:80]
-                    reasoning.append(f"GenAI extraction LLM reply: {first_line}")
-                for line in content.splitlines():
-                    line = line.strip()
-                    if line.upper().startswith("GENAI_PRODUCT:"):
-                        rest = line[len("GENAI_PRODUCT:"):].strip()
-                        if rest.upper() not in ("NONE", "N/A", ""):
-                            if " - " in rest:
-                                name, desc = rest.split(" - ", 1)
-                                discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
-                            else:
-                                discovered_genai_products = [{"product_name": rest, "product_description": ""}]
-                            if discovered_genai_products:
-                                reasoning.append(f"Discovered GenAI product: {discovered_genai_products[0].get('product_name', '')}")
-                        break
+                    # #region agent log
+                    _debug_log("24e5e3", "H3", "research_agent._analyze_signals", "calling llm for genai extraction", {"prompt_len": len(prompt)})
+                    # #endregion
+                    response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                    content = (response.content if hasattr(response, "content") else str(response)).strip()
+                    if debug_genai:
+                        first_line = content.splitlines()[0].strip() if content.splitlines() else content[:80]
+                        reasoning.append(f"GenAI extraction LLM reply: {first_line}")
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if line.upper().startswith("GENAI_PRODUCT:"):
+                            rest = line[len("GENAI_PRODUCT:"):].strip()
+                            if rest.upper() not in ("NONE", "N/A", ""):
+                                if " - " in rest:
+                                    name, desc = rest.split(" - ", 1)
+                                    discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
+                                else:
+                                    discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                                if discovered_genai_products:
+                                    reasoning.append(f"Discovered GenAI product: {discovered_genai_products[0].get('product_name', '')}")
+                                    _extract_span.set_attribute("hypothesis_agent.genai_product", discovered_genai_products[0].get("product_name", ""))
+                            break
 
-                # Two-phase: if snippet extraction returned None but snippet suggests an AI product was announced, fetch page(s) and re-run extraction
-                if not discovered_genai_products and genai_results:
-                    snippet_combined = text.lower()
-                    suggests_ai_product = (
-                        "ai" in snippet_combined
-                        and any(
-                            kw in snippet_combined
-                            for kw in (
-                                "tool",
-                                "platform",
-                                "assistant",
-                                "announced",
-                                "launch",
-                                "product",
-                                "introduced",
-                                "unveil",
+                    # Two-phase: if snippet extraction returned None but snippet suggests an AI product was announced, fetch page(s) and re-run extraction
+                    if not discovered_genai_products and genai_results:
+                        snippet_combined = text.lower()
+                        suggests_ai_product = (
+                            "ai" in snippet_combined
+                            and any(
+                                kw in snippet_combined
+                                for kw in (
+                                    "tool",
+                                    "platform",
+                                    "assistant",
+                                    "announced",
+                                    "launch",
+                                    "product",
+                                    "introduced",
+                                    "unveil",
+                                )
                             )
                         )
-                    )
-                    if suggests_ai_product:
-                        fetched_parts = []
-                        for r in genai_results[:2]:
-                            page_text = await fetch_page_text(r.url, max_chars=3500)
-                            if page_text:
-                                fetched_parts.append(f"Title: {r.title}\nContent: {page_text}")
-                        if fetched_parts:
-                            fetched_text = "\n\n---\n\n".join(fetched_parts)
-                            phase2_prompt = f"""From this article content about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
+                        if suggests_ai_product:
+                            fetched_parts = []
+                            for r in genai_results[:2]:
+                                page_text = await fetch_page_text(r.url, max_chars=3500)
+                                if page_text:
+                                    fetched_parts.append(f"Title: {r.title}\nContent: {page_text}")
+                            if fetched_parts:
+                                fetched_text = "\n\n---\n\n".join(fetched_parts)
+                                phase2_prompt = f"""From this article content about {state['company_name']}, identify the company's NAMED AI or GenAI product/assistant/agent if clearly mentioned.
 Look for a specific product or brand name (e.g. Fillip, Gus, Einstein, Copilot), not a generic phrase like "AI tool".
 Reply with exactly one line:
 GENAI_PRODUCT: Product Name - one sentence description
@@ -878,26 +924,27 @@ GENAI_PRODUCT: None
 
 Article content:
 {fetched_text[:8000]}"""
-                            try:
-                                phase2_response = await self.llm.ainvoke([HumanMessage(content=phase2_prompt)])
-                                phase2_content = (phase2_response.content if hasattr(phase2_response, "content") else str(phase2_response)).strip()
-                                for line in phase2_content.splitlines():
-                                    line = line.strip()
-                                    if line.upper().startswith("GENAI_PRODUCT:"):
-                                        rest = line[len("GENAI_PRODUCT:"):].strip()
-                                        if rest.upper() not in ("NONE", "N/A", ""):
-                                            if " - " in rest:
-                                                name, desc = rest.split(" - ", 1)
-                                                discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
-                                            else:
-                                                discovered_genai_products = [{"product_name": rest, "product_description": ""}]
-                                            if discovered_genai_products:
-                                                reasoning.append(f"Discovered GenAI product (from fetched page): {discovered_genai_products[0].get('product_name', '')}")
-                                        break
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+                                try:
+                                    phase2_response = await self.llm.ainvoke([HumanMessage(content=phase2_prompt)])
+                                    phase2_content = (phase2_response.content if hasattr(phase2_response, "content") else str(phase2_response)).strip()
+                                    for line in phase2_content.splitlines():
+                                        line = line.strip()
+                                        if line.upper().startswith("GENAI_PRODUCT:"):
+                                            rest = line[len("GENAI_PRODUCT:"):].strip()
+                                            if rest.upper() not in ("NONE", "N/A", ""):
+                                                if " - " in rest:
+                                                    name, desc = rest.split(" - ", 1)
+                                                    discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
+                                                else:
+                                                    discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                                                if discovered_genai_products:
+                                                    reasoning.append(f"Discovered GenAI product (from fetched page): {discovered_genai_products[0].get('product_name', '')}")
+                                                    _extract_span.set_attribute("hypothesis_agent.genai_product", discovered_genai_products[0].get("product_name", ""))
+                                            break
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
 
         return {
             "signals": signals,
@@ -1101,7 +1148,17 @@ Output just the search queries, one per line."""
         }
 
     async def _generate_hypotheses(self, state: AgentState) -> dict:
-        """Generate hypotheses using LLM."""
+        """Generate hypotheses using LLM.
+
+        Inputs to this step (all produced by earlier nodes in the trace):
+        - company_summary: from analyze_signals → company_summary_llm (SignalExtractor.analyze_with_llm)
+        - signals: from analyze_signals (keyword extraction + optional subagent insights)
+        - playbook, industry: from load_playbook (file) and check_crm (industry)
+        - team_insights, job_insights, etc.: from analyze_subagent_insights (if subagent path ran)
+        - discovered_genai_products: from analyze_signals (extract_genai_product) or analyze_subagent_insights
+        - competitive_situation, detected_tools: from analyze_signals (detect_competitors)
+        - value_driver_context: from _get_relevant_value_drivers(industry)
+        """
 
         reasoning = list(state.get("agent_reasoning", []))
         warnings = list(state.get("warnings", []))
@@ -1266,8 +1323,6 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
             else:
                 errors.append(f"AI analysis failed: {error_msg}")
             reasoning.append(f"ERROR: LLM call failed - {error_msg}")
-            
-            # Return empty hypotheses with error state
             return {
                 "hypotheses": [],
                 "competitive_context": None,
@@ -1649,6 +1704,7 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
         # Ensure the current OpenTelemetry context (parent span from the API request)
         # is explicitly propagated to the task running the graph.
         #
+        _debug_log("24e5e3", "H1", "research_agent.py:research()", "project at research() start", {"project": _get_current_project()})
         ctx = contextvars.copy_context()
         tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
 

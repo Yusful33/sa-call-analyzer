@@ -46,7 +46,7 @@ def run_multimodal(
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.multimodal.crewai")
     if not query:
-        query = get_random_query()
+        query = get_random_query(prospect_context)
 
     text_query = query["text"]
     image_description = query["image_description"]
@@ -162,6 +162,8 @@ def run_multimodal(
 
         root_span.set_attribute("output.value", answer)
         root_span.set_attribute("output.mime_type", "text/plain")
+        root_span.set_attribute("context.query", (text_query or str(query))[:1000])
+        root_span.set_attribute("context.image_description", (image_description or "")[:1000])
         root_span.set_status(Status(StatusCode.OK))
 
     return {

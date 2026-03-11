@@ -12,7 +12,6 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import run_guardrail, run_tool_call, run_in_context
 from ...use_cases.multi_agent import (
-    QUERIES,
     AGENTS,
     GUARDRAILS,
     RESEARCH_PROMPT,
@@ -22,6 +21,7 @@ from ...use_cases.multi_agent import (
     search_web,
     analyze_metrics,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_multi_agent(
@@ -40,21 +40,27 @@ def run_multi_agent(
 
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.multi_agent.crewai")
+    from ...use_cases import multi_agent as multi_agent_use_case
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(multi_agent_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "multi_agent_orchestration",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "multi-agent-orchestration",
-        },
-    ) as root_span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "multi-agent-orchestration",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("multi_agent_orchestration", attributes=attrs) as root_span:
 
         # === GUARDRAILS ===
         for g in GUARDRAILS:
@@ -156,6 +162,8 @@ def run_multi_agent(
 
         root_span.set_attribute("output.value", answer)
         root_span.set_attribute("output.mime_type", "text/plain")
+        root_span.set_attribute("context.query", query[:1000])
+        root_span.set_attribute("context.answer_summary", answer[:2000])
         root_span.set_status(Status(StatusCode.OK))
 
     return {

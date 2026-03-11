@@ -164,6 +164,9 @@ def run_classification(
 
         agent_span.set_attribute("output.value", answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
+        agent_span.set_attribute("context.classification", classification[:500])
+        agent_span.set_attribute("context.sentiment", sentiment[:500])
+        agent_span.set_attribute("context.entities", entities[:500])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

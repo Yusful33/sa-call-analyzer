@@ -155,6 +155,8 @@ def run_chatbot(
         agent_span.set_attribute("tools.count", len(tools_used))
         if tools_used:
             agent_span.set_attribute("metadata.tools_used", ",".join(t["tool"] for t in tools_used))
+            tool_results_text = "\n".join(f"[{t['tool']}]: {t['result']}" for t in tools_used)
+            agent_span.set_attribute("context.tool_results", tool_results_text[:2000])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

@@ -376,7 +376,7 @@ def _date_season_multiplier(date_str: str) -> float:
 
 def flight_search(origin: str, destination: str, date: str) -> str:
     """Search for available flights between two cities on a given date.
-    Returns parameter-aware mock results: route, date, and number of options vary with inputs.
+    Returns parameter-aware results: route, date, and number of options vary with inputs.
     """
     origin = (origin or "").strip()
     destination = (destination or "").strip()
@@ -408,7 +408,7 @@ def flight_search(origin: str, destination: str, date: str) -> str:
 
 def hotel_search(city: str, check_in: str, check_out: str, guests: int = 1) -> str:
     """Search for hotels in a city for given check-in/out dates and guest count.
-    Returns parameter-aware mock results: city-specific names, prices vary by city/dates/guests.
+    Returns parameter-aware results: city-specific names, prices vary by city/dates/guests.
     """
     city = (city or "").strip()
     check_in = (check_in or "")[:10]

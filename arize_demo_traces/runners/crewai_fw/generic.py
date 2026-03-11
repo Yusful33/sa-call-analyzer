@@ -11,7 +11,8 @@ from crewai import Agent, Crew, Task, Process
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import run_guardrail, run_tool_call
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ...use_cases.generic import GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ..common_runner_utils import get_query_for_run
 
 
 def run_generic(
@@ -28,23 +29,29 @@ def run_generic(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import generic as generic_use_case
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.generic.crewai")
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(generic_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "generic_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "generic",
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "generic",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("generic_pipeline", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
         for g in GUARDRAILS:
@@ -97,6 +104,7 @@ def run_generic(
 
         pipeline_span.set_attribute("output.value", answer)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.query", query[:1000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

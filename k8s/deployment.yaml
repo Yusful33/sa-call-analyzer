@@ -1,0 +1,49 @@
+# Replace <AWS_ACCOUNT_ID> and <AWS_REGION> before applying, e.g.:
+# sed -e 's/<AWS_ACCOUNT_ID>/123456789012/' -e 's/<AWS_REGION>/us-east-1/' k8s/deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: id-pain
+  namespace: id-pain
+  labels:
+    app: id-pain
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: id-pain
+  template:
+    metadata:
+      labels:
+        app: id-pain
+    spec:
+      containers:
+        - name: app
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/id-pain:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: id-pain-config
+            - secretRef:
+                name: id-pain-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10

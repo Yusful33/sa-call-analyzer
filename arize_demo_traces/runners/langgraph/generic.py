@@ -14,7 +14,8 @@ from langgraph.graph import StateGraph, END
 from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call, run_in_context
-from ...use_cases.generic import QUERIES, GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ...use_cases.generic import GUARDRAILS, SYSTEM_PROMPT, web_search, get_current_context
+from ..common_runner_utils import get_query_for_run
 
 
 class GenericState(TypedDict):
@@ -40,8 +41,14 @@ def run_generic(
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.generic.langgraph")
 
+    from ...use_cases import generic as generic_use_case
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(generic_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
@@ -80,16 +87,16 @@ def run_generic(
     graph = workflow.compile()
 
     # --- Execute with root span ---
-    with tracer.start_as_current_span(
-        "llm_pipeline",
-        attributes={
-            "openinference.span.kind": "CHAIN",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langgraph",
-            "metadata.use_case": "generic",
-        },
-    ) as span:
+    attrs = {
+        "openinference.span.kind": "CHAIN",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langgraph",
+        "metadata.use_case": "generic",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("llm_pipeline", attributes=attrs) as span:
         result = run_in_context(graph.invoke, {
             "query": query,
             "answer": "",
@@ -97,6 +104,7 @@ def run_generic(
         })
         span.set_attribute("output.value", result["answer"])
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.query", query[:1000])
         span.set_status(Status(StatusCode.OK))
 
     return {

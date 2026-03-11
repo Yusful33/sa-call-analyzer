@@ -56,7 +56,7 @@ def run_multimodal(
     tracer = provider.get_tracer("demo.multimodal.adk")
 
     if not query:
-        query = get_random_query()
+        query = get_random_query(prospect_context)
 
     text_query = query["text"]
     image_description = query["image_description"]
@@ -191,6 +191,9 @@ def run_multimodal(
 
         agent_span.set_attribute("output.value", answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
+        agent_span.set_attribute("context.image_classification", classification[:500])
+        agent_span.set_attribute("context.analysis", analysis[:2000])
+        agent_span.set_attribute("context.extracted_data", extracted_data[:2000])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

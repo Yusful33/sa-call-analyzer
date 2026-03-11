@@ -210,6 +210,10 @@ INDUSTRY_QUERIES: dict[str, list[str]] = {
         "What compliance certifications do we have for data handling?",
         "How do I run a fraud report for the last 30 days?",
         "What are the fee schedules for different account tiers?",
+        "How do I enable options trading and what are the margin requirements?",
+        "When is my dividend paid and how do I view my dividend history?",
+        "What are the fees for crypto and stock trades?",
+        "How do I transfer funds in and out of my account?",
     ],
     "healthcare": [
         "What is our policy for patient data requests and portability?",
@@ -224,6 +228,11 @@ INDUSTRY_QUERIES: dict[str, list[str]] = {
         "How do I modify or rebook a reservation?",
         "What are the current offers and promo codes?",
         "How do I set up a corporate travel policy?",
+        "What is the baggage allowance for my flight?",
+        "How do I change or cancel my flight?",
+        "How do I redeem my miles for a reward flight?",
+        "Why was my flight delayed and am I eligible for compensation?",
+        "How do I add a companion or upgrade my seat?",
     ],
 }
 

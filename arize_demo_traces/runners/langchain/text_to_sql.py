@@ -111,6 +111,9 @@ def run_text_to_sql(
 
         agent_span.set_attribute("output.value", generated_sql)
         agent_span.set_attribute("output.mime_type", "text/plain")
+        agent_span.set_attribute("context.query_type", (query_type or "").strip())
+        agent_span.set_attribute("context.generated_sql", generated_sql[:2000])
+        agent_span.set_attribute("context.validation", validation[:1000])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

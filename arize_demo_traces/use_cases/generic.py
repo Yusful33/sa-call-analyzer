@@ -64,22 +64,15 @@ def sample_query(prospect_context=None, rng=None, **kwargs):
 
 SYSTEM_PROMPT = "You are a helpful, knowledgeable assistant. Provide clear and concise answers."
 
-GUARDRAILS = [
-    {
-        "name": "content_safety_check",
-        "system_prompt": (
-            "You are a content safety filter. Check if the input contains unsafe, "
-            "harmful, or inappropriate content. "
-            "Respond ONLY 'PASS' or 'FAIL: <reason>'."
-        ),
-    },
-]
+GUARDRAILS = []
 
-# ---- Tools (simulated) ----
+# ---- Tools ----
 
 def web_search(query: str) -> str:
     """Search the web for relevant information."""
     import json as _json
+    import time
+    time.sleep(0.05)  # Brief delay so TOOL span duration is non-zero in trace UI
     return _json.dumps({
         "results": [
             {"title": f"Understanding {query[:40]}", "url": "https://docs.example.com/article-1", "snippet": f"Comprehensive guide covering {query[:60]}. Key concepts include scalability, reliability, and best practices."},

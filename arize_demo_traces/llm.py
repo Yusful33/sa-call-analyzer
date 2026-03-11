@@ -63,7 +63,7 @@ def get_chat_llm(model: str, temperature: float = 0, **kwargs: Any):
     llm_kwargs = {}
     if use_litellm:
         llm_kwargs["base_url"] = litellm_base_url
-        llm_kwargs["api_key"] = os.getenv("LITELLM_API_KEY", "dummy")
+        llm_kwargs["api_key"] = os.getenv("LITELLM_API_KEY", "api_key")
         model = f"openai/{model}"
 
     from langchain_openai import ChatOpenAI

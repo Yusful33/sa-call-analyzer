@@ -82,6 +82,7 @@ def run_generic(
 
         span.set_attribute("output.value", answer)
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.query", query[:1000])
         span.set_status(Status(StatusCode.OK))
 
     return {

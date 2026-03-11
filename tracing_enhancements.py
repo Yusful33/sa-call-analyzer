@@ -12,12 +12,15 @@ This module provides:
 import time
 import json
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, List, Optional
+from uuid import UUID
 from contextlib import contextmanager
 
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode, Link
-from openinference.instrumentation.openinference import using_prompt_template, using_attributes
+from openinference.instrumentation import using_prompt_template, using_attributes
 
 # Cost per 1M tokens (approximate, update as needed)
 MODEL_COSTS = {
@@ -245,6 +248,52 @@ def add_cost_attributes_to_span(
     span.set_attribute("cost.total_usd", total_cost)
     span.set_attribute("cost.input_cost_usd", prompt_cost)
     span.set_attribute("cost.output_cost_usd", completion_cost)
+
+
+class TokenTrackingCallback(BaseCallbackHandler):
+    """
+    LangChain callback that enriches the current span with token usage and cost data.
+
+    Use this with any LangChain LLM (e.g. ChatAnthropic, ChatOpenAI) so that Arize
+    traces show Total Tokens and Total Cost. Without it, token/cost only appear when
+    the LangChain instrumentor can read run.outputs (e.g. on successful run end).
+
+    IMPORTANT: This callback does NOT create its own spans or manipulate the OTel
+    context. Span creation is handled by the auto-instrumentors (LangChain, LiteLLM,
+    OpenAI).
+    """
+
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+        """Enrich the current span with token usage and cost attributes."""
+        if not response.llm_output:
+            return
+
+        token_usage = response.llm_output.get("token_usage", {})
+        model_name = response.llm_output.get("model_name", "unknown")
+
+        if not token_usage and "usage" in response.llm_output:
+            token_usage = response.llm_output["usage"]
+
+        prompt_tokens = token_usage.get("prompt_tokens", 0)
+        completion_tokens = token_usage.get("completion_tokens", 0)
+        total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
+            current_span.set_attribute("llm.token_count.completion", completion_tokens)
+            current_span.set_attribute("llm.token_count.total", total_tokens)
+            current_span.set_attribute("llm.model_name", model_name)
+            try:
+                add_cost_attributes_to_span(
+                    current_span,
+                    model_name,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                )
+            except Exception:
+                pass
 
 
 def create_span_link(span_context: trace.SpanContext, attributes: Optional[Dict[str, Any]] = None) -> Link:

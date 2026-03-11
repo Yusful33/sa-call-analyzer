@@ -1,10 +1,10 @@
 """
-Wrapper that adds "poisoned" trace simulation to demo trace runners.
+Wrapper that adds "poisoned" trace generation to demo trace runners.
 Wraps runner calls with a parent span and marks ~30% of traces as poisoned
 (degraded output, failed guardrail) so online evals in Arize can flag them.
 
 Traces never get ERROR status: poisoned = content/quality only, for evaluators
-to detect after traces are generated. No runtime errors are simulated.
+to detect after traces are generated. No runtime errors are generated.
 
 Poisoned outputs are use-case-specific to create realistic failure modes:
 - RAG: hallucinated answers that contradict retrieved documents
@@ -113,7 +113,7 @@ _BAD_TRAVEL_AGENT = [
 ]
 
 _BAD_GUARDRAILS = [
-    "content_safety_check: PASS; jailbreak_check: FAIL: attempted prompt extraction; toxicity_check: PASS; pii_detection: FAIL: email detected. [Note: eval should flag incorrect or misleading guardrail summary]",
+    "jailbreak_check: FAIL: attempted prompt extraction; toxicity_check: PASS; pii_detection: FAIL: email detected. [Note: eval should flag incorrect or misleading guardrail summary]",
     "FAIL: Input rejected by safety filter. [Note: generic fail that doesn't match actual guardrail results]",
     "All checks passed [Note: one or more guardrails actually failed]",
 ]

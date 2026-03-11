@@ -2,6 +2,8 @@
 
 import random
 
+from .common import industry_key
+
 QUERIES = [
     "Find all Python files in the project that import requests and summarize their purpose.",
     "Query the customer database for accounts with revenue over $1M and draft a summary report.",
@@ -12,6 +14,64 @@ QUERIES = [
     "Pull the latest sales data from our CRM and generate a pipeline forecast.",
     "Search the internal wiki for our deployment runbook and summarize the rollback procedure.",
 ]
+
+# Industry-tailored MCP-style tasks for prospect-aware demos
+INDUSTRY_QUERIES: dict[str, list[str]] = {
+    "default": QUERIES,
+    "technology": QUERIES,
+    "financial": [
+        "Query the trading activity database for accounts with margin usage over threshold and draft a risk summary.",
+        "Search our Slack channels for discussions about the Q4 compliance audit and compile key decisions.",
+        "Pull the latest transaction and fee data from our CRM and generate a revenue forecast.",
+        "List all open support tickets labeled 'dispute' and prioritize them by amount.",
+        "Check our fraud monitoring dashboard for any alerts in the last 24 hours and create a status report.",
+        "Search the internal wiki for our regulatory reporting runbook and summarize the submission procedure.",
+        "Query the customer database for accounts with high cash balance and draft an engagement summary.",
+        "Find all accounts that opted in to options trading in the last 30 days and summarize adoption metrics.",
+    ],
+    "travel": [
+        "Query the reservations database for flights with delays over 2 hours and draft a compensation summary.",
+        "Search our Slack channels for discussions about the holiday schedule and compile crew coverage decisions.",
+        "Pull the latest booking and cancellation data and generate a demand forecast.",
+        "List all open customer complaints labeled 'baggage' and prioritize by loyalty tier.",
+        "Check our operations dashboard for any irregular ops in the last 24 hours and create a status report.",
+        "Search the internal wiki for our rebooking runbook and summarize the waiver procedure.",
+        "Query the loyalty database for members nearing tier status and draft an engagement summary.",
+        "Find all reward bookings in the next 90 days and summarize availability by route.",
+    ],
+    "retail": [
+        "Query the inventory database for SKUs with stockouts and draft a replenishment summary.",
+        "Search our Slack channels for discussions about the holiday promotion and compile key decisions.",
+        "Pull the latest sales data from our POS and generate a store performance forecast.",
+        "List all open orders with fulfillment delays and prioritize by customer tier.",
+        "Check our supply chain dashboard for any disruptions and create a status report.",
+        "Search the internal wiki for our return policy runbook and summarize the exception procedure.",
+    ],
+    "healthcare": [
+        "Query the patient records system for pending data requests and draft a compliance summary.",
+        "Search our Slack channels for discussions about the clinical rollout and compile key decisions.",
+        "Pull the latest quality metrics and generate a readmission forecast.",
+        "List all open incidents labeled 'critical' and prioritize by facility.",
+        "Check our clinical dashboard for any alerts in the last 24 hours and create a status report.",
+        "Search the internal wiki for our HIPAA breach runbook and summarize the notification procedure.",
+    ],
+}
+
+
+def get_queries_for_prospect(prospect_context: dict | None) -> list[str]:
+    """Return MCP-style tasks tailored to the prospect's industry."""
+    if not prospect_context:
+        return INDUSTRY_QUERIES["default"]
+    key = industry_key(prospect_context.get("industry"))
+    return INDUSTRY_QUERIES.get(key, INDUSTRY_QUERIES["default"])
+
+
+def sample_query(prospect_context=None, rng=None, **kwargs):
+    """Contract: sample_query(prospect_context, rng) -> str. Industry-aware sampling."""
+    queries = get_queries_for_prospect(prospect_context)
+    if rng is not None:
+        return rng.choice(queries)
+    return random.choice(queries)
 
 # Simulated MCP servers and their tools
 MCP_SERVERS = [
@@ -115,8 +175,8 @@ EVALUATORS = [
 ]
 
 
-def get_simulated_tool_results(num_tools: int = 2) -> list[dict]:
-    """Return a random set of simulated MCP tool call results."""
+def get_tool_results(num_tools: int = 2) -> list[dict]:
+    """Return a random set of MCP tool call results."""
     available_tools = list(TOOL_RESULTS.keys())
     selected = random.sample(available_tools, min(num_tools, len(available_tools)))
     return [

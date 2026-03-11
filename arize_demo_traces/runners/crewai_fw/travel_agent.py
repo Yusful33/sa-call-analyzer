@@ -153,6 +153,7 @@ def run_travel_agent(
         out = degraded_output if degraded_output else answer
         pipeline_span.set_attribute("output.value", out[:2000] if len(out) > 2000 else out)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.query", query[:1000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

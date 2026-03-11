@@ -3,8 +3,6 @@
 import re
 from enum import Enum
 
-import anthropic
-
 from ..clients.brave_client import SearchResult
 from ..models.hypothesis import (
     AIMLSignal,
@@ -193,7 +191,13 @@ class SignalExtractor:
     def __init__(self, llm_model: str | None = None):
         settings = get_settings()
         self.llm_model = llm_model or settings.llm_model
-        self.anthropic = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        # Use LangChain ChatAnthropic so every Anthropic call is traced (same as research_agent)
+        from langchain_anthropic import ChatAnthropic
+        self.llm = ChatAnthropic(
+            model=self.llm_model,
+            anthropic_api_key=settings.anthropic_api_key,
+            max_tokens=500,
+        )
 
     def _check_keywords(
         self,
@@ -457,13 +461,14 @@ Recent News:
 
 Provide a factual summary prioritizing evidence of LLM/GenAI adoption. If there's limited evidence of GenAI work, note what traditional ML or AI they might be using instead. Be specific about what you found."""
 
-        response = self.anthropic.messages.create(
-            model=self.llm_model,
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
+        from langchain_core.messages import HumanMessage
+        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        if isinstance(response.content, str):
+            return response.content
+        if isinstance(response.content, list) and response.content:
+            part = response.content[0]
+            return getattr(part, "text", str(part))
+        return str(response.content) if response.content else ""
 
     async def build_company_research(
         self,

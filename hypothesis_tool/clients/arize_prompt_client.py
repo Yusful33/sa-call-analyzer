@@ -1,4 +1,4 @@
-"""Client for fetching and rendering Arize Prompt Hub prompts by ID."""
+"""Client for fetching and rendering Arize Prompt Hub prompts via GraphQL (app.arize.com/graphql)."""
 
 import logging
 import re
@@ -10,31 +10,69 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Default prompt version ID for "Sales Research Assistant" (plan research step)
-DEFAULT_PLAN_RESEARCH_PROMPT_ID = "UHJvbXB0OjMwNTI3Om9BbWo="
+# Prompt (container) ID for "Sales Research Assistant". GraphQL node(id) returns prompt with messages.
+PROMPT_ID_PLAN_RESEARCH = "UHJvbXB0OjMwNTI3Om9BbWo="
+DEFAULT_PLAN_RESEARCH_PROMPT_ID = PROMPT_ID_PLAN_RESEARCH
+
+# Fallback when GraphQL fails (e.g. no key, network error)
+DEFAULT_PLAN_RESEARCH_PROMPT_TEMPLATE = (
+    "You are a sales research assistant. Plan what research to conduct for: {{company_name}}. "
+    "Output a brief research plan (2-3 sentences) covering company overview, key products, and relevant news."
+)
+
+GRAPHQL_ENDPOINT = "https://app.arize.com/graphql"
 
 
-def _normalize_prompt_data(data: dict[str, Any]) -> dict[str, Any]:
-    """Normalize Arize v2 or Phoenix v1 response to our expected shape (template, template_format, etc.)."""
-    # v1/Phoenix: { "template", "template_type", "template_format", "model_provider", ... }
-    if data.get("template") is not None:
-        return data
-    # v2: may have prompt.versions[0] or prompt.latest_version or messages
-    if "versions" in data and data["versions"]:
-        v = data["versions"][0]
-        return _normalize_prompt_data(v) if isinstance(v, dict) else data
-    if "latest_version" in data:
-        return _normalize_prompt_data(data["latest_version"])
-    # v2 shape: messages array for chat
-    if "messages" in data:
-        return {
-            "template": {"type": "chat", "messages": data["messages"]},
-            "template_type": "CHAT",
-            "template_format": (data.get("template_format") or "NONE").upper(),
+async def _fetch_prompt_via_graphql(
+    api_key: str,
+    prompt_id: str,
+    *,
+    space_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Fetch a prompt by ID via Arize GraphQL API (app.arize.com/graphql). Use prompt (container) ID; returns normalized prompt data or None."""
+    # Prompt type has messages (JSON array) and inputVariableFormat; PromptVersion has same but node(id) with version ID may be null
+    query = """
+    query GetPrompt($id: ID!) {
+      node(id: $id) {
+        ... on Prompt {
+          id
+          name
+          inputVariableFormat
+          messages
         }
-    if "template" in data:
-        return data
-    raise ValueError(f"Unrecognized prompt response shape: no template, versions, or messages in {list(data.keys())}")
+        ... on PromptVersion {
+          id
+          inputVariableFormat
+          messages
+        }
+      }
+    }
+    """
+    payload: dict[str, Any] = {"query": query, "variables": {"id": prompt_id}}
+    headers = {"Content-Type": "application/json", "x-api-key": api_key}
+    if space_id:
+        headers["arize-space-id"] = space_id
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(GRAPHQL_ENDPOINT, json=payload, headers=headers)
+        if not resp.is_success:
+            logger.debug("GraphQL prompt fetch status %s: %s", resp.status_code, resp.text[:200])
+            return None
+        body = resp.json()
+        if body.get("errors"):
+            logger.debug("GraphQL errors: %s", body["errors"])
+            return None
+        node = (body.get("data") or {}).get("node")
+        if not node or not isinstance(node, dict):
+            return None
+        messages = node.get("messages")
+        if not messages:
+            return None
+        template_format = (node.get("inputVariableFormat") or "NONE").upper()
+        return {
+            "template": {"type": "chat", "messages": messages},
+            "template_type": "CHAT",
+            "template_format": template_format,
+        }
 
 
 def _render_mustache(template: str, variables: dict[str, Any]) -> str:
@@ -57,54 +95,25 @@ def _render_mustache(template: str, variables: dict[str, Any]) -> str:
     return result
 
 
-async def get_prompt_version(prompt_version_id: str) -> dict[str, Any]:
+async def get_prompt_version(prompt_id: str) -> dict[str, Any]:
     """
-    Fetch a prompt (or prompt version) by ID from the Arize API.
-    Tries v2 /v2/prompts/{id} first, then v1 /v1/prompt_versions/{id}.
-    Returns normalized data with template, template_format, etc.
+    Fetch a prompt by ID via Arize GraphQL API (app.arize.com/graphql).
+    Use prompt (container) ID. Returns dict with template, template_type, template_format.
     """
     settings = get_settings()
     if not settings.arize_api_key:
         raise ValueError("ARIZE_API_KEY is required to fetch Arize prompts")
-    base_url = (settings.arize_prompt_api_base_url or "https://api.arize.com").rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {settings.arize_api_key}",
-        "Content-Type": "application/json",
-    }
-    if settings.arize_space_id:
-        headers["arize-space-id"] = settings.arize_space_id
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Try Arize v2 Prompt Hub first (GET /v2/prompts/{id})
-        url_v2 = f"{base_url}/v2/prompts/{prompt_version_id}"
-        params = {}
-        if settings.arize_space_id:
-            params["space_id"] = settings.arize_space_id
-        try:
-            resp = await client.get(url_v2, headers=headers, params=params or None)
-            if resp.is_success:
-                data = resp.json()
-                # v2 may wrap in "data" or return prompt directly
-                payload = data.get("data", data)
-                if isinstance(payload, dict):
-                    return _normalize_prompt_data(payload)
-            elif resp.status_code != 404:
-                resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                pass
-            else:
-                raise
-
-        # Fallback: Phoenix-style v1 prompt_versions
-        url_v1 = f"{base_url}/v1/prompt_versions/{prompt_version_id}"
-        resp = await client.get(url_v1, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-    payload = data.get("data", data)
-    if isinstance(payload, dict):
-        return _normalize_prompt_data(payload)
-    return _normalize_prompt_data(data)
+    for try_id in (prompt_id, PROMPT_ID_PLAN_RESEARCH):
+        data = await _fetch_prompt_via_graphql(
+            settings.arize_api_key,
+            try_id,
+            space_id=settings.arize_space_id or None,
+        )
+        if data is not None:
+            return data
+    raise ValueError(
+        "Could not fetch prompt from Arize GraphQL. Check ARIZE_API_KEY and ARIZE_SPACE_ID; use prompt (container) ID."
+    )
 
 
 def render_prompt_template(prompt_data: dict[str, Any], variables: dict[str, Any]) -> str:
@@ -133,7 +142,14 @@ def render_prompt_template(prompt_data: dict[str, Any], variables: dict[str, Any
                         p.get("text", "") if isinstance(p, dict) else str(p) for p in content if isinstance(p, dict) and p.get("type") == "text"
                     )
                 if role == "user" and content:
-                    parts.append(_render_mustache(content, variables) if template_format == "MUSTACHE" else content)
+                    if template_format == "MUSTACHE":
+                        content = _render_mustache(content, variables)
+                    elif template_format == "F_STRING":
+                        try:
+                            content = content.format(**{k: v or "" for k, v in variables.items()})
+                        except KeyError:
+                            content = _render_mustache(content, variables)
+                    parts.append(content)
             return "\n\n".join(parts) if parts else ""
         # string template
         template_str = template.get("template", "")
@@ -150,13 +166,23 @@ def render_prompt_template(prompt_data: dict[str, Any], variables: dict[str, Any
     return template_str
 
 
-async def get_plan_research_prompt(company_name: str, prompt_version_id: str | None = None) -> str:
+async def get_plan_research_prompt(company_name: str, prompt_id: str | None = None) -> str:
     """
-    Fetch the Sales Research Assistant (plan research) prompt from Arize and render it
-    with the given company name. Returns the prompt text to send to the LLM.
+    Fetch the Sales Research Assistant (plan research) prompt from Arize via GraphQL and render it
+    with the given company name. Falls back to built-in template if GraphQL fails.
     """
     settings = get_settings()
-    pid = prompt_version_id or getattr(settings, "arize_plan_research_prompt_id", None) or DEFAULT_PLAN_RESEARCH_PROMPT_ID
     variables = {"company_name": company_name, "Company Name": company_name}
-    prompt_data = await get_prompt_version(pid)
-    return render_prompt_template(prompt_data, variables)
+    if not settings.arize_api_key:
+        logger.debug("ARIZE_API_KEY not set, using built-in plan-research prompt")
+        return _render_mustache(DEFAULT_PLAN_RESEARCH_PROMPT_TEMPLATE, variables)
+    pid = prompt_id or getattr(settings, "arize_plan_research_prompt_id", None) or DEFAULT_PLAN_RESEARCH_PROMPT_ID
+    try:
+        prompt_data = await get_prompt_version(pid)
+        return render_prompt_template(prompt_data, variables)
+    except (ValueError, httpx.HTTPStatusError) as e:
+        logger.warning(
+            "Arize GraphQL prompt fetch failed (%s), using built-in Sales Research Assistant fallback",
+            e,
+        )
+        return _render_mustache(DEFAULT_PLAN_RESEARCH_PROMPT_TEMPLATE, variables)

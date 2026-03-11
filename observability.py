@@ -145,7 +145,8 @@ def setup_observability(
     # Verify credentials are present
     if api_key and space_id:
         print(f"✅ Arize credentials loaded (API Key: {len(api_key)} chars, Space ID: {len(space_id)} chars)")
-        print(f"   Using Space ID: {space_id[:20]}...")
+        print(f"   Using Space ID (full): {space_id!r}")
+        print(f"   → Verify this matches your Arize space URL (e.g. base64 form like U3BhY2U6MzY1NTU6aitIdg==)")
 
     if not api_key or not space_id:
         print("⚠️  WARNING: Arize credentials not found. Observability disabled.")
@@ -239,6 +240,7 @@ def setup_observability(
 
         print("\n✅ OpenInference tracing enabled (4 projects)")
         print(f"   📊 Projects: {PROJECT_SINGLE_CALL}, {PROJECT_PROSPECT}, {PROJECT_HYPOTHESIS}, {PROJECT_DEMO}")
+        print(f"   📌 Hypothesis Generator → Arize project: {PROJECT_HYPOTHESIS!r} (create this project in your space if missing)")
         print(f"   🔗 View traces at: https://app.arize.com/organizations")
         print(f"   🌐 Space ID: {space_id[:20]}...")
 
@@ -333,6 +335,23 @@ def api_span(route_name: str, kind: str = "CHAIN", **attributes):
                     span.record_exception(e)
                 raise
     return _ctx()
+
+
+def force_flush_current_request(timeout_millis: int = 15000) -> bool:
+    """
+    Flush the current request's tracer provider (the one set by middleware).
+    Use this so hypothesis/demo spans are exported before the response is sent.
+    Returns True if flush was attempted and succeeded.
+    """
+    provider = _request_tracer_provider.get()
+    if provider is None:
+        return False
+    if not hasattr(provider, "force_flush"):
+        return False
+    try:
+        return bool(provider.force_flush(timeout_millis=timeout_millis))
+    except Exception:
+        return False
 
 
 def force_flush_spans():

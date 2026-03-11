@@ -133,6 +133,7 @@ def run_chatbot(
             answer = degraded_output
         pipeline_span.set_attribute("output.value", answer[:5000] if len(answer) > 5000 else answer)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.query", query[:1000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

@@ -139,6 +139,9 @@ def run_travel_agent(
         out = degraded_output if degraded_output else answer
         span.set_attribute("output.value", out[:2000] if len(out) > 2000 else out)
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.search_options", options_table[:2000])
+        if params.get("assumptions"):
+            span.set_attribute("context.assumptions", ", ".join(params["assumptions"])[:500])
         span.set_status(Status(StatusCode.OK))
 
     return {

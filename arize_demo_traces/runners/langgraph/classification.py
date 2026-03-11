@@ -168,6 +168,9 @@ def run_classification(
         })
         span.set_attribute("output.value", result["response"])
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.classification", (result.get("category") or "")[:500])
+        span.set_attribute("context.sentiment", (result.get("sentiment") or "")[:500])
+        span.set_attribute("context.entities", (result.get("entities") or "")[:500])
         span.set_status(Status(StatusCode.OK))
 
     return {

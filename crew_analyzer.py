@@ -3,7 +3,7 @@ import json
 import re
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from crewai import Agent, Task, Crew, Process
 from models import (
     AnalysisResult,
@@ -32,70 +32,10 @@ from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from observability import force_flush_spans
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
-from typing import Any, Dict, List
-from uuid import UUID
+from langchain_core.callbacks import CallbackManager
+from tracing_enhancements import TokenTrackingCallback
 
 load_dotenv()
-
-
-class TokenTrackingCallback(BaseCallbackHandler):
-    """
-    LangChain callback that enriches the current span with token usage and cost data.
-
-    IMPORTANT: This callback does NOT create its own spans or manipulate the OTel
-    context. Span creation is handled by the auto-instrumentors (LangChain, LiteLLM,
-    OpenAI). Creating competing spans here was the root cause of broken parent-span
-    propagation (multiple traces per interaction).
-    """
-
-    def __init__(self):
-        pass
-
-    def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], *, run_id: UUID, **kwargs: Any) -> None:
-        """Log LLM call start for debugging."""
-        model_name = "unknown"
-        if serialized:
-            model_name = serialized.get("id", serialized.get("_type", ["unknown"])[-1] if isinstance(serialized.get("_type"), list) else "unknown")
-        print(f"🔵 LLM call started: {model_name} (run_id={run_id})")
-
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
-        """Enrich the current span with token usage and cost attributes."""
-        if not response.llm_output:
-            return
-
-        token_usage = response.llm_output.get("token_usage", {})
-        model_name = response.llm_output.get("model_name", "unknown")
-
-        if not token_usage and "usage" in response.llm_output:
-            token_usage = response.llm_output["usage"]
-
-        prompt_tokens = token_usage.get("prompt_tokens", 0)
-        completion_tokens = token_usage.get("completion_tokens", 0)
-        total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
-
-        # Enrich the current span (created by auto-instrumentor) with cost data
-        current_span = trace.get_current_span()
-        if current_span and current_span.is_recording():
-            current_span.set_attribute("llm.token_count.prompt", prompt_tokens)
-            current_span.set_attribute("llm.token_count.completion", completion_tokens)
-            current_span.set_attribute("llm.token_count.total", total_tokens)
-            current_span.set_attribute("llm.model_name", model_name)
-
-            try:
-                from tracing_enhancements import add_cost_attributes_to_span
-                add_cost_attributes_to_span(
-                    current_span,
-                    model_name,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens
-                )
-            except Exception as e:
-                print(f"⚠️  Error adding cost attributes: {e}")
-
-        print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total ({model_name})")
 
 
 class SACallAnalysisCrew:

@@ -496,10 +496,9 @@ class BraveSearchClient:
         return unique_results
 
     async def search_genai_product_name(self, company_name: str) -> list[SearchResult]:
-        """Search for the company's named AI/GenAI product or assistant (e.g. Gus, Einstein).
+        """Search for the company's named AI/GenAI product or assistant (e.g. Gus, Einstein, Fillip).
 
-        Hypothesis Formation: Identify the prospect's actual GenAI offering by name
-        so hypotheses can reference it and frame Arize value in their terms.
+        Uses a direct question so search engines return snippets that often contain the answer.
 
         Args:
             company_name: Company name
@@ -507,24 +506,14 @@ class BraveSearchClient:
         Returns:
             List of results that may mention the product name
         """
-        queries = [
-            f'"{company_name}" AI assistant name product',
-            f'"{company_name}" GenAI product launch',
-            f'"{company_name}" AI agent name',
-            f'"{company_name}" AI tool name announced',
-            f'"{company_name}" name of AI product',
-        ]
-        all_results = []
-        for query in queries:
-            try:
-                results = await self.search(query, count=4, freshness="pm")
-                all_results.extend(results)
-                await asyncio.sleep(0.1)
-            except SearchAPIError:
-                continue
+        query = f"what is {company_name} AI agent called?"
+        try:
+            results = await self.search(query, count=10, freshness="pm")
+        except SearchAPIError:
+            return []
         seen_urls = set()
         unique_results = []
-        for r in all_results:
+        for r in results:
             if r.url not in seen_urls:
                 seen_urls.add(r.url)
                 unique_results.append(r)

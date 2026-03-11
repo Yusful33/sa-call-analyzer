@@ -1,5 +1,9 @@
 """Multi-agent orchestration use-case: shared prompts, queries, agent configs, guardrails, evaluators."""
 
+import random
+
+from .common import industry_key
+
 QUERIES = [
     "Research the latest trends in sustainable energy and draft a 500-word executive brief with investment recommendations.",
     "Analyze our Q3 customer churn data and produce an action plan to improve retention by 15%.",
@@ -10,6 +14,68 @@ QUERIES = [
     "Research best practices for LLM deployment in healthcare and draft internal guidelines.",
     "Analyze customer feedback from the last quarter and identify the top 5 feature requests with business justification.",
 ]
+
+# Industry-tailored multi-agent tasks for prospect-aware demos
+INDUSTRY_QUERIES: dict[str, list[str]] = {
+    "default": QUERIES,
+    "technology": QUERIES,
+    "financial": [
+        "Research recent SEC and FINRA regulatory updates and draft a compliance impact brief for our trading platform.",
+        "Analyze our Q3 trading volume and margin usage data and produce an action plan to reduce risk exposure.",
+        "Review competitor fee structures and create a positioning document for our brokerage offerings.",
+        "Investigate the root cause of the settlement delay last week and write a post-mortem report.",
+        "Evaluate three vendors for market data feeds and produce a recommendation with cost analysis.",
+        "Summarize recent regulatory changes in financial services and assess impact on our compliance posture.",
+        "Research best practices for fraud detection in real-time payment systems and draft internal guidelines.",
+        "Analyze customer feedback from the last quarter and identify the top 5 feature requests with business justification.",
+    ],
+    "travel": [
+        "Research the latest trends in airline ancillary revenue and draft a 500-word brief with recommendations.",
+        "Analyze our Q3 on-time performance and customer satisfaction data and produce an action plan.",
+        "Review competitor loyalty programs and create a positioning document for our miles program.",
+        "Investigate the root cause of the operational disruption last week and write a post-mortem report.",
+        "Evaluate three vendors for crew scheduling and produce a recommendation with cost analysis.",
+        "Summarize recent DOT and FAA regulatory updates and assess impact on our operations.",
+        "Research best practices for dynamic pricing in airline distribution and draft internal guidelines.",
+        "Analyze customer feedback from the last quarter and identify the top 5 complaints with remediation plans.",
+    ],
+    "retail": [
+        "Research the latest trends in omnichannel retail and draft a brief with investment recommendations.",
+        "Analyze our Q3 inventory turnover and markdown data and produce an action plan.",
+        "Review competitor loyalty programs and create a positioning document.",
+        "Investigate the root cause of the fulfillment delay last week and write a post-mortem report.",
+        "Evaluate three vendors for demand forecasting and produce a recommendation with cost analysis.",
+        "Summarize recent consumer privacy regulations and assess impact on our data practices.",
+        "Research best practices for shrink prevention and draft internal guidelines.",
+        "Analyze customer feedback from the last quarter and identify the top 5 feature requests.",
+    ],
+    "healthcare": [
+        "Research recent FDA guidance on AI in clinical decision support and draft a compliance brief.",
+        "Analyze our Q3 readmission and quality metrics and produce an action plan.",
+        "Review competitor EHR integrations and create a positioning document.",
+        "Investigate the root cause of the clinical workflow issue last week and write a post-mortem report.",
+        "Evaluate three vendors for patient engagement and produce a recommendation with cost analysis.",
+        "Summarize recent HIPAA and state privacy updates and assess impact on our posture.",
+        "Research best practices for clinical documentation and draft internal guidelines.",
+        "Analyze patient feedback from the last quarter and identify the top 5 improvement areas.",
+    ],
+}
+
+
+def get_queries_for_prospect(prospect_context: dict | None) -> list[str]:
+    """Return multi-agent tasks tailored to the prospect's industry."""
+    if not prospect_context:
+        return INDUSTRY_QUERIES["default"]
+    key = industry_key(prospect_context.get("industry"))
+    return INDUSTRY_QUERIES.get(key, INDUSTRY_QUERIES["default"])
+
+
+def sample_query(prospect_context=None, rng=None, **kwargs):
+    """Contract: sample_query(prospect_context, rng) -> str. Industry-aware sampling."""
+    queries = get_queries_for_prospect(prospect_context)
+    if rng is not None:
+        return rng.choice(queries)
+    return random.choice(queries)
 
 # Agent role definitions for the multi-agent orchestration
 AGENTS = [
@@ -51,7 +117,7 @@ WRITER_PROMPT = "You are a professional writer. Given the analysis and research,
 
 REVIEWER_PROMPT = "You are a quality reviewer. Review the following document for factual accuracy, logical consistency, completeness, and clarity. Provide a brief assessment and any corrections needed."
 
-# ---- Tools (simulated) ----
+# ---- Tools ----
 
 # Minimal delay so TOOL spans have non-zero duration in traces (avoids 0s warning in Arize).
 _TOOL_SPAN_MIN_DURATION_SEC = 0.02
@@ -100,14 +166,6 @@ GUARDRAILS = [
         "system_prompt": (
             "Check if the user request is within acceptable scope for an enterprise AI assistant. "
             "Reject requests for personal advice, illegal activities, or topics outside business use. "
-            "Respond ONLY 'PASS' or 'FAIL: <reason>'."
-        ),
-    },
-    {
-        "name": "Content Safety Check",
-        "system_prompt": (
-            "You are a content safety filter. Check if the input contains unsafe, "
-            "harmful, or inappropriate content. "
             "Respond ONLY 'PASS' or 'FAIL: <reason>'."
         ),
     },

@@ -15,14 +15,14 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_llm_in_context, run_guardrail, run_in_context
 from ...use_cases.mcp import (
-    QUERIES,
     MCP_SERVERS,
     GUARDRAILS,
     SYSTEM_PROMPT_DISCOVER,
     SYSTEM_PROMPT_PLAN,
     SYSTEM_PROMPT_SYNTHESIZE,
-    get_simulated_tool_results,
+    get_tool_results,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 class MCPState(TypedDict):
@@ -51,8 +51,14 @@ def run_mcp(
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.mcp.langgraph")
 
+    from ...use_cases import mcp as mcp_use_case
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(mcp_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
     servers_info = _json.dumps(
@@ -96,7 +102,7 @@ def run_mcp(
         return {"execution_plan": result}
 
     def execute_tools_node(state: MCPState) -> dict:
-        tool_results = get_simulated_tool_results(num_tools=3)
+        tool_results = get_tool_results(num_tools=3)
         return {"tool_results": tool_results}
 
     def synthesize_node(state: MCPState) -> dict:
@@ -130,16 +136,16 @@ def run_mcp(
     graph = workflow.compile()
 
     # --- Execute with root span ---
-    with tracer.start_as_current_span(
-        "mcp_agent",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "langgraph",
-            "metadata.use_case": "mcp-tool-use",
-        },
-    ) as span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "langgraph",
+        "metadata.use_case": "mcp-tool-use",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("mcp_agent", attributes=attrs) as span:
         result = run_in_context(graph.invoke, {
             "query": query,
             "discovered_tools": "",
@@ -150,6 +156,9 @@ def run_mcp(
         })
         span.set_attribute("output.value", result["response"])
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.discovered_tools", (result.get("discovered_tools") or "")[:2000])
+        span.set_attribute("context.execution_plan", (result.get("execution_plan") or "")[:1000])
+        span.set_attribute("context.tool_results", _json.dumps(result.get("tool_results") or [], default=str)[:2000])
         span.set_status(Status(StatusCode.OK))
 
     return {

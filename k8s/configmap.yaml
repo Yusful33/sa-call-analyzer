@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: id-pain-config
+  namespace: id-pain
+data:
+  PORT: "8080"
+  MODEL_NAME: "claude-3-5-haiku-20241022"
+  # LiteLLM (in-cluster service; set USE_LITELLM to "false" to call providers directly from id-pain)
+  USE_LITELLM: "true"
+  LITELLM_BASE_URL: "http://litellm:4000"
+  LITELLM_API_KEY: "dummy"
+  # Gong MCP HTTP server (in-cluster)
+  GONG_MCP_URL: "http://gong-http-server:8080"
+  # CrewAI / observability
+  CREWAI_TELEMETRY_OPT_OUT: "true"
+  CREWAI_DISABLE_TELEMETRY: "true"
+  CREWAI_INSTRUMENTATION_ENABLED: "false"
+  OTEL_SDK_DISABLED: "false"
+  OTEL_TRACES_EXPORTER: "none"
+  OTEL_METRICS_EXPORTER: "none"
+  OTEL_LOGS_EXPORTER: "none"

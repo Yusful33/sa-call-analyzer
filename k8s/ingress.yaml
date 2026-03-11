@@ -1,0 +1,22 @@
+# Optional: expose id-pain via ALB. Requires AWS Load Balancer Controller.
+# Update host or remove to use ALB DNS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: id-pain
+  namespace: id-pain
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: id-pain
+                port:
+                  number: 80

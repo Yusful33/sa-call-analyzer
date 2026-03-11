@@ -103,6 +103,9 @@ from observability import (
     get_provider_for_component,
     set_request_tracer_provider,
     get_current_project_name,
+    force_flush_current_request,
+    COMPONENT_HYPOTHESIS,
+    PROJECT_HYPOTHESIS,
 )
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
@@ -140,6 +143,18 @@ app.add_middleware(
 )
 
 
+# #region agent log
+def _agent_log(location: str, message: str, data: dict, hypothesis_id: str = "H4"):
+    import json
+    from datetime import datetime
+    try:
+        with open("/Users/yusufcattaneo/Projects/.cursor/debug-24e5e3.log", "a") as f:
+            f.write(json.dumps({"sessionId": "24e5e3", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": datetime.utcnow().isoformat() + "Z"}) + "\n")
+    except Exception:
+        pass
+# #endregion
+
+
 @app.middleware("http")
 async def arize_project_middleware(request, call_next):
     """Set the active Arize tracer provider by component so each of the 4 components writes to its own project."""
@@ -148,6 +163,7 @@ async def arize_project_middleware(request, call_next):
         provider = get_provider_for_component(component)
         if provider is not None:
             set_request_tracer_provider(provider)  # update proxy's current provider (instrumentors use the proxy)
+        _agent_log("main.py:arize_project_middleware", "path and component", {"path": request.url.path, "component": component}, "H4")
     return await call_next(request)
 
 
@@ -1547,15 +1563,22 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     yield _sse_event("progress", {"message": f"Generating trace {i + 1}/{num_traces} ({quality_label})..."})
 
                     def _run_pipeline(trace_idx=i):
-                        # Run pipeline in an isolated context so trace hierarchy is correct.
-                        # asyncio.to_thread does NOT propagate OTel context to worker threads;
-                        # we must run with explicit context to avoid orphaned/incomplete traces.
+                        # Run pipeline with an explicit root span so all runner and instrumentor
+                        # spans parent to it (avoids orphaned spans when using asyncio.to_thread).
                         def _body():
-                            ctx = trace.set_span_in_context(trace.INVALID_SPAN)
-                            token = otel_context.attach(ctx)
-                            try:
-                                from arize_demo_traces.runners.registry import get_runner
-                                from arize_demo_traces.eval_wrapper import run_with_evals
+                            from opentelemetry.context import Context
+                            from arize_demo_traces.runners.registry import get_runner
+                            from arize_demo_traces.eval_wrapper import run_with_evals
+                            tracer = demo_provider.get_tracer("arize-demo-trace-service") if demo_provider else trace.get_tracer("arize-demo-trace-service")
+                            with tracer.start_as_current_span(
+                                "demo_run",
+                                context=Context(),
+                                attributes={
+                                    "demo.use_case": use_case,
+                                    "demo.framework": framework,
+                                    "demo.trace_index": trace_idx,
+                                },
+                            ):
                                 runner = get_runner(framework, use_case)
                                 return run_with_evals(
                                     runner=runner,
@@ -1567,10 +1590,7 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                                     force_bad=(trace_idx in bad_indices),
                                     prospect_context=prospect_context,
                                 )
-                            finally:
-                                otel_context.detach(token)
 
-                        # Run in fresh context so worker thread has proper OTel context from the start
                         run_ctx = contextvars.copy_context()
                         return run_ctx.run(_body)
 
@@ -1824,13 +1844,20 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
         bad_indices = set(_random.sample(range(num_traces), k=max(1, int(num_traces * 0.3))))
         for i in range(num_traces):
             def _run_pipeline(_trace_idx=i):
-                from opentelemetry import context as otel_context
                 def _body():
-                    ctx = trace.set_span_in_context(trace.INVALID_SPAN)
-                    token = otel_context.attach(ctx)
-                    try:
-                        from arize_demo_traces.runners.registry import get_runner
-                        from arize_demo_traces.eval_wrapper import run_with_evals
+                    from opentelemetry.context import Context
+                    from arize_demo_traces.runners.registry import get_runner
+                    from arize_demo_traces.eval_wrapper import run_with_evals
+                    tracer = demo_provider.get_tracer("arize-demo-trace-service") if demo_provider else trace.get_tracer("arize-demo-trace-service")
+                    with tracer.start_as_current_span(
+                        "demo_run",
+                        context=Context(),
+                        attributes={
+                            "demo.use_case": use_case,
+                            "demo.framework": framework,
+                            "demo.trace_index": _trace_idx,
+                        },
+                    ):
                         runner = get_runner(framework, use_case)
                         return run_with_evals(
                             runner=runner,
@@ -1842,8 +1869,6 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
                             force_bad=(_trace_idx in bad_indices),
                             prospect_context=prospect_context,
                         )
-                    finally:
-                        otel_context.detach(token)
                 return contextvars.copy_context().run(_body)
 
             try:
@@ -2045,7 +2070,16 @@ async def hypothesis_research(request: HypothesisResearchRequest):
         print(f"Hypothesis research init error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Research service unavailable: {str(e)[:200]}")
 
-    # Use api_span so the root span is created with the current provider's tracer (set by middleware).
+    # Ensure this request's traces go to the Arize "hypothesis-generator" project (explicit connection).
+    hyp_provider = get_provider_for_component(COMPONENT_HYPOTHESIS)
+    space_id_used = os.getenv("ARIZE_SPACE_ID", "")
+    if hyp_provider is not None:
+        set_request_tracer_provider(hyp_provider)
+        print(f"[Arize] Hypothesis research → project: {PROJECT_HYPOTHESIS!r}, space_id: {space_id_used!r}")
+    else:
+        print("[Arize] WARNING: Hypothesis tracer provider not available (observability may be disabled).")
+
+    # Use api_span so the root span is created with the current provider's tracer (set above).
     # That way root and all LangGraph/LLM child spans share the same trace_id and the Traces tab shows the tree.
     with api_span(
         "hypothesis_research",
@@ -2054,16 +2088,26 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             "company.name": request.company_name,
         },
     ) as span:
+        project_at_start = get_current_project_name()
+        _agent_log("main.py:hypothesis_research", "entry project", {"project": project_at_start}, "H1")
         if os.environ.get("ARIZE_TRACE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
-            project = get_current_project_name()
             ctx = span.get_span_context() if hasattr(span, "get_span_context") else None
             trace_id = format(ctx.trace_id, "032x") if ctx and hasattr(ctx, "trace_id") else None
-            print(f"[ARIZE_TRACE_DEBUG] hypothesis_research → project={project!r} trace_id={trace_id}")
+            print(f"[ARIZE_TRACE_DEBUG] hypothesis_research → project={project_at_start!r} trace_id={trace_id}")
         try:
             result, reasoning = await agent.research(
                 company_name=request.company_name.strip(),
                 company_domain=request.company_domain.strip() if request.company_domain else None,
             )
+
+            # Flush hypothesis provider so traces are exported before response (same pattern as demo)
+            hyp_provider = get_provider_for_component(COMPONENT_HYPOTHESIS)
+            if hyp_provider is not None and hasattr(hyp_provider, "force_flush"):
+                try:
+                    hyp_provider.force_flush(timeout_millis=15000)
+                    _agent_log("main.py:hypothesis_research", "after flush", {"flushed": True}, "H2")
+                except Exception as e:
+                    _agent_log("main.py:hypothesis_research", "after flush", {"flushed": False, "error": str(e)}, "H2")
 
             # Convert pydantic model to dict for JSON response
             result_dict = result.model_dump() if hasattr(result, 'model_dump') else result

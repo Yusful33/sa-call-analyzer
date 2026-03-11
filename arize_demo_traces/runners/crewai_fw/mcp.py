@@ -13,11 +13,11 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import run_guardrail
 from ...use_cases.mcp import (
-    QUERIES,
     MCP_SERVERS,
     GUARDRAILS,
-    get_simulated_tool_results,
+    get_tool_results,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_mcp(
@@ -34,26 +34,32 @@ def run_mcp(
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
+    from ...use_cases import mcp as mcp_use_case
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.mcp.crewai")
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(mcp_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
     servers_info = _json.dumps(
         [{"name": s["name"], "tools": s["tools"]} for s in MCP_SERVERS], indent=2
     )
 
-    with tracer.start_as_current_span(
-        "mcp_pipeline",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "crewai",
-            "metadata.use_case": "mcp-tool-use",
-        },
-    ) as pipeline_span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "crewai",
+        "metadata.use_case": "mcp-tool-use",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("mcp_pipeline", attributes=attrs) as pipeline_span:
 
         # === GUARDRAILS ===
         for g in GUARDRAILS:
@@ -113,7 +119,7 @@ def run_mcp(
         )
 
         # Simulate tool execution
-        tool_results = get_simulated_tool_results(num_tools=3)
+        tool_results = get_tool_results(num_tools=3)
 
         plan_task = Task(
             description=(
@@ -164,6 +170,8 @@ def run_mcp(
 
         pipeline_span.set_attribute("output.value", response)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.query", query[:1000])
+        pipeline_span.set_attribute("context.tool_results", _json.dumps(tool_results, default=str)[:2000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

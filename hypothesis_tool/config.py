@@ -22,9 +22,7 @@ class Settings(BaseSettings):
     arize_space_id: str = ""
     arize_api_key: str = ""
     arize_project_name: str = "ae-hypothesis-agent"
-    # Arize Prompt Hub: base URL for prompt_versions API (optional; default api.arize.com)
-    arize_prompt_api_base_url: str = "https://api.arize.com"
-    # Prompt version ID for plan_research step (Sales Research Assistant)
+    # Plan-research prompt: fetched via GraphQL (app.arize.com/graphql). Use prompt (container) ID.
     arize_plan_research_prompt_id: str = "UHJvbXB0OjMwNTI3Om9BbWo="
 
     # Database

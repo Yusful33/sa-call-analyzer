@@ -97,14 +97,6 @@ GUARDRAILS = [
             "Respond ONLY 'PASS' or 'FAIL: <reason>'."
         ),
     },
-    {
-        "name": "Content Safety Check",
-        "system_prompt": (
-            "You are a content safety filter. Check if the input contains unsafe, "
-            "harmful, or inappropriate content. "
-            "Respond ONLY 'PASS' or 'FAIL: <reason>'."
-        ),
-    },
 ]
 
 EVALUATORS = [
@@ -119,7 +111,7 @@ EVALUATORS = [
 ]
 
 
-# ---- Tools (simulated) ----
+# ---- Tools ----
 
 def lookup_routing_rules(category: str) -> str:
     """Look up routing rules for a ticket category."""

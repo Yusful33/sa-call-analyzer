@@ -175,6 +175,7 @@ def run_evaluator(tracer, name, question, response, llm, guard=None, criteria="q
 
 def run_tool_call(tracer, name, input_value, tool_fn, guard=None, **kwargs):
     """Create a TOOL span and execute a tool function."""
+    import json as _json
     from opentelemetry.trace import Status, StatusCode
 
     with tracer.start_as_current_span(
@@ -186,6 +187,8 @@ def run_tool_call(tracer, name, input_value, tool_fn, guard=None, **kwargs):
             "input.mime_type": "text/plain",
         },
     ) as span:
+        if kwargs:
+            span.set_attribute("tool.parameters", _json.dumps(kwargs, default=str)[:1000])
         if guard:
             guard.check()
         result = tool_fn(**kwargs)

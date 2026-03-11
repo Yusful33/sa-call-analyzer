@@ -201,6 +201,8 @@ def run_chatbot(
         agent_span.set_attribute("tools.count", len(tool_results))
         if tool_results:
             agent_span.set_attribute("metadata.tools_used", ",".join(r["tool"] for r in tool_results))
+            agent_span.set_attribute("context.tool_results", tool_output_text[:2000])
+        agent_span.set_attribute("context.plan", plan[:1000] if plan else "")
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

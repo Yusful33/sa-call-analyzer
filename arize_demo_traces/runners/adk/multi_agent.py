@@ -26,7 +26,6 @@ from ...cost_guard import CostGuard
 from ...llm import get_chat_llm
 from ...trace_enrichment import invoke_chain_in_context, run_guardrail, run_tool_call
 from ...use_cases.multi_agent import (
-    QUERIES,
     GUARDRAILS,
     SUPERVISOR_PROMPT,
     RESEARCH_PROMPT,
@@ -36,6 +35,7 @@ from ...use_cases.multi_agent import (
     search_web,
     analyze_metrics,
 )
+from ..common_runner_utils import get_query_for_run
 
 
 def run_multi_agent(
@@ -55,21 +55,27 @@ def run_multi_agent(
     provider = tracer_provider or trace.get_tracer_provider()
     tracer = provider.get_tracer("demo.multi_agent.adk")
 
+    from ...use_cases import multi_agent as multi_agent_use_case
     if not query:
-        query = random.choice(QUERIES)
+        rng = kwargs.get("rng")
+        _kw = {k: v for k, v in kwargs.items() if k != "rng"}
+        query_spec = get_query_for_run(multi_agent_use_case, prospect_context=prospect_context, rng=rng, **_kw)
+        query = query_spec.text
+    else:
+        query_spec = None
 
     llm = get_chat_llm(model, temperature=0)
 
-    with tracer.start_as_current_span(
-        "orchestrator_agent.run",
-        attributes={
-            "openinference.span.kind": "AGENT",
-            "input.value": query,
-            "input.mime_type": "text/plain",
-            "metadata.framework": "adk",
-            "metadata.use_case": "multi-agent-orchestration",
-        },
-    ) as agent_span:
+    attrs = {
+        "openinference.span.kind": "AGENT",
+        "input.value": query,
+        "input.mime_type": "text/plain",
+        "metadata.framework": "adk",
+        "metadata.use_case": "multi-agent-orchestration",
+    }
+    if query_spec:
+        attrs.update(query_spec.to_span_attributes())
+    with tracer.start_as_current_span("orchestrator_agent.run", attributes=attrs) as agent_span:
 
         # ---- Guardrails ----
         for g in GUARDRAILS:
@@ -237,6 +243,10 @@ def run_multi_agent(
 
         agent_span.set_attribute("output.value", answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
+        agent_span.set_attribute("context.plan", plan[:1000] if plan else "")
+        agent_span.set_attribute("context.research_summary", research_output[:2000])
+        agent_span.set_attribute("context.analysis_summary", analysis_output[:2000])
+        agent_span.set_attribute("context.draft", writer_output[:2000])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

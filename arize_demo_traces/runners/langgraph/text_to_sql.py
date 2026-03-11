@@ -125,6 +125,9 @@ def run_text_to_sql(
         })
         span.set_attribute("output.value", result["generated_sql"])
         span.set_attribute("output.mime_type", "text/plain")
+        span.set_attribute("context.query_type", result.get("query_type", "")[:200])
+        span.set_attribute("context.generated_sql", (result.get("generated_sql") or "")[:2000])
+        span.set_attribute("context.validation", (result.get("validation") or "")[:1000])
         span.set_status(Status(StatusCode.OK))
 
     return {

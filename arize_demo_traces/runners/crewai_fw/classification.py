@@ -153,6 +153,7 @@ def run_classification(
 
         root_span.set_attribute("output.value", answer)
         root_span.set_attribute("output.mime_type", "text/plain")
+        root_span.set_attribute("context.query", query[:1000])
         root_span.set_status(Status(StatusCode.OK))
 
     return {

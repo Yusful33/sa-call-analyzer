@@ -50,7 +50,7 @@ def run_multimodal(
 
     # Handle query: None -> random dict, string -> wrap with default image description
     if query is None:
-        q = get_random_query()
+        q = get_random_query(prospect_context)
         query_text = q["text"]
         image_description = q["image_description"]
     elif isinstance(query, dict):
@@ -176,6 +176,9 @@ def run_multimodal(
 
         pipeline_span.set_attribute("output.value", summary)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.classification", classification[:500])
+        pipeline_span.set_attribute("context.analysis", analysis[:2000])
+        pipeline_span.set_attribute("context.extraction", extraction[:2000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

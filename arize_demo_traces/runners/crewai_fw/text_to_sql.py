@@ -126,6 +126,8 @@ def run_text_to_sql(
 
         pipeline_span.set_attribute("output.value", generated_sql)
         pipeline_span.set_attribute("output.mime_type", "text/plain")
+        pipeline_span.set_attribute("context.query", query[:1000])
+        pipeline_span.set_attribute("context.generated_sql", generated_sql[:2000])
         pipeline_span.set_status(Status(StatusCode.OK))
 
     return {

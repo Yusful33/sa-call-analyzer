@@ -36,13 +36,17 @@ INDUSTRY_QUERIES: dict[str, list[str]] = {
         "How do I configure SSO for store and HQ systems?",
     ],
     "financial": [
-        "What compliance certifications are supported?",
         "What was last quarter's revenue?",
+        "What compliance certifications are supported?",
         "How do I configure SSO with Okta?",
         "What are best practices for fraud detection and risk modeling?",
         "What are key considerations for regulatory reporting?",
         "How do I set up monitoring for transaction systems?",
         "What metrics matter for deposits and lending?",
+        "What are the fees for options and crypto trading?",
+        "How do I enable margin trading and what are the requirements?",
+        "When are dividends paid and how do I view my dividend history?",
+        "What is the policy for disputed charges and chargebacks?",
     ],
     "healthcare": [
         "What compliance certifications are supported?",
@@ -58,6 +62,11 @@ INDUSTRY_QUERIES: dict[str, list[str]] = {
         "What are best practices for dynamic pricing and distribution?",
         "How do I set up monitoring for booking systems?",
         "What metrics matter for occupancy and RevPAR?",
+        "What is your flight change and cancellation policy?",
+        "How do I redeem miles for a flight and what are blackout dates?",
+        "What is the baggage allowance for my fare class?",
+        "How do I add a companion to my reservation?",
+        "What compensation do I get for a delayed or cancelled flight?",
     ],
 }
 
@@ -88,7 +97,12 @@ SAMPLE_DOCS = [
     Document(page_content="Multi-agent architectures use a supervisor agent to delegate tasks to specialized worker agents. Common patterns include hierarchical delegation, peer-to-peer collaboration, and blackboard architectures.", metadata={"source": "multi-agent.md"}),
 ]
 
-SYSTEM_PROMPT = "You are a helpful assistant. Use the following context to answer the user's question accurately and concisely.\n\nContext:\n{context}"
+SYSTEM_PROMPT = (
+    "You are a helpful assistant. Use ONLY the information in the context below to answer the user's question. "
+    "Respond with a single, concise answer in plain language as if speaking directly to the user. "
+    "Do not repeat the context, cite internal source names or filenames, include metadata, or mention tools/guardrails. "
+    "Your reply must be only the answer—nothing else.\n\nContext:\n{context}"
+)
 
 GUARDRAILS = [
     {
@@ -120,7 +134,7 @@ EVALUATORS = [
     },
 ]
 
-# ---- Tools (simulated) ----
+# ---- Tools ----
 
 def search_documents(query: str) -> str:
     """Search the knowledge base for relevant documents."""
