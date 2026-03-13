@@ -1,5 +1,5 @@
-# Replace <AWS_ACCOUNT_ID> and <AWS_REGION> before applying, e.g.:
-# sed -e 's/<AWS_ACCOUNT_ID>/123456789012/' -e 's/<AWS_REGION>/us-east-1/' k8s/deployment.yaml | kubectl apply -f -
+# Replace 574016082345 and us-east-1 before applying, e.g.:
+# sed -e 's/574016082345/123456789012/' -e 's/us-east-1/us-east-1/' k8s/deployment.yaml | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/id-pain:latest
+          image: 574016082345.dkr.ecr.us-east-1.amazonaws.com/id-pain:latest
           ports:
             - containerPort: 8080
               name: http
@@ -30,11 +30,11 @@ spec:
                 name: id-pain-secrets
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "200m"
+              memory: "384Mi"
+              cpu: "100m"
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "768Mi"
+              cpu: "500m"
           livenessProbe:
             httpGet:
               path: /health

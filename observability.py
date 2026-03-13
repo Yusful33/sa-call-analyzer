@@ -123,6 +123,36 @@ def _add_cleaning_processor(tracer_provider, enable_cleaning: bool) -> None:
             multi_processor._span_processors = (cleaning_processor,) + existing_processors
 
 
+def _add_grafana_alloy_otlp_processor(tracer_provider) -> bool:
+    """
+    If GRAFANA_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is set,
+    add a BatchSpanProcessor that exports traces to that OTLP endpoint (e.g. Grafana Alloy).
+    Returns True if the processor was added.
+    """
+    endpoint = (
+        os.getenv("GRAFANA_OTLP_TRACES_ENDPOINT")
+        or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    )
+    if not endpoint or not endpoint.strip():
+        return False
+    endpoint = endpoint.strip()
+    use_grpc = os.getenv("GRAFANA_OTLP_USE_GRPC", "true").lower() == "true"
+    try:
+        if use_grpc:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        else:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
+        processor = BatchSpanProcessor(exporter)
+        if hasattr(tracer_provider, "add_span_processor"):
+            tracer_provider.add_span_processor(processor)
+            return True
+    except Exception as e:
+        logging.getLogger(__name__).warning("Could not add Grafana Alloy OTLP exporter: %s", e)
+    return False
+
+
 def setup_observability(
     project_name: str = "sa-call-analyzer",
     arize_api_key: Optional[str] = None,

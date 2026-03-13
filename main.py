@@ -1487,9 +1487,16 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                         crewai_instrumentor = CrewAIInstrumentor()
                     except ImportError:
                         pass
-                api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
-                space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
+                api_key = (request.arize_api_key or os.getenv("ARIZE_API_KEY") or "").strip()
+                space_id = (request.arize_space_id or os.getenv("ARIZE_SPACE_ID") or "").strip()
+                _saved_arize_space_id = None
+                _saved_arize_api_key = None
                 if api_key and space_id:
+                    # So the Arize OTLP exporter (and any SDK code reading env) uses the Custom Demo credentials
+                    _saved_arize_space_id = os.environ.pop("ARIZE_SPACE_ID", None)
+                    _saved_arize_api_key = os.environ.pop("ARIZE_API_KEY", None)
+                    os.environ["ARIZE_SPACE_ID"] = space_id
+                    os.environ["ARIZE_API_KEY"] = api_key
                     try:
                         from arize.otel import Transport
                         _transport = Transport.HTTP
@@ -1512,6 +1519,10 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                     if _transport is not None:
                         _reg_kw["transport"] = _transport
                     demo_provider = arize_register(**_reg_kw)
+                    yield _sse_event(
+                        "progress",
+                        {"message": f"Traces will be sent to your Arize space (project: {demo_project_name}). Use the link at the end to open it."},
+                    )
                     # Re-instrument libraries with demo provider so LLM calls
                     # are traced to the demo project instead of sa-call-analyzer
                     LangChainInstrumentor().uninstrument()
@@ -1651,6 +1662,15 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                         except Exception:
                             pass
                     demo_provider.shutdown()
+                # Restore Arize env vars if we overrode them for Custom Demo credentials
+                if _saved_arize_space_id is not None:
+                    os.environ["ARIZE_SPACE_ID"] = _saved_arize_space_id
+                elif "ARIZE_SPACE_ID" in os.environ:
+                    del os.environ["ARIZE_SPACE_ID"]
+                if _saved_arize_api_key is not None:
+                    os.environ["ARIZE_API_KEY"] = _saved_arize_api_key
+                elif "ARIZE_API_KEY" in os.environ:
+                    del os.environ["ARIZE_API_KEY"]
 
             if demo_provider is not None:
                 yield _sse_event(
@@ -1737,9 +1757,15 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
         # Skip OpenAI instrumentor to avoid duplicate ChatOpenAI + ChatCompletion spans (same LLM call).
         instrument_openai = False
         crewai_instrumentor = None
-        api_key = request.arize_api_key or os.getenv("ARIZE_API_KEY")
-        space_id = request.arize_space_id or os.getenv("ARIZE_SPACE_ID")
+        api_key = (request.arize_api_key or os.getenv("ARIZE_API_KEY") or "").strip()
+        space_id = (request.arize_space_id or os.getenv("ARIZE_SPACE_ID") or "").strip()
+        _saved_arize_space_id = None
+        _saved_arize_api_key = None
         if api_key and space_id:
+            _saved_arize_space_id = os.environ.pop("ARIZE_SPACE_ID", None)
+            _saved_arize_api_key = os.environ.pop("ARIZE_API_KEY", None)
+            os.environ["ARIZE_SPACE_ID"] = space_id
+            os.environ["ARIZE_API_KEY"] = api_key
             try:
                 from arize.otel import Transport
                 _transport = Transport.HTTP
@@ -1939,6 +1965,14 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
             except Exception:
                 pass
             demo_provider.shutdown()
+        if _saved_arize_space_id is not None:
+            os.environ["ARIZE_SPACE_ID"] = _saved_arize_space_id
+        elif "ARIZE_SPACE_ID" in os.environ:
+            del os.environ["ARIZE_SPACE_ID"]
+        if _saved_arize_api_key is not None:
+            os.environ["ARIZE_API_KEY"] = _saved_arize_api_key
+        elif "ARIZE_API_KEY" in os.environ:
+            del os.environ["ARIZE_API_KEY"]
 
 
 # ============================================================

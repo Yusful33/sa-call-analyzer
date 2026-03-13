@@ -8,5 +8,5 @@ COPY config.yaml /app/config.yaml
 # Default to 4000 if PORT not set
 ENV PORT=4000
 
-# Use shell form to allow variable expansion
+ENTRYPOINT []
 CMD litellm --config /app/config.yaml --port $PORT --host 0.0.0.0

@@ -3,6 +3,8 @@
 import re
 from enum import Enum
 
+from opentelemetry import trace
+
 from ..clients.brave_client import SearchResult
 from ..models.hypothesis import (
     AIMLSignal,
@@ -432,7 +434,8 @@ class SignalExtractor:
         Returns:
             Company summary string
         """
-        # Format search results for LLM
+        tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
+        # Format search results for LLM (this is where the ChatAnthropic input under analyze_signals is built)
         search_text = "\n".join(
             f"- {r.title}: {r.description}" for r in search_results[:10]
         )
@@ -462,13 +465,61 @@ Recent News:
 Provide a factual summary prioritizing evidence of LLM/GenAI adoption. If there's limited evidence of GenAI work, note what traditional ML or AI they might be using instead. Be specific about what you found."""
 
         from langchain_core.messages import HumanMessage
-        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        if isinstance(response.content, str):
-            return response.content
-        if isinstance(response.content, list) and response.content:
-            part = response.content[0]
-            return getattr(part, "text", str(part))
-        return str(response.content) if response.content else ""
+        # CHAIN span so the trace shows "where the input is generated" (prompt built from search/job/news results, then LLM call)
+        input_summary = (
+            f"company={company_name}, search_results={len(search_results[:10])}, "
+            f"job_results={len(job_results[:5])}, news_results={len(news_results[:5])}"
+        )
+        input_sources = (
+            "Input to this LLM is built HERE in SignalExtractor.analyze_with_llm from agent state: "
+            "state.ai_ml_results (up to 10), state.job_results (up to 5), state.news_results (up to 5). "
+            "That state is populated by the execute_research node (Brave search + job/news APIs)."
+        )
+        _MAX_ATTR = 2000  # truncate prompt/response in span attributes
+        with tracer.start_as_current_span(
+            "company_summary_llm",
+            attributes={
+                "openinference.span.kind": "CHAIN",
+                "input.value": input_summary[:500],
+                "metadata.input_sources": input_sources[:1000],
+            },
+        ) as span:
+            # LLM span so Arize shows it as a ChatAnthropic-style call (icon, model, tokens).
+            # LangChain instrumentor parents its span to LangGraph; we keep our own LLM span here.
+            invoke_attrs = {
+                "openinference.span.kind": "LLM",
+                "llm.model_name": getattr(self.llm, "model", None) or self.llm_model or "claude",
+                "input.value": (prompt[: _MAX_ATTR] + "..." if len(prompt) > _MAX_ATTR else prompt),
+                "metadata.input_sources": (
+                    "This prompt is built by parent span company_summary_llm from: "
+                    "state.ai_ml_results (AI/ML search), state.job_results, state.news_results. "
+                    "State comes from execute_research."
+                )[:1000],
+            }
+            with tracer.start_as_current_span("company_summary_llm.invoke", attributes=invoke_attrs) as invoke_span:
+                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                if isinstance(response.content, str):
+                    summary = response.content
+                elif isinstance(response.content, list) and response.content:
+                    part = response.content[0]
+                    summary = getattr(part, "text", str(part))
+                else:
+                    summary = str(response.content) if response.content else ""
+                out_val = summary[: _MAX_ATTR] + "..." if len(summary) > _MAX_ATTR else summary
+                invoke_span.set_attribute("output.value", out_val)
+                # Token usage from ChatAnthropic response_metadata so Arize shows tokens/cost
+                meta = getattr(response, "response_metadata", None) or {}
+                usage = meta.get("usage") or {}
+                if usage:
+                    inp = usage.get("input_tokens", 0)
+                    out = usage.get("output_tokens", 0)
+                    invoke_span.set_attribute("llm.token_count.prompt", inp)
+                    invoke_span.set_attribute("llm.token_count.completion", out)
+                    invoke_span.set_attribute("llm.token_count.total", inp + out)
+                if meta.get("model"):
+                    invoke_span.set_attribute("llm.model_name", meta["model"])
+            span.set_attribute("output.value", (summary[:1000] + "..." if len(summary) > 1000 else summary))
+            return summary
 
     async def build_company_research(
         self,

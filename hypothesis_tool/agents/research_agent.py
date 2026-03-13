@@ -33,6 +33,20 @@ def _get_current_project() -> str | None:
         return get_current_project_name()
     except Exception:
         return None
+
+
+def _set_llm_usage(span, response) -> None:
+    """Set OpenInference LLM token counts (and model) on span from ChatAnthropic response_metadata."""
+    meta = getattr(response, "response_metadata", None) or {}
+    usage = meta.get("usage") or {}
+    if usage:
+        inp = usage.get("input_tokens", 0)
+        out = usage.get("output_tokens", 0)
+        span.set_attribute("llm.token_count.prompt", inp)
+        span.set_attribute("llm.token_count.completion", out)
+        span.set_attribute("llm.token_count.total", inp + out)
+    if meta.get("model"):
+        span.set_attribute("llm.model_name", meta["model"])
 # #endregion
 
 from langchain_anthropic import ChatAnthropic
@@ -264,14 +278,28 @@ class ResearchAgent:
                 _debug_log("24e5e3", "H1", "research_agent.py:_wrap_node", "project inside graph task", {"project": _get_current_project(), "node_name": node_name})
             tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
             company = state.get("company_name", "") or ""
+            attrs = {
+                "openinference.span.kind": "CHAIN",
+                "hypothesis_agent.node": node_name,
+                "company.name": company,
+                "input.value": f"{node_name} for {company}"[:500],
+            }
+            if node_name == "analyze_signals":
+                attrs["metadata.llm_input_sources"] = (
+                    "This node runs two LLM calls. (1) Company summary: input built in SignalExtractor.analyze_with_llm "
+                    "from state.ai_ml_results, job_results, news_results (from execute_research). "
+                    "(2) GenAI product extraction: input built in _analyze_signals from state.genai_product_search_results (from execute_research)."
+                )[:1000]
+            if node_name == "generate_hypotheses":
+                attrs["metadata.llm_input_sources"] = (
+                    "Prompt built in _generate_hypotheses from: company_summary, signals, competitive_situation, "
+                    "detected_tools (analyze_signals); playbook, industry (load_playbook, check_crm); "
+                    "discovered_genai_products (analyze_signals); team_insights (analyze_subagent_insights); "
+                    "value_driver_context (industry). Single LLM call outputs JSON hypotheses."
+                )[:1000]
             with tracer.start_as_current_span(
                 f"hypothesis_agent.{node_name}",
-                attributes={
-                    "openinference.span.kind": "CHAIN",
-                    "hypothesis_agent.node": node_name,
-                    "company.name": company,
-                    "input.value": f"{node_name} for {company}"[:500],
-                },
+                attributes=attrs,
             ) as span:
                 try:
                     result = await node_fn(state)
@@ -836,7 +864,7 @@ Be concise. Say "Unknown" for categories with no clear signals. Format as bullet
         if genai_results:
             tracer = trace.get_tracer("hypothesis_tool.agent", "1.0")
             with tracer.start_as_current_span(
-                "extract_genai_product",
+                "hypothesis_agent.extract_genai_product",
                 attributes={
                     "openinference.span.kind": "CHAIN",
                     "hypothesis_agent.genai_input_results_count": len(genai_results),
@@ -868,8 +896,25 @@ Search results:
                     # #region agent log
                     _debug_log("24e5e3", "H3", "research_agent._analyze_signals", "calling llm for genai extraction", {"prompt_len": len(prompt)})
                     # #endregion
-                    response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-                    content = (response.content if hasattr(response, "content") else str(response)).strip()
+                    # LLM span so Arize shows it as a ChatAnthropic-style call (icon, model, tokens).
+                    _max_attr = 2000
+                    _model = getattr(self.llm, "model", None) or "claude"
+                    with tracer.start_as_current_span(
+                        "extract_genai_product.llm_invoke",
+                        attributes={
+                            "openinference.span.kind": "LLM",
+                            "llm.model_name": _model,
+                            "input.value": (prompt[:_max_attr] + "..." if len(prompt) > _max_attr else prompt),
+                            "metadata.input_sources": (
+                                "Prompt built here in _analyze_signals from state.genai_product_search_results "
+                                "(up to 5 results, 300 chars each). State from execute_research node."
+                            )[:1000],
+                        },
+                    ) as _llm_span:
+                        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                        content = (response.content if hasattr(response, "content") else str(response)).strip()
+                        _llm_span.set_attribute("output.value", (content[:_max_attr] + "..." if len(content) > _max_attr else content))
+                        _set_llm_usage(_llm_span, response)
                     if debug_genai:
                         first_line = content.splitlines()[0].strip() if content.splitlines() else content[:80]
                         reasoning.append(f"GenAI extraction LLM reply: {first_line}")
@@ -925,22 +970,36 @@ GENAI_PRODUCT: None
 Article content:
 {fetched_text[:8000]}"""
                                 try:
-                                    phase2_response = await self.llm.ainvoke([HumanMessage(content=phase2_prompt)])
-                                    phase2_content = (phase2_response.content if hasattr(phase2_response, "content") else str(phase2_response)).strip()
-                                    for line in phase2_content.splitlines():
-                                        line = line.strip()
-                                        if line.upper().startswith("GENAI_PRODUCT:"):
-                                            rest = line[len("GENAI_PRODUCT:"):].strip()
-                                            if rest.upper() not in ("NONE", "N/A", ""):
-                                                if " - " in rest:
-                                                    name, desc = rest.split(" - ", 1)
-                                                    discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
-                                                else:
-                                                    discovered_genai_products = [{"product_name": rest, "product_description": ""}]
-                                                if discovered_genai_products:
-                                                    reasoning.append(f"Discovered GenAI product (from fetched page): {discovered_genai_products[0].get('product_name', '')}")
-                                                    _extract_span.set_attribute("hypothesis_agent.genai_product", discovered_genai_products[0].get("product_name", ""))
-                                            break
+                                    with tracer.start_as_current_span(
+                                        "extract_genai_product.llm_invoke_phase2",
+                                        attributes={
+                                            "openinference.span.kind": "LLM",
+                                            "llm.model_name": _model,
+                                            "input.value": (phase2_prompt[:_max_attr] + "..." if len(phase2_prompt) > _max_attr else phase2_prompt),
+                                            "metadata.input_sources": (
+                                                "Phase2: prompt built from fetched page content (genai_product_search_results URLs). "
+                                                "State from execute_research."
+                                            )[:1000],
+                                        },
+                                    ) as _llm_span2:
+                                        phase2_response = await self.llm.ainvoke([HumanMessage(content=phase2_prompt)])
+                                        phase2_content = (phase2_response.content if hasattr(phase2_response, "content") else str(phase2_response)).strip()
+                                        _llm_span2.set_attribute("output.value", (phase2_content[:_max_attr] + "..." if len(phase2_content) > _max_attr else phase2_content))
+                                        _set_llm_usage(_llm_span2, phase2_response)
+                                        for line in phase2_content.splitlines():
+                                            line = line.strip()
+                                            if line.upper().startswith("GENAI_PRODUCT:"):
+                                                rest = line[len("GENAI_PRODUCT:"):].strip()
+                                                if rest.upper() not in ("NONE", "N/A", ""):
+                                                    if " - " in rest:
+                                                        name, desc = rest.split(" - ", 1)
+                                                        discovered_genai_products = [{"product_name": name.strip(), "product_description": desc.strip()}]
+                                                    else:
+                                                        discovered_genai_products = [{"product_name": rest, "product_description": ""}]
+                                                    if discovered_genai_products:
+                                                        reasoning.append(f"Discovered GenAI product (from fetched page): {discovered_genai_products[0].get('product_name', '')}")
+                                                        _extract_span.set_attribute("hypothesis_agent.genai_product", discovered_genai_products[0].get("product_name", ""))
+                                                break
                                 except Exception:
                                     pass
                 except Exception:

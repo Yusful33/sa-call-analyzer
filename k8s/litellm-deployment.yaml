@@ -1,4 +1,4 @@
-# Replace <AWS_ACCOUNT_ID> and <AWS_REGION> before applying.
+# Replace 574016082345 and us-east-1 before applying.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: litellm
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/litellm:latest
+          image: 574016082345.dkr.ecr.us-east-1.amazonaws.com/litellm:latest
           ports:
             - containerPort: 4000
               name: http
@@ -29,10 +29,10 @@ spec:
                 name: litellm-secrets
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "192Mi"
+              cpu: "50m"
             limits:
-              memory: "512Mi"
+              memory: "384Mi"
               cpu: "500m"
           livenessProbe:
             httpGet:
