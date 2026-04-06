@@ -39,13 +39,15 @@ _EVAL_TEMPLATES = {
         "name": "hallucination_check",
         "template": """You are an expert evaluator assessing whether an AI assistant's response is faithful to the retrieved context.
 
-**User Question:** {{input}}
+The input field below includes the user question AND the retrieved context (when present), as recorded on the demo trace root span.
 
-**Assistant Response:** {{output}}
+**Input (user question and retrieved context):** {{input}}
+
+**Assistant response:** {{output}}
 
 Evaluate whether the response meets ALL of the following criteria:
-1. The response only contains information that is supported by or can be reasonably inferred from the retrieved context
-2. The response does not fabricate facts, statistics, policies, or procedures not present in the source documents
+1. The response only contains information that is supported by or can be reasonably inferred from the retrieved context section of the input
+2. The response does not fabricate facts, statistics, policies, or procedures not present in that source material
 3. The response does not contradict information from the retrieved documents (e.g., stating "no refunds" when the policy says "30-day refund")
 4. Numbers, dates, and specific claims in the response match the source material
 
@@ -254,6 +256,25 @@ If ANY criteria are NOT met, classify as "fail".
 Respond with ONLY "pass" or "fail".""",
 }
 
+# Second online task for RAG: judge TOOL span input/output (search + metadata tools)
+_RAG_TOOL_EVAL = {
+    "name": "rag_tool_fidelity",
+    "template": """You are evaluating tool outputs in a RAG pipeline.
+
+**Tool input:** {{input}}
+
+**Tool output:** {{output}}
+
+Evaluate whether:
+1. The output is relevant to the query or parameters implied by the tool input (e.g. search returns on-topic snippets).
+2. For a metadata tool, the output is coherent and the source identifier matches the request.
+3. The output does not read as an unrelated placeholder.
+
+Respond with ONLY "pass" or "fail".""",
+}
+
+RAG_USE_CASE = "retrieval-augmented-search"
+
 
 def get_suggested_evals(use_case: str | None = None) -> list[dict]:
     """Return suggested eval task configs for a use case (for display / optional creation).
@@ -266,7 +287,7 @@ def get_suggested_evals(use_case: str | None = None) -> list[dict]:
             f"attributes.openinference.span.kind = 'CHAIN' "
             f"AND attributes.metadata.use_case = '{use_case}'"
         )
-        return [
+        items = [
             {
                 "use_case": use_case,
                 "eval_name": config["name"],
@@ -275,6 +296,22 @@ def get_suggested_evals(use_case: str | None = None) -> list[dict]:
                 "template_preview": (config["template"][:200] + "...") if len(config["template"]) > 200 else config["template"],
             }
         ]
+        if use_case == RAG_USE_CASE:
+            tool_filter = (
+                f"attributes.openinference.span.kind = 'TOOL' "
+                f"AND attributes.metadata.use_case = '{RAG_USE_CASE}'"
+            )
+            tp = _RAG_TOOL_EVAL["template"]
+            items.append(
+                {
+                    "use_case": use_case,
+                    "eval_name": _RAG_TOOL_EVAL["name"],
+                    "task_name": f"{_RAG_TOOL_EVAL['name']}_<project>",
+                    "query_filter": tool_filter,
+                    "template_preview": (tp[:200] + "...") if len(tp) > 200 else tp,
+                }
+            )
+        return items
     # Suggest one generic fallback when no use_case
     return [
         {
@@ -587,7 +624,7 @@ def create_and_run_online_eval(
 
     task_name = task_name or f"{eval_name}_{project_name}"
 
-    # Step 4: Create the eval task
+    # Step 4: Create the primary eval task (and RAG tool-fidelity task when applicable)
     try:
         eval_task = _create_eval_task(
             project_id=project_id,
@@ -603,6 +640,25 @@ def create_and_run_online_eval(
         if not task_id:
             return {"error": "Failed to create eval task", "detail": eval_task}
 
+        tool_task_id = None
+        tool_task_name = None
+        if use_case == RAG_USE_CASE:
+            tool_filter = (
+                f"attributes.openinference.span.kind = 'TOOL' "
+                f"AND attributes.metadata.use_case = '{RAG_USE_CASE}'"
+            )
+            tool_task_name = f"{_RAG_TOOL_EVAL['name']}_{project_name}"
+            tool_eval_task = _create_eval_task(
+                project_id=project_id,
+                task_name=tool_task_name,
+                eval_name=_RAG_TOOL_EVAL["name"],
+                eval_template=_RAG_TOOL_EVAL["template"],
+                query_filter=tool_filter,
+                integration_id=integration_id,
+                api_key=api_key,
+            )
+            tool_task_id = tool_eval_task.get("id")
+
     except Exception as e:
         return {"error": f"Failed to create eval task: {e}"}
 
@@ -617,6 +673,14 @@ def create_and_run_online_eval(
             max_spans=max_spans,
             api_key=api_key,
         )
+        run_result_tool = None
+        if tool_task_id:
+            run_result_tool = _run_eval_task(
+                tool_task_id,
+                minutes_back=minutes_back,
+                max_spans=max_spans,
+                api_key=api_key,
+            )
         out = {
             "success": True,
             "task_id": task_id,
@@ -625,6 +689,11 @@ def create_and_run_online_eval(
             "use_case": use_case,
             **run_result,
         }
+        if tool_task_id:
+            out["tool_fidelity_task_id"] = tool_task_id
+            out["tool_fidelity_task_name"] = tool_task_name
+            out["tool_fidelity_eval_name"] = _RAG_TOOL_EVAL["name"]
+            out["tool_fidelity_backfill"] = run_result_tool
         if run_result.get("task_error"):
             out["backfill_task_error"] = run_result["task_error"]
             out["note"] = (
@@ -633,7 +702,7 @@ def create_and_run_online_eval(
             )
         return out
     except Exception as e:
-        return {
+        out = {
             "success": True,
             "task_id": task_id,
             "task_name": task_name,
@@ -642,3 +711,7 @@ def create_and_run_online_eval(
             "run_error": str(e),
             "note": "Task created and runs continuously on new spans. Backfill failed; you may re-run the eval from the Arize UI.",
         }
+        if tool_task_id:
+            out["tool_fidelity_task_id"] = tool_task_id
+            out["tool_fidelity_task_name"] = tool_task_name
+        return out

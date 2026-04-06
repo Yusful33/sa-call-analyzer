@@ -71,7 +71,7 @@ def _try_get_runner(framework: str, use_case: str) -> Callable | None:
 
 def _get_langgraph_runner(use_case: str) -> Callable | None:
     if use_case == RAG:
-        from .langgraph.rag import run_rag
+        from .langgraph.rag_tools import run_rag
         return run_rag
     elif use_case == CHATBOT:
         from .langgraph.chatbot import run_chatbot

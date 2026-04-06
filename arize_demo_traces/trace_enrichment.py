@@ -173,19 +173,22 @@ def run_evaluator(tracer, name, question, response, llm, guard=None, criteria="q
         return result
 
 
-def run_tool_call(tracer, name, input_value, tool_fn, guard=None, **kwargs):
+def run_tool_call(tracer, name, input_value, tool_fn, guard=None, metadata_use_case=None, **kwargs):
     """Create a TOOL span and execute a tool function."""
     import json as _json
     from opentelemetry.trace import Status, StatusCode
 
+    attrs = {
+        "openinference.span.kind": "TOOL",
+        "tool.name": name,
+        "input.value": str(input_value)[:500],
+        "input.mime_type": "text/plain",
+    }
+    if metadata_use_case:
+        attrs["metadata.use_case"] = metadata_use_case
     with tracer.start_as_current_span(
         name,
-        attributes={
-            "openinference.span.kind": "TOOL",
-            "tool.name": name,
-            "input.value": str(input_value)[:500],
-            "input.mime_type": "text/plain",
-        },
+        attributes=attrs,
     ) as span:
         if kwargs:
             span.set_attribute("tool.parameters", _json.dumps(kwargs, default=str)[:1000])

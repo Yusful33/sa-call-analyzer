@@ -20,6 +20,7 @@ from ...use_cases.rag import (
     fetch_document_metadata,
 )
 from ..common_runner_utils import get_query_for_run
+from ..registry import RAG
 
 
 def run_rag(
@@ -83,17 +84,24 @@ def run_rag(
         ) as step:
             if guard:
                 guard.check()
-            run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
+            run_tool_call(
+                tracer, "search_documents", query, search_documents,
+                guard=guard, metadata_use_case=RAG, query=query,
+            )
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
             retrieved = run_in_context(retriever.invoke, query)
             if retrieved:
-                run_tool_call(tracer, "fetch_document_metadata", retrieved[0].metadata.get("source", ""),
-                              fetch_document_metadata, guard=guard, source=retrieved[0].metadata.get("source", "unknown"))
+                run_tool_call(
+                    tracer, "fetch_document_metadata", retrieved[0].metadata.get("source", ""),
+                    fetch_document_metadata, guard=guard, metadata_use_case=RAG,
+                    source=retrieved[0].metadata.get("source", "unknown"),
+                )
             context = format_docs(retrieved)
             step.set_attribute("retrieval.documents", _json.dumps(
                 [{"content": d.page_content[:200], "source": d.metadata.get("source", "")} for d in retrieved]
             ))
+            step.set_attribute("rag.retrieval_context", context[:8000])
             step.set_attribute("output.value", context[:2000])
             step.set_status(Status(StatusCode.OK))
 

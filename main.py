@@ -1394,6 +1394,55 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
     )
 
 
+def _apply_demo_run_io(demo_span, result: dict, attrs: dict, use_case: str, framework: str) -> None:
+    """Enrich root demo_run span for Arize: I/O, mime types, OpenInference message JSON, RAG context."""
+    from arize_demo_traces.eval_wrapper import _extract_output
+
+    _max_attr = 5000
+    _ctx_cap = 8000
+    _max_combined_input = 12000  # allow question + context for RAG online evals
+    demo_span.set_attribute("metadata.use_case", use_case)
+    demo_span.set_attribute("metadata.framework", framework)
+    run_input = result.get("query") or result.get("question") or attrs["input.value"]
+    if isinstance(run_input, str) and len(run_input) > _max_attr:
+        run_input = run_input[:_max_attr] + "..."
+    run_input_s = run_input if isinstance(run_input, str) else str(run_input)[:_max_attr]
+    out = _extract_output(result)
+    out_trunc = out[:_max_attr] + "..." if len(out) > _max_attr else out
+
+    docs = result.get("retrieved_docs")
+    ctx = ""
+    if isinstance(docs, list) and docs:
+        ctx = "\n\n".join(
+            (d.get("content") or "")[:4000] for d in docs[:8]
+        )[:_ctx_cap]
+        demo_span.set_attribute("rag.retrieval_context", ctx)
+
+    # RAG online evals need retrieved text in {{input}}; embed context for faithfulness judges.
+    if use_case == "retrieval-augmented-search" and ctx:
+        combined_input = (
+            f"User question:\n{run_input_s}\n\nRetrieved context:\n{ctx}"
+        )
+        if len(combined_input) > _max_combined_input:
+            combined_input = combined_input[:_max_combined_input] + "..."
+        display_input = combined_input
+    else:
+        display_input = run_input_s
+
+    demo_span.set_attribute("input.value", display_input)
+    demo_span.set_attribute("input.mime_type", "text/plain")
+    demo_span.set_attribute("output.value", out_trunc)
+    demo_span.set_attribute("output.mime_type", "text/plain")
+    demo_span.set_attribute(
+        "llm.input_messages",
+        json.dumps([{"role": "user", "content": display_input}]),
+    )
+    demo_span.set_attribute(
+        "llm.output_messages",
+        json.dumps([{"role": "assistant", "content": out_trunc}]),
+    )
+
+
 @app.post("/api/generate-demo-stream")
 async def generate_demo_stream(request: GenerateDemoRequest):
     """
@@ -1581,17 +1630,18 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                             from arize_demo_traces.runners.registry import get_runner
                             from arize_demo_traces.eval_wrapper import run_with_evals
                             tracer = demo_provider.get_tracer("arize-demo-trace-service") if demo_provider else trace.get_tracer("arize-demo-trace-service")
-                            with tracer.start_as_current_span(
-                                "demo_run",
-                                context=Context(),
-                                attributes={
-                                    "demo.use_case": use_case,
-                                    "demo.framework": framework,
-                                    "demo.trace_index": trace_idx,
-                                },
-                            ):
+                            attrs = {
+                                "openinference.span.kind": "CHAIN",
+                                "demo.use_case": use_case,
+                                "demo.framework": framework,
+                                "demo.trace_index": trace_idx,
+                                "metadata.use_case": use_case,
+                                "metadata.framework": framework,
+                                "input.value": f"use_case={use_case}, framework={framework}",
+                            }
+                            with tracer.start_as_current_span("demo_run", context=Context(), attributes=attrs) as demo_span:
                                 runner = get_runner(framework, use_case)
-                                return run_with_evals(
+                                result = run_with_evals(
                                     runner=runner,
                                     use_case=use_case,
                                     framework=framework,
@@ -1601,6 +1651,8 @@ async def generate_demo_stream(request: GenerateDemoRequest):
                                     force_bad=(trace_idx in bad_indices),
                                     prospect_context=prospect_context,
                                 )
+                                _apply_demo_run_io(demo_span, result, attrs, use_case, framework)
+                                return result
 
                         run_ctx = contextvars.copy_context()
                         return run_ctx.run(_body)
@@ -1875,17 +1927,18 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
                     from arize_demo_traces.runners.registry import get_runner
                     from arize_demo_traces.eval_wrapper import run_with_evals
                     tracer = demo_provider.get_tracer("arize-demo-trace-service") if demo_provider else trace.get_tracer("arize-demo-trace-service")
-                    with tracer.start_as_current_span(
-                        "demo_run",
-                        context=Context(),
-                        attributes={
-                            "demo.use_case": use_case,
-                            "demo.framework": framework,
-                            "demo.trace_index": _trace_idx,
-                        },
-                    ):
+                    attrs = {
+                        "openinference.span.kind": "CHAIN",
+                        "demo.use_case": use_case,
+                        "demo.framework": framework,
+                        "demo.trace_index": _trace_idx,
+                        "metadata.use_case": use_case,
+                        "metadata.framework": framework,
+                        "input.value": f"use_case={use_case}, framework={framework}",
+                    }
+                    with tracer.start_as_current_span("demo_run", context=Context(), attributes=attrs) as demo_span:
                         runner = get_runner(framework, use_case)
-                        return run_with_evals(
+                        result = run_with_evals(
                             runner=runner,
                             use_case=use_case,
                             framework=framework,
@@ -1895,6 +1948,8 @@ async def _generate_demo_legacy_impl(request: GenerateDemoRequest):
                             force_bad=(_trace_idx in bad_indices),
                             prospect_context=prospect_context,
                         )
+                        _apply_demo_run_io(demo_span, result, attrs, use_case, framework)
+                        return result
                 return contextvars.copy_context().run(_body)
 
             try:

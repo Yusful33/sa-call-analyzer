@@ -705,6 +705,41 @@ class UserIssueEvent(BaseModel):
     recording_url: Optional[str] = None  # Direct link to FullStory recording
     timestamp: Optional[str] = None
     count: int = 1
+    # FullStory warehouse IDs (for precise session timeline queries)
+    fullstory_user_id: Optional[str] = None
+    fullstory_indv_id: Optional[str] = None
+
+
+class UserLast24hSurface(BaseModel):
+    """A feature or page surface used by a visitor in the last 24 hours"""
+    id: str
+    name: Optional[str] = None
+    count: int = 0
+
+
+class UserLast24hActivity(BaseModel):
+    """Per-visitor product activity in the rolling last 24 hours (Pendo + merged FullStory friction)"""
+    visitor_id: Optional[str] = None
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    total_events_24h: int = 0
+    total_minutes_24h: int = 0
+    first_activity_24h: Optional[str] = None
+    last_activity_24h: Optional[str] = None
+    top_features_24h: List[UserLast24hSurface] = Field(default_factory=list)
+    top_pages_24h: List[UserLast24hSurface] = Field(default_factory=list)
+    summary: str = ""
+    fullstory_issues_24h: List[UserIssueEvent] = Field(default_factory=list)
+    # LLM narrative from FullStory warehouse events (not video); null if disabled or unavailable
+    fullstory_behavior_summary: Optional[str] = None
+
+
+class AccountLast24hActivity(BaseModel):
+    """Account-level 24h telemetry with one row per active user"""
+    account_summary: Optional[str] = None
+    total_active_users_24h: int = 0
+    pendo_total_events_24h: int = 0
+    active_users: List[UserLast24hActivity] = Field(default_factory=list)
 
 
 class UserErrorEvent(BaseModel):
@@ -841,6 +876,9 @@ class ProspectOverview(BaseModel):
     
     # Product usage summary
     product_usage: Optional[ProductUsageSummary] = None
+    
+    # Last 24h: per-user Pendo + FullStory (friction) breakdown
+    last_24h_activity: Optional[AccountLast24hActivity] = None
     
     # ============================================================================
     # METADATA

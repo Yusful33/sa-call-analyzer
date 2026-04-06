@@ -1716,6 +1716,65 @@
                 return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`;
             };
 
+            const escapeHtml = (s) => {
+                if (s === null || s === undefined) return '';
+                return String(s)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            };
+
+            const buildLast24hExecutiveHtml = (l24) => {
+                if (!l24) return '';
+                const users = l24.active_users || [];
+                const userRows = users.map(u => {
+                    const label = escapeHtml(u.display_name || u.email || u.visitor_id || 'Unknown user');
+                    const emailLine = u.email && u.display_name ? `<div style="font-size:0.8em;color:#8ab4f8;">${escapeHtml(u.email)}</div>` : '';
+                    const sub = escapeHtml(u.summary || '');
+                    const feats = (u.top_features_24h || []).slice(0, 5).map(f =>
+                        `<li style="margin:2px 0;color:#d0d8e4;">${escapeHtml(f.name || f.id)} <span style="opacity:0.75">(${f.count})</span></li>`
+                    ).join('');
+                    const pgs = (u.top_pages_24h || []).slice(0, 5).map(p =>
+                        `<li style="margin:2px 0;color:#d0d8e4;">${escapeHtml(p.name || p.id)} <span style="opacity:0.75">(${p.count})</span></li>`
+                    ).join('');
+                    const issueItems = (u.fullstory_issues_24h || []).slice(0, 4).map(i => {
+                        const href = i.recording_url && String(i.recording_url).startsWith('https://') ? i.recording_url : '';
+                        const link = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#f5b041;font-size:0.78em;">Recording</a>` : '';
+                        const ctx = escapeHtml(i.page_context || i.issue_type || '');
+                        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px;font-size:0.78em;color:#e8c547;"><span>${ctx}</span>${link}</div>`;
+                    }).join('');
+                    const narrativeText = (u.fullstory_behavior_summary || '').trim();
+                    const hasFsIssues = (u.fullstory_issues_24h || []).length > 0;
+                    const fsNarrative = (narrativeText || hasFsIssues)
+                        ? `<div style="margin-top:10px;padding:10px 12px;background:rgba(126,214,255,0.08);border-radius:8px;border:1px solid rgba(126,214,255,0.25);">
+                            <div style="font-size:0.72em;text-transform:uppercase;letter-spacing:0.06em;color:#7dd3fc;margin-bottom:6px;">Session narrative (from FullStory data export)</div>
+                            <div style="font-size:0.86em;color:#e2edf5;line-height:1.55;white-space:pre-wrap;">${narrativeText ? escapeHtml(narrativeText) : '<span style="color:#9aa5b8;">No narrative returned yet — restart the Stillness API server and run Prospect Overview again.</span>'}</div>
+                            <div style="font-size:0.68em;color:#7a8fa6;margin-top:8px;">Built from warehouse events (URLs, clicks, loads), not video. Use Recording for the replay.</div>
+                           </div>`
+                        : '';
+                    return `
+                        <div style="margin-bottom:14px;padding:12px;background:rgba(0,0,0,0.22);border-radius:10px;border-left:3px solid #4facfe;">
+                            <div style="font-weight:600;color:#fff;">${label}</div>
+                            ${emailLine}
+                            <div style="font-size:0.88em;color:#c8d0dc;margin-top:6px;line-height:1.45;">${sub}</div>
+                            ${fsNarrative}
+                            ${feats ? `<div style="margin-top:8px;font-size:0.78em;color:#a8b0bc;"><strong style="color:#9ee0ff;">Features</strong><ul style="margin:4px 0 0 18px;padding:0;">${feats}</ul></div>` : ''}
+                            ${pgs ? `<div style="margin-top:6px;font-size:0.78em;color:#a8b0bc;"><strong style="color:#9ee0ff;">Pages</strong><ul style="margin:4px 0 0 18px;padding:0;">${pgs}</ul></div>` : ''}
+                            ${issueItems ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);"><span style="font-size:0.75em;color:#f5b041;">FullStory (friction)</span>${issueItems}</div>` : ''}
+                        </div>`;
+                }).join('');
+                const acct = l24.account_summary ? `<p style="margin:0 0 12px 0;line-height:1.5;color:#e8eef5;font-size:0.95em;">${escapeHtml(l24.account_summary)}</p>` : '';
+                const meta = (l24.total_active_users_24h != null) ? `<div style="font-size:0.8em;color:#8fa3bf;margin-bottom:10px;">${l24.total_active_users_24h} user(s) in this view · ${l24.pendo_total_events_24h || 0} Pendo events (24h)</div>` : '';
+                return `
+                        <div style="margin-top: 20px; padding: 16px; background: rgba(255,255,255,0.07); border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);">
+                            <div style="font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.07em; color: #7dd3fc; margin-bottom: 10px;">Last 24 hours (UTC) — by user</div>
+                            ${meta}
+                            ${acct}
+                            ${userRows || (l24.account_summary ? '' : `<p style="margin:0;color:#9aa5b8;font-size:0.9em;">No activity in this window.</p>`)}
+                        </div>`;
+            };
+
             // ============================================================================
             // EXECUTIVE SUMMARY
             // ============================================================================
@@ -1748,6 +1807,7 @@
                                 <div style="font-size: 0.85em; color: #a0a0a0;">Active ARR</div>
                             </div>
                         </div>
+                        ${buildLast24hExecutiveHtml(overview.last_24h_activity)}
                         
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-top: 25px;">
                             <div style="text-align: center; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 12px;">

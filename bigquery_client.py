@@ -6,6 +6,7 @@ including Salesforce, Gong, Pendo, and FullStory data.
 """
 import os
 import json
+from collections import Counter, defaultdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -30,6 +31,9 @@ from models import (
     SalesEngagementSummary,
     ProductUsageSummary,
     ProspectOverview,
+    UserLast24hSurface,
+    UserLast24hActivity,
+    AccountLast24hActivity,
 )
 
 
@@ -220,6 +224,18 @@ class BigQueryClient:
             except Exception as e:
                 errors.append(f"User behavior analysis error: {str(e)}")
         
+        # 8b. Last 24h per-user activity (Pendo + FullStory)
+        last_24h_activity = None
+        try:
+            last_24h_activity = self._get_last_24h_activity(
+                pendo_account_id=pendo_account_id,
+                search_domain=search_domain,
+            )
+            if last_24h_activity is not None:
+                data_sources.append("last_24h_activity")
+        except Exception as e:
+            errors.append(f"Last 24h activity error: {str(e)}")
+        
         # 8. Build sales engagement summary (based on selected opportunity)
         sales_engagement = self._build_sales_engagement_summary(
             salesforce_account, latest_opportunity, gong_summary, deal_summary
@@ -239,6 +255,7 @@ class BigQueryClient:
             pendo_usage=pendo_usage,
             user_behavior=user_behavior,
             product_usage=product_usage,
+            last_24h_activity=last_24h_activity,
             data_sources_available=data_sources,
             errors=errors
         )
@@ -1129,26 +1146,648 @@ class BigQueryClient:
         
         return trend
     
-    def _get_fullstory_issues(self, domain: str) -> List[UserIssueEvent]:
-        """Fetch user issue events from FullStory (errors, exceptions, frustration signals)."""
-        
-        # FullStory org ID for constructing recording URLs
+    def _build_user_24h_summary(
+        self,
+        events: int,
+        minutes: int,
+        features: List[UserLast24hSurface],
+        pages: List[UserLast24hSurface],
+        fs_issue_events: int,
+    ) -> str:
+        parts = [f"{events} events and {minutes}m on the platform in the last 24h (UTC)"]
+        if features:
+            fn = [f.name or f.id for f in features[:3]]
+            parts.append("Top features: " + ", ".join(fn))
+        if pages:
+            pn = [p.name or p.id for p in pages[:3]]
+            parts.append("Top pages: " + ", ".join(pn))
+        if fs_issue_events > 0:
+            parts.append(f"{fs_issue_events} FullStory friction event(s)")
+        return ". ".join(parts) + "."
+
+    def _get_last_24h_activity(
+        self,
+        pendo_account_id: Optional[str],
+        search_domain: Optional[str],
+    ) -> Optional[AccountLast24hActivity]:
+        """Per-visitor Pendo rollup for last 24h, merged with FullStory friction by email."""
+        if not pendo_account_id and not search_domain:
+            return None
+
+        USER_CAP = 50
+        TOP_N = 5
+        visitors: Dict[str, Dict[str, Any]] = {}
+
+        try:
+            if pendo_account_id:
+                q_base = f"""
+                SELECT 
+                    visitor_id,
+                    SUM(num_events) as total_events,
+                    SUM(num_minutes) as total_minutes,
+                    MIN(timestamp) as first_activity,
+                    MAX(timestamp) as last_activity
+                FROM `{self.PROJECT_ID}.pendo.event`
+                WHERE account_id = @account_id
+                  AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+                GROUP BY visitor_id
+                ORDER BY last_activity DESC
+                LIMIT {USER_CAP}
+                """
+                jc = bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("account_id", "STRING", pendo_account_id)
+                    ]
+                )
+                for row in self.client.query(q_base, job_config=jc).result():
+                    visitors[row.visitor_id] = {
+                        "total_events": int(row.total_events or 0),
+                        "total_minutes": int(row.total_minutes or 0),
+                        "first_activity": row.first_activity,
+                        "last_activity": row.last_activity,
+                    }
+        except Exception:
+            visitors = {}
+
+        visitor_ids = list(visitors.keys())
+        features_by_vid: Dict[str, List[UserLast24hSurface]] = defaultdict(list)
+        pages_by_vid: Dict[str, List[UserLast24hSurface]] = defaultdict(list)
+        visitor_email: Dict[str, Any] = {}
+
+        jc_acct = None
+        if pendo_account_id:
+            jc_acct = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("account_id", "STRING", pendo_account_id)
+                ]
+            )
+
+        if pendo_account_id and visitor_ids:
+            try:
+                q_feat = f"""
+                WITH agg AS (
+                  SELECT 
+                    fe.visitor_id,
+                    fe.feature_id,
+                    ANY_VALUE(fh.name) as feature_name,
+                    SUM(fe.num_events) as event_count
+                  FROM `{self.PROJECT_ID}.pendo.feature_event` fe
+                  LEFT JOIN `{self.PROJECT_ID}.pendo.feature_history` fh ON fe.feature_id = fh.id
+                  WHERE fe.account_id = @account_id
+                    AND fe.timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+                  GROUP BY fe.visitor_id, fe.feature_id
+                ),
+                ranked AS (
+                  SELECT *, ROW_NUMBER() OVER (PARTITION BY visitor_id ORDER BY event_count DESC) as rn
+                  FROM agg
+                )
+                SELECT visitor_id, feature_id, feature_name, event_count
+                FROM ranked
+                WHERE rn <= {TOP_N}
+                """
+                for row in self.client.query(q_feat, job_config=jc_acct).result():
+                    features_by_vid[row.visitor_id].append(
+                        UserLast24hSurface(
+                            id=row.feature_id or "",
+                            name=row.feature_name,
+                            count=int(row.event_count or 0),
+                        )
+                    )
+            except Exception:
+                pass
+
+            try:
+                q_pages = f"""
+                WITH agg AS (
+                  SELECT 
+                    pe.visitor_id,
+                    pe.page_id,
+                    ANY_VALUE(ph.name) as page_name,
+                    SUM(pe.num_events) as view_count
+                  FROM `{self.PROJECT_ID}.pendo.page_event` pe
+                  LEFT JOIN `{self.PROJECT_ID}.pendo.page_history` ph ON pe.page_id = ph.id
+                  WHERE pe.account_id = @account_id
+                    AND pe.timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+                  GROUP BY pe.visitor_id, pe.page_id
+                ),
+                ranked AS (
+                  SELECT *, ROW_NUMBER() OVER (PARTITION BY visitor_id ORDER BY view_count DESC) as rn
+                  FROM agg
+                )
+                SELECT visitor_id, page_id, page_name, view_count
+                FROM ranked
+                WHERE rn <= {TOP_N}
+                """
+                for row in self.client.query(q_pages, job_config=jc_acct).result():
+                    pages_by_vid[row.visitor_id].append(
+                        UserLast24hSurface(
+                            id=row.page_id or "",
+                            name=row.page_name,
+                            count=int(row.view_count or 0),
+                        )
+                    )
+            except Exception:
+                pass
+
+            try:
+                q_vi = f"""
+                SELECT id, agent_email, agent_full_name
+                FROM (
+                  SELECT id, agent_email, agent_full_name,
+                    ROW_NUMBER() OVER (PARTITION BY id ORDER BY last_updated_at DESC) as rn
+                  FROM `{self.PROJECT_ID}.pendo.visitor_history`
+                  WHERE id IN UNNEST(@visitor_ids)
+                )
+                WHERE rn = 1
+                """
+                jc2 = bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ArrayQueryParameter("visitor_ids", "STRING", visitor_ids),
+                    ]
+                )
+                for row in self.client.query(q_vi, job_config=jc2).result():
+                    visitor_email[row.id] = (row.agent_email, row.agent_full_name)
+            except Exception:
+                pass
+
+        fs_issues: List[UserIssueEvent] = []
+        if search_domain:
+            try:
+                fs_issues = self._get_fullstory_issues(
+                    search_domain, lookback_hours=24, limit=200
+                )
+            except Exception:
+                fs_issues = []
+
+        fs_by_email: Dict[str, List[UserIssueEvent]] = defaultdict(list)
+        for issue in fs_issues:
+            if issue.user_email:
+                fs_by_email[issue.user_email.lower().strip()].append(issue)
+
+        active_users: List[UserLast24hActivity] = []
+        matched_fs_emails = set()
+
+        def _sort_vis_key(item):
+            la = item[1].get("last_activity")
+            return str(la) if la is not None else ""
+
+        for vid, stats in sorted(visitors.items(), key=_sort_vis_key, reverse=True):
+            em, dn = visitor_email.get(vid, (None, None))
+            fs_list: List[UserIssueEvent] = []
+            if em:
+                ek = em.lower().strip()
+                fs_list = list(fs_by_email.get(ek, []))
+                if fs_list:
+                    matched_fs_emails.add(ek)
+            feats = features_by_vid.get(vid, [])
+            pgs = pages_by_vid.get(vid, [])
+            fs_n = sum(i.count for i in fs_list)
+            summary = self._build_user_24h_summary(
+                stats["total_events"],
+                stats["total_minutes"],
+                feats,
+                pgs,
+                fs_n,
+            )
+            active_users.append(
+                UserLast24hActivity(
+                    visitor_id=vid,
+                    email=em,
+                    display_name=dn,
+                    total_events_24h=stats["total_events"],
+                    total_minutes_24h=stats["total_minutes"],
+                    first_activity_24h=str(stats["first_activity"]) if stats.get("first_activity") else None,
+                    last_activity_24h=str(stats["last_activity"]) if stats.get("last_activity") else None,
+                    top_features_24h=feats,
+                    top_pages_24h=pgs,
+                    summary=summary,
+                    fullstory_issues_24h=fs_list,
+                )
+            )
+
+        for email_key, issues in fs_by_email.items():
+            if email_key in matched_fs_emails:
+                continue
+            first = issues[0]
+            fs_n = sum(i.count for i in issues)
+            last_ts = None
+            for i in issues:
+                if i.timestamp and (last_ts is None or i.timestamp > last_ts):
+                    last_ts = i.timestamp
+            summary = (
+                f"FullStory only in this window: {fs_n} friction signal(s); "
+                f"no Pendo events for this account in the last 24h."
+            )
+            active_users.append(
+                UserLast24hActivity(
+                    visitor_id=None,
+                    email=first.user_email,
+                    display_name=first.user_name,
+                    total_events_24h=0,
+                    total_minutes_24h=0,
+                    first_activity_24h=None,
+                    last_activity_24h=last_ts,
+                    top_features_24h=[],
+                    top_pages_24h=[],
+                    summary=summary,
+                    fullstory_issues_24h=issues,
+                )
+            )
+
+        active_users.sort(key=lambda u: u.last_activity_24h or "", reverse=True)
+
+        pendo_total = sum(u.total_events_24h for u in active_users if u.visitor_id)
+        n_pendo = sum(1 for u in active_users if u.visitor_id)
+        n_fs_only = sum(1 for u in active_users if not u.visitor_id)
+
+        if not active_users:
+            return AccountLast24hActivity(
+                account_summary="No Pendo or FullStory friction activity in the last 24 hours (UTC).",
+                total_active_users_24h=0,
+                pendo_total_events_24h=0,
+                active_users=[],
+            )
+
+        active_users = self._attach_fullstory_session_narratives(active_users, search_domain)
+
+        account_parts = []
+        if n_pendo:
+            account_parts.append(
+                f"{n_pendo} user(s) with Pendo activity ({pendo_total} events) in the last 24h."
+            )
+        if n_fs_only:
+            account_parts.append(
+                f"{n_fs_only} user(s) with FullStory friction only (no Pendo rows in window)."
+            )
+        account_summary = " ".join(account_parts) if account_parts else None
+
+        return AccountLast24hActivity(
+            account_summary=account_summary,
+            total_active_users_24h=len(active_users),
+            pendo_total_events_24h=pendo_total,
+            active_users=active_users,
+        )
+
+    def _fetch_fullstory_session_timeline_rows(
+        self,
+        session_id: int,
+        domain: str,
+        user_id: Optional[int] = None,
+        lookback_hours: int = 168,
+        limit_rows: int = 320,
+        narrative_event_types_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Load FullStory segment rows for one session (BigQuery export).
+
+        Uses case-insensitive event_type matching. Optionally scopes by user_id when present
+        on friction rows (FullStory compound session key). If the filtered query returns
+        nothing, retries without the event-type filter so we still get a timeline.
+        """
+        lh = int(lookback_hours)
+        lim = int(limit_rows)
+        domain_pat = f"%@{domain.lower().strip()}%"
+
+        type_predicate = ""
+        if narrative_event_types_only:
+            type_predicate = """
+          AND LOWER(TRIM(se.event_type)) IN UNNEST(@event_types)
+            """
+
+        uid_predicate = ""
+        if user_id is not None:
+            uid_predicate = "          AND se.user_id = @user_id\n"
+
+        query = f"""
+        SELECT
+            se.event_start,
+            se.event_type,
+            SUBSTR(se.page_url, 1, 400) AS page_url,
+            CASE
+                WHEN LOWER(TRIM(se.event_type)) IN ('change', 'paste') THEN '[text entry redacted]'
+                ELSE SUBSTR(IFNULL(se.event_target_text, ''), 1, 100)
+            END AS target_hint,
+            se.event_mod_dead,
+            se.event_mod_frustrated,
+            se.event_mod_error,
+            se.event_var_error_kind,
+            se.event_sub_type,
+            SUBSTR(IFNULL(se.req_url, ''), 1, 140) AS req_url_short
+        FROM `{self.PROJECT_ID}.fullstory.segment_event` se
+        WHERE se.session_id = @session_id
+          AND LOWER(se.user_email) LIKE @domain_pattern
+          AND (se._fivetran_deleted IS NOT TRUE)
+          AND se.event_start > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {lh} HOUR)
+        {uid_predicate}{type_predicate if narrative_event_types_only else ""}
+        ORDER BY se.event_start ASC
+        LIMIT {lim}
+        """
+        narrative_types = [
+            "load",
+            "navigate",
+            "pageview",
+            "click",
+            "change",
+            "paste",
+            "copy",
+            "exception",
+            "thrash",
+            "highlight_error",
+            "highlight",
+            "abandon",
+            "change_error",
+            "console_message_error",
+            "console_message",
+            "custom",
+            "request",
+            "seen",
+        ]
+
+        params: List[Any] = [
+            bigquery.ScalarQueryParameter("session_id", "INT64", session_id),
+            bigquery.ScalarQueryParameter("domain_pattern", "STRING", domain_pat),
+        ]
+        if user_id is not None:
+            params.append(bigquery.ScalarQueryParameter("user_id", "INT64", user_id))
+        if narrative_event_types_only:
+            params.append(
+                bigquery.ArrayQueryParameter("event_types", "STRING", narrative_types)
+            )
+
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+
+        def _rows_from_job(job_cfg: bigquery.QueryJobConfig) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            for row in self.client.query(query, job_config=job_cfg).result():
+                out.append(
+                    {
+                        "event_start": row.event_start,
+                        "event_type": row.event_type,
+                        "page_url": row.page_url,
+                        "target_hint": row.target_hint,
+                        "event_mod_dead": row.event_mod_dead,
+                        "event_mod_frustrated": row.event_mod_frustrated,
+                        "event_mod_error": row.event_mod_error,
+                        "event_var_error_kind": row.event_var_error_kind,
+                        "event_sub_type": row.event_sub_type,
+                        "req_url_short": row.req_url_short,
+                    }
+                )
+            return out
+
+        try:
+            rows = _rows_from_job(job_config)
+            if not rows and narrative_event_types_only:
+                return self._fetch_fullstory_session_timeline_rows(
+                    session_id=session_id,
+                    domain=domain,
+                    user_id=user_id,
+                    lookback_hours=lh,
+                    limit_rows=lim,
+                    narrative_event_types_only=False,
+                )
+            return rows
+        except Exception:
+            if narrative_event_types_only:
+                return self._fetch_fullstory_session_timeline_rows(
+                    session_id=session_id,
+                    domain=domain,
+                    user_id=user_id,
+                    lookback_hours=lh,
+                    limit_rows=lim,
+                    narrative_event_types_only=False,
+                )
+            return []
+
+    def _format_fullstory_timeline_for_prompt(self, rows: List[Dict[str, Any]]) -> str:
+        lines = []
+        for r in rows:
+            flags = []
+            if r.get("event_mod_dead"):
+                flags.append("dead_click")
+            if r.get("event_mod_frustrated"):
+                flags.append("rage_click_series")
+            if r.get("event_mod_error"):
+                flags.append(f"error_mod={r.get('event_mod_error')}")
+            flag_s = ",".join(flags) if flags else ""
+            sub = (r.get("event_sub_type") or "").strip()
+            ek = (r.get("event_var_error_kind") or "").strip()
+            extras = " ".join(x for x in (sub, ek) if x)
+            req = (r.get("req_url_short") or "").strip()
+            ts = r.get("event_start")
+            lines.append(
+                f"{ts} | {r.get('event_type')} | url={r.get('page_url') or ''} "
+                f"| target={r.get('target_hint') or ''} | {extras}"
+                f"{' | req=' + req if req else ''}{' | ' + flag_s if flag_s else ''}"
+            )
+        text = "\n".join(lines)
+        max_chars = int(os.environ.get("FULLSTORY_SESSION_SUMMARY_MAX_CHARS", "12000"))
+        if len(text) > max_chars:
+            text = text[: max_chars - 20] + "\n...[truncated]"
+        return text
+
+    def _deterministic_fullstory_narrative(
+        self,
+        user: UserLast24hActivity,
+        timeline_rows: List[Dict[str, Any]],
+    ) -> str:
+        """Readable summary without LLM — always returned when friction rows exist."""
+        issues = user.fullstory_issues_24h or []
+        parts: List[str] = []
+
+        ctxs = list(dict.fromkeys(i.page_context for i in issues if i.page_context))
+        if ctxs:
+            parts.append(
+                "FullStory flagged activity in these areas: "
+                + ", ".join(ctxs[:6])
+                + "."
+            )
+        kinds = list(dict.fromkeys(i.issue_type for i in issues if i.issue_type))
+        if kinds:
+            parts.append("Friction / issue categories: " + ", ".join(kinds) + ".")
+        for i in issues[:5]:
+            ek = (i.error_kind or "").strip()
+            if ek:
+                parts.append(f"Detail: {i.issue_type} ({ek}).")
+                break
+
+        if timeline_rows:
+            et = Counter(
+                (str(r.get("event_type") or "").strip().lower() or "unknown")
+                for r in timeline_rows
+            )
+            top = [f"{k}×{v}" for k, v in et.most_common(8) if k != "unknown"]
+            parts.append(
+                f"BigQuery session export contains {len(timeline_rows)} events"
+                + (f" ({', '.join(top)})" if top else "")
+                + "."
+            )
+            paths: List[str] = []
+            for r in timeline_rows:
+                u = r.get("page_url") or ""
+                if not u:
+                    continue
+                path = u.split("?", 1)[0].strip()
+                if len(path) > 90:
+                    path = path[:87] + "..."
+                if path and path not in paths:
+                    paths.append(path)
+                if len(paths) >= 5:
+                    break
+            if paths:
+                parts.append("Pages/URLs seen (trimmed): " + " · ".join(paths) + ".")
+        else:
+            parts.append(
+                "No extra timeline rows matched this session in BigQuery "
+                "(session id + email + lookback window), so only the friction row(s) above are available."
+            )
+
+        parts.append(
+            "This is from the FullStory data warehouse, not video. Use Recording for the replay."
+        )
+        return " ".join(parts)
+
+    def _summarize_user_fullstory_sessions(
+        self,
+        user: UserLast24hActivity,
+        search_domain: str,
+    ) -> Optional[str]:
+        """Narrate session from warehouse telemetry; LLM when available, else deterministic."""
+        issues = user.fullstory_issues_24h or []
+        if not issues:
+            return None
+
+        # Map session_id -> FullStory user_id (cookie) when present for tighter BQ match
+        sessions_map: Dict[int, Optional[int]] = {}
+        for issue in issues:
+            sid = issue.session_id
+            if not sid:
+                continue
+            try:
+                sid_int = int(str(sid).strip())
+            except (TypeError, ValueError):
+                continue
+            uid: Optional[int] = None
+            if issue.fullstory_user_id:
+                try:
+                    uid = int(str(issue.fullstory_user_id).strip())
+                except (TypeError, ValueError):
+                    uid = None
+            if sid_int not in sessions_map:
+                sessions_map[sid_int] = uid
+            elif sessions_map[sid_int] is None and uid is not None:
+                sessions_map[sid_int] = uid
+
+        session_items = list(sessions_map.items())[:3]
+
+        all_rows: List[Dict[str, Any]] = []
+        for sid_int, uid in session_items:
+            all_rows.extend(
+                self._fetch_fullstory_session_timeline_rows(
+                    sid_int,
+                    search_domain,
+                    user_id=uid,
+                    lookback_hours=168,
+                    limit_rows=320,
+                    narrative_event_types_only=True,
+                )
+            )
+
+        all_rows.sort(key=lambda r: str(r.get("event_start") or ""))
+
+        timeline_text = self._format_fullstory_timeline_for_prompt(all_rows)
+        deterministic = self._deterministic_fullstory_narrative(user, all_rows)
+
+        friction_lines = []
+        for issue in issues[:20]:
+            friction_lines.append(
+                f"- {issue.issue_type} | {(issue.page_context or '')} | "
+                f"{(issue.error_kind or '')} | {(issue.page_url or '')[:120]}"
+            )
+        friction_block = "\n".join(friction_lines) if friction_lines else "(none)"
+
+        model = os.environ.get(
+            "FULLSTORY_SESSION_SUMMARY_MODEL",
+            os.environ.get(
+                "COMPETITIVE_ANALYSIS_MODEL",
+                os.environ.get("USE_CASE_CLASSIFICATION_MODEL", "claude-haiku-4-5"),
+            ),
+        )
+        user_label = user.email or user.display_name or user.visitor_id or "user"
+
+        prompt = f"""You help a sales engineer understand a prospect's product session.
+
+The following is chronological telemetry from FullStory's data export in BigQuery (page URLs, event types, UI labels where captured, frustration flags). This is NOT a video or screen recording transcript.
+
+Prospect user: {user_label}
+
+Friction / issue-type events already flagged:
+{friction_block}
+
+Session timeline (oldest first):
+{timeline_text or '(no additional timeline rows in warehouse for these sessions — summarize only from friction markers above if needed)'}
+
+Write 4-7 short sentences:
+1) What the user was likely trying to accomplish in the app
+2) Which areas or workflows the telemetry suggests (use plain language; do not paste long URLs — describe pages, e.g. "model detail" or "settings")
+3) Any struggle signals (errors, dead clicks, thrash, abandons)
+4) If telemetry is thin, say that explicitly and avoid inventing details.
+
+Do not claim you watched a recording. Do not include markdown headings or bullet characters — plain paragraphs only."""
+
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.2,
+            )
+            out = (response.choices[0].message.content or "").strip()
+            if out:
+                return out
+        except Exception as e:
+            print(f"⚠️ FullStory session summary LLM error: {e}")
+
+        return deterministic
+
+    def _attach_fullstory_session_narratives(
+        self,
+        active_users: List[UserLast24hActivity],
+        search_domain: Optional[str],
+    ) -> List[UserLast24hActivity]:
+        if not search_domain:
+            return active_users
+        flag = os.environ.get("FULLSTORY_SESSION_SUMMARY", "1").strip().lower()
+        if flag in ("0", "false", "no", "off"):
+            return active_users
+        max_users = int(os.environ.get("FULLSTORY_SESSION_SUMMARY_MAX_USERS", "12"))
+        out: List[UserLast24hActivity] = []
+        n_done = 0
+        for u in active_users:
+            if not u.fullstory_issues_24h or n_done >= max_users:
+                out.append(u)
+                continue
+            narrative = self._summarize_user_fullstory_sessions(u, search_domain)
+            n_done += 1
+            out.append(
+                u.model_copy(update={"fullstory_behavior_summary": narrative})
+            )
+        return out
+
+    def _get_fullstory_issues(
+        self,
+        domain: str,
+        lookback_hours: int = 336,
+        limit: int = 30,
+    ) -> List[UserIssueEvent]:
+        """Fetch user issue events from FullStory (errors, exceptions, frustration signals).
+
+        Default lookback_hours=336 (14 days) matches recording retention assumptions.
+        Use lookback_hours=24 for the last-24h prospect slice.
+        """
         FULLSTORY_ORG_ID = "o-1HS6XF-na1"
-        
-        # FullStory session recording retention is typically 14-30 days depending on plan.
-        # We use 14 days to ensure "View Recording" links actually work.
-        # Older sessions may still have event data but the recordings are no longer available.
-        FULLSTORY_RECORDING_RETENTION_DAYS = 14
-        
-        # FullStory URL format: https://app.fullstory.com/ui/ORG_ID/session/DEVICE_ID:SESSION_ID
-        # indv_id is the individual/device identifier, session_id is the session
-        # Target event types that indicate issues:
-        # - exception: JavaScript errors
-        # - thrash: Mouse thrashing (frustration)
-        # - highlight_error: Error highlights
-        # - abandon: Page abandonment
-        # - change_error: Form change errors
-        # - console_message_error: Console errors
+        lh = int(lookback_hours)
+        lim = int(limit)
+
         query = f"""
         SELECT 
             se.session_id,
@@ -1163,12 +1802,13 @@ class BigQueryClient:
             COUNT(*) as issue_count
         FROM `{self.PROJECT_ID}.fullstory.segment_event` se
         WHERE se.event_type IN ('exception', 'thrash', 'highlight_error', 'abandon', 'change_error', 'console_message_error')
-          AND se.event_start > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {FULLSTORY_RECORDING_RETENTION_DAYS} DAY)
+          AND (se._fivetran_deleted IS NOT TRUE)
+          AND se.event_start > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {lh} HOUR)
           AND LOWER(se.user_email) LIKE @domain_pattern
         GROUP BY se.session_id, se.user_id, se.indv_id, se.user_email, se.user_display_name, 
                  se.event_type, se.event_var_error_kind, page_url, se.event_start
         ORDER BY se.event_start DESC
-        LIMIT 30
+        LIMIT {lim}
         """
         
         job_config = bigquery.QueryJobConfig(
@@ -1182,7 +1822,6 @@ class BigQueryClient:
             
             issues = []
             for row in results:
-                # Map event_type to user-friendly issue type
                 event_type = row.event_type or ""
                 if event_type == "exception":
                     issue_type = "error"
@@ -1197,7 +1836,6 @@ class BigQueryClient:
                 else:
                     issue_type = "unknown"
                 
-                # Extract page context from URL
                 page_context = None
                 if row.page_url:
                     url = row.page_url.lower()
@@ -1221,16 +1859,12 @@ class BigQueryClient:
                     elif "traces" in url:
                         page_context = "Tracing"
                 
-                # Construct recording URL using FullStory format: /ui/ORG_ID/session/DEVICE_ID:SESSION_ID
-                # indv_id is the individual/device identifier used in FullStory URLs
                 recording_url = None
                 if row.session_id and row.indv_id:
                     recording_url = f"https://app.fullstory.com/ui/{FULLSTORY_ORG_ID}/session/{row.indv_id}:{row.session_id}"
                 elif row.session_id and row.user_id:
-                    # Fallback to user_id if indv_id not available
                     recording_url = f"https://app.fullstory.com/ui/{FULLSTORY_ORG_ID}/session/{row.user_id}:{row.session_id}"
                 elif row.session_id:
-                    # Last resort - just session_id
                     recording_url = f"https://app.fullstory.com/ui/{FULLSTORY_ORG_ID}/session/{row.session_id}"
                 
                 issues.append(UserIssueEvent(
@@ -1243,13 +1877,15 @@ class BigQueryClient:
                     session_id=str(row.session_id) if row.session_id else None,
                     recording_url=recording_url,
                     timestamp=str(row.event_start) if row.event_start else None,
-                    count=row.issue_count or 1
+                    count=row.issue_count or 1,
+                    fullstory_user_id=str(row.user_id) if row.user_id is not None else None,
+                    fullstory_indv_id=str(row.indv_id) if row.indv_id is not None else None,
                 ))
             
             return issues
         except Exception:
             return []
-    
+
     def _get_adoption_milestones(self, pendo_account_id: str) -> List[AdoptionMilestone]:
         """Fetch adoption milestones (projects, traces, experiments, evals, prompts) for an account."""
         

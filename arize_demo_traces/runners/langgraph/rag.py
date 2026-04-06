@@ -22,6 +22,7 @@ from ...use_cases.rag import (
     fetch_document_metadata,
 )
 from ..common_runner_utils import get_query_for_run
+from ..registry import RAG
 
 
 class RAGState(TypedDict):
@@ -71,17 +72,21 @@ def run_rag(
         return {"guardrail_passed": True}
 
     def retrieve_node(state: RAGState) -> dict:
-        run_tool_call(tracer, "search_documents", state["query"],
-                      search_documents, guard=guard, query=state["query"])
+        run_tool_call(
+            tracer, "search_documents", state["query"],
+            search_documents, guard=guard, metadata_use_case=RAG, query=state["query"],
+        )
         if guard:
             guard.check()
         vectorstore = get_vectorstore()
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
         docs = run_in_context(retriever.invoke, state["query"])
         if docs:
-            run_tool_call(tracer, "fetch_document_metadata", docs[0].metadata.get("source", ""),
-                          fetch_document_metadata, guard=guard,
-                          source=docs[0].metadata.get("source", "unknown"))
+            run_tool_call(
+                tracer, "fetch_document_metadata", docs[0].metadata.get("source", ""),
+                fetch_document_metadata, guard=guard, metadata_use_case=RAG,
+                source=docs[0].metadata.get("source", "unknown"),
+            )
         return {"context": format_docs(docs), "retrieved_docs": docs}
 
     def generate_node(state: RAGState) -> dict:

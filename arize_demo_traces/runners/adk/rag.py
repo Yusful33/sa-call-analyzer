@@ -8,10 +8,10 @@ Trace structure:
     -> guardrails (GUARDRAIL group)
     -> generate_content (LLM) - planning step
     -> retrieve_documents (RETRIEVER) - vectorstore retrieval
+    -> search_documents (TOOL) - keyword search over sample corpus (aligned with retrieval)
+    -> fetch_document_metadata (TOOL) - metadata for retrieved primary source
     -> generate_content (LLM) - generate answer from context
 """
-
-import random
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -28,6 +28,7 @@ from ...use_cases.rag import (
     fetch_document_metadata,
 )
 from ..common_runner_utils import get_query_for_run
+from ..registry import RAG
 
 
 def run_rag(
@@ -40,7 +41,7 @@ def run_rag(
     trace_quality="good",
     **kwargs,
 ) -> dict:
-    """Execute an ADK-style RAG agent: guardrails -> plan -> retrieve -> generate."""
+    """Execute an ADK-style RAG agent: guardrails -> plan -> retrieve -> tools -> generate."""
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
 
@@ -97,11 +98,7 @@ def run_rag(
             plan_span.set_attribute("output.mime_type", "text/plain")
             plan_span.set_status(Status(StatusCode.OK))
 
-        # ---- Tool calls: document search and metadata ----
-        run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
-        run_tool_call(tracer, "fetch_document_metadata", "knowledge-base", fetch_document_metadata, guard=guard, source="knowledge-base")
-
-        # ---- retrieve_documents: vectorstore retrieval ----
+        # ---- retrieve_documents: vectorstore retrieval (before tools so tool I/O matches real docs) ----
         with tracer.start_as_current_span(
             "retrieve_documents",
             attributes={
@@ -110,14 +107,38 @@ def run_rag(
                 "input.mime_type": "text/plain",
             },
         ) as retriever_span:
+            if guard:
+                guard.check()
             vectorstore = get_vectorstore()
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
             docs = run_in_context(retriever.invoke, query)
             context = format_docs(docs)
-            retriever_span.set_attribute("output.value", context[:1000])
+            retriever_span.set_attribute("output.value", context[:2000])
             retriever_span.set_attribute("output.mime_type", "text/plain")
             retriever_span.set_attribute("retrieval.documents", len(docs))
+            retriever_span.set_attribute("rag.retrieval_context", context[:8000])
             retriever_span.set_status(Status(StatusCode.OK))
+
+        # ---- Tool calls: after retrieval, using real primary source ----
+        search_span_input = query
+        if docs:
+            preview = docs[0].page_content[:200].replace("\n", " ")
+            search_span_input = f"{query}\n[top_retrieved_excerpt: {preview}...]"
+        run_tool_call(
+            tracer, "search_documents", search_span_input, search_documents,
+            guard=guard, metadata_use_case=RAG, query=query,
+        )
+
+        primary_source = docs[0].metadata.get("source", "unknown") if docs else "unknown"
+        run_tool_call(
+            tracer,
+            "fetch_document_metadata",
+            primary_source,
+            fetch_document_metadata,
+            guard=guard,
+            metadata_use_case=RAG,
+            source=primary_source,
+        )
 
         # ---- generate_content: answer generation ----
         with tracer.start_as_current_span(
@@ -126,6 +147,7 @@ def run_rag(
                 "openinference.span.kind": "LLM",
                 "input.value": query,
                 "input.mime_type": "text/plain",
+                "rag.retrieval_context": context[:8000],
             },
         ) as answer_span:
             answer_prompt = ChatPromptTemplate.from_messages([
@@ -143,6 +165,7 @@ def run_rag(
 
         agent_span.set_attribute("output.value", answer)
         agent_span.set_attribute("output.mime_type", "text/plain")
+        agent_span.set_attribute("rag.retrieval_context", context[:8000])
         agent_span.set_status(Status(StatusCode.OK))
 
     return {

@@ -21,6 +21,7 @@ from ...use_cases.rag import (
     fetch_document_metadata,
 )
 from ..common_runner_utils import get_query_for_run
+from ..registry import RAG
 
 
 def run_rag(
@@ -68,10 +69,6 @@ def run_rag(
                 system_prompt=g["system_prompt"],
             )
 
-        # === TOOL CALLS ===
-        run_tool_call(tracer, "search_documents", query, search_documents, guard=guard, query=query)
-        run_tool_call(tracer, "fetch_document_metadata", "knowledge-base", fetch_document_metadata, guard=guard, source="knowledge-base")
-
         # === RETRIEVE DOCUMENTS (outside CrewAI since agents can't use vectorstores directly) ===
         with tracer.start_as_current_span(
             "retrieve_documents",
@@ -87,7 +84,23 @@ def run_rag(
                 [{"content": d.page_content[:200], "source": d.metadata.get("source", "")} for d in retrieved]
             ))
             retrieval_span.set_attribute("output.value", context[:2000])
+            retrieval_span.set_attribute("rag.retrieval_context", context[:8000])
             retrieval_span.set_status(Status(StatusCode.OK))
+
+        # === TOOL CALLS (after retrieval; align with real sources) ===
+        search_span_input = query
+        if retrieved:
+            preview = retrieved[0].page_content[:200].replace("\n", " ")
+            search_span_input = f"{query}\n[top_retrieved_excerpt: {preview}...]"
+        run_tool_call(
+            tracer, "search_documents", search_span_input, search_documents,
+            guard=guard, metadata_use_case=RAG, query=query,
+        )
+        primary_source = retrieved[0].metadata.get("source", "unknown") if retrieved else "unknown"
+        run_tool_call(
+            tracer, "fetch_document_metadata", primary_source, fetch_document_metadata,
+            guard=guard, metadata_use_case=RAG, source=primary_source,
+        )
 
         # === CREWAI AGENTS ===
         retrieval_agent = Agent(
