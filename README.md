@@ -47,10 +47,13 @@ Open **http://localhost:8080** in your browser (or **http://localhost:8080/docs*
 
 ## Docker Compose
 
-Runs the **app**, **LiteLLM** (port **4000**), and **Gong MCP** (host port **8081** → container **8080**). Compose uses **`./litellm_config.yaml`** and wires **`GONG_MCP_URL=http://gong-mcp:8080`**.
+Runs the **app**, **LiteLLM** (port **4000**), and **Gong MCP** (host port **8081** → container **8080**). Compose uses **`./litellm/config.yaml`** for LiteLLM and wires **`GONG_MCP_URL=http://gong-mcp:8080`**.
 
 ```bash
-# Ensure .env is filled (ANTHROPIC_API_KEY, etc.)
+# First time: copy env template (`.env` is not committed)
+cp .env.example .env
+# Edit .env — at minimum set ANTHROPIC_API_KEY (and OPENAI_API_KEY if your LiteLLM config uses OpenAI)
+
 docker compose up -d
 
 # Logs for the main web app (service name is "app")

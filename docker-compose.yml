@@ -81,7 +81,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - ./litellm_config.yaml:/app/config.yaml:ro
+      - ./litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
     healthcheck:
@@ -93,7 +93,7 @@ services:
       watch:
         # Restart on config changes (config is volume-mounted)
         - action: sync+restart
-          path: ./litellm_config.yaml
+          path: ./litellm/config.yaml
           target: /app/config.yaml
 
   # Gong MCP Server - Fetches call transcripts from Gong via MCP protocol
