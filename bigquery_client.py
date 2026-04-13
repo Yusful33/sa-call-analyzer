@@ -260,6 +260,53 @@ class BigQueryClient:
             errors=errors
         )
     
+    def _salesforce_account_lookup_sql(
+        self,
+        account_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        sfdc_account_id: Optional[str] = None,
+    ) -> tuple[Optional[str], list]:
+        """Build WHERE clause and BigQuery params for Salesforce account lookup.
+
+        When both *account_name* and *domain* are provided, require **both** to match
+        (AND). Using OR with ORDER BY ARR allowed a stale domain (e.g. extend.com)
+        to win over the account name the user typed (e.g. Stripe), returning the
+        wrong company.
+        """
+        params: list = []
+
+        sid = (sfdc_account_id or "").strip()
+        if sid:
+            params.append(bigquery.ScalarQueryParameter("sfdc_id", "STRING", sid))
+            return "a.id = @sfdc_id", params
+
+        an = (account_name or "").strip()
+        dom = (domain or "").strip()
+
+        if an and dom:
+            params.extend(
+                [
+                    bigquery.ScalarQueryParameter("name_pattern", "STRING", f"%{an.lower()}%"),
+                    bigquery.ScalarQueryParameter("domain_pattern", "STRING", f"%{dom.lower()}%"),
+                ]
+            )
+            return (
+                "LOWER(a.name) LIKE @name_pattern AND LOWER(a.website) LIKE @domain_pattern",
+                params,
+            )
+        if an:
+            params.append(
+                bigquery.ScalarQueryParameter("name_pattern", "STRING", f"%{an.lower()}%")
+            )
+            return "LOWER(a.name) LIKE @name_pattern", params
+        if dom:
+            params.append(
+                bigquery.ScalarQueryParameter("domain_pattern", "STRING", f"%{dom.lower()}%")
+            )
+            return "LOWER(a.website) LIKE @domain_pattern", params
+
+        return None, []
+
     def _get_all_matching_sfdc_ids(
         self,
         account_name: Optional[str] = None,
@@ -272,26 +319,19 @@ class BigQueryClient:
         Companies often have duplicate Salesforce records. Gong calls may be
         linked to any of them, so we need all IDs to avoid missing call data.
         """
-        conditions = []
-        params = []
+        where_clause, params = self._salesforce_account_lookup_sql(
+            account_name=account_name,
+            domain=domain,
+            sfdc_account_id=sfdc_account_id,
+        )
 
-        if sfdc_account_id:
-            conditions.append("a.id = @sfdc_id")
-            params.append(bigquery.ScalarQueryParameter("sfdc_id", "STRING", sfdc_account_id))
-        if domain:
-            conditions.append("LOWER(a.website) LIKE @domain_pattern")
-            params.append(bigquery.ScalarQueryParameter("domain_pattern", "STRING", f"%{domain.lower()}%"))
-        if account_name:
-            conditions.append("LOWER(a.name) LIKE @name_pattern")
-            params.append(bigquery.ScalarQueryParameter("name_pattern", "STRING", f"%{account_name.lower()}%"))
-
-        if not conditions:
+        if not where_clause:
             return [primary_id] if primary_id else []
 
         query = f"""
         SELECT DISTINCT a.id
         FROM `{self.PROJECT_ID}.salesforce.account` a
-        WHERE ({" OR ".join(conditions)})
+        WHERE ({where_clause})
           AND a.is_deleted = FALSE
         """
         job_config = bigquery.QueryJobConfig(query_parameters=params)
@@ -312,25 +352,13 @@ class BigQueryClient:
     ) -> Optional[SalesforceAccountData]:
         """Fetch Salesforce account data with enhanced fields and resolved user names."""
         
-        conditions = []
-        params = []
-        
-        if sfdc_account_id:
-            conditions.append("a.id = @sfdc_id")
-            params.append(bigquery.ScalarQueryParameter("sfdc_id", "STRING", sfdc_account_id))
-        
-        if domain:
-            conditions.append("LOWER(a.website) LIKE @domain_pattern")
-            params.append(bigquery.ScalarQueryParameter("domain_pattern", "STRING", f"%{domain.lower()}%"))
-        
-        if account_name:
-            conditions.append("LOWER(a.name) LIKE @name_pattern")
-            params.append(bigquery.ScalarQueryParameter("name_pattern", "STRING", f"%{account_name.lower()}%"))
-        
-        if not conditions:
+        where_clause, params = self._salesforce_account_lookup_sql(
+            account_name=account_name,
+            domain=domain,
+            sfdc_account_id=sfdc_account_id,
+        )
+        if not where_clause:
             return None
-        
-        where_clause = " OR ".join(conditions)
         
         # Query with JOINs to resolve all user IDs to names
         query = f"""

@@ -806,6 +806,7 @@
                         type="text"
                         id="accountName"
                         placeholder="e.g., Acme Corp, OpenAI, Stripe"
+                        autocomplete="off"
                     >
                     <p class="help-text">
                         Search by account/company name (fuzzy matching supported).
@@ -817,10 +818,11 @@
                         type="text"
                         id="accountDomain"
                         placeholder="e.g., acme.com, openai.com"
+                        autocomplete="off"
                         style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;"
                     >
                     <p class="help-text">
-                        Search by email domain from website.
+                        When set together with account name, <strong>both</strong> must match. Clear this field if you only want to search by name—otherwise a leftover domain can return a different company than you expect.
                     </p>
                 </div>
                 <div class="input-section" style="margin-top: 15px;">

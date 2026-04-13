@@ -32,8 +32,6 @@ from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from observability import force_flush_spans
-from langchain_core.callbacks import CallbackManager
-from tracing_enhancements import TokenTrackingCallback
 
 load_dotenv()
 
@@ -53,40 +51,39 @@ class SACallAnalysisCrew:
         # Determine which LLM to use based on environment
         self.use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
         self.default_model = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
-        
-        # Create token tracking callback for cost visibility
-        self.token_callback = TokenTrackingCallback()
 
         # Initialize with default model
         self._configure_llm(self.default_model)
     
     def _configure_llm(self, model_name: str):
-        """Configure the LLM via LiteLLM proxy (OpenAI-compatible API)."""
-        from langchain_core.callbacks import CallbackManager
-        from langchain_openai import ChatOpenAI
-
-        callback_manager = CallbackManager([self.token_callback])
+        """Configure CrewAI's LLM (CrewAI 1.x rejects LangChain Chat* as Agent.llm)."""
+        from crewai import LLM
 
         if self.use_litellm:
-            litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
+            litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000").rstrip("/")
             print(f"🔧 LiteLLM proxy: model={model_name}, base_url={litellm_base_url}")
-            self.llm = ChatOpenAI(
+            self.llm = LLM(
                 model=model_name,
-                api_key=os.getenv("LITELLM_API_KEY", "dummy"),
+                is_litellm=True,
                 base_url=f"{litellm_base_url}/v1",
+                api_key=os.getenv("LITELLM_API_KEY", "dummy"),
                 temperature=0.7,
                 max_tokens=2048,
-                callbacks=callback_manager,
             )
         else:
-            print(f"🔧 OpenAI direct: model={model_name}")
-            self.llm = ChatOpenAI(
+            # Native routing: claude* → Anthropic SDK, gpt* → OpenAI, etc.
+            print(f"🔧 Direct LLM (CrewAI): model={model_name}")
+            api_key = (
+                os.getenv("ANTHROPIC_API_KEY")
+                if "claude" in model_name.lower()
+                else os.getenv("OPENAI_API_KEY")
+            )
+            self.llm = LLM(
                 model=model_name,
-                api_key=os.getenv("OPENAI_API_KEY"),
-                base_url="https://api.openai.com/v1",
+                is_litellm=False,
                 temperature=0.7,
                 max_tokens=2048,
-                callbacks=callback_manager,
+                api_key=api_key,
             )
 
         self.model_name = model_name
@@ -224,8 +221,6 @@ class SACallAnalysisCrew:
         Returns:
             Dict with call_type, one_liner, key_points, participants, sentiment
         """
-        from langchain_core.messages import HumanMessage
-
         tracer = trace.get_tracer("quick-summarize")
 
         with tracer.start_as_current_span("quick_summarize_call") as span:
@@ -272,9 +267,10 @@ Return ONLY the JSON object, no additional text."""
                 span.set_attribute("input.transcript_length", len(transcript))
                 span.set_attribute("input.truncated", len(transcript) > 15000)
 
-                # Make single LLM call
-                response = self.llm.invoke([HumanMessage(content=prompt)])
-                result_text = response.content if hasattr(response, 'content') else str(response)
+                # CrewAI LLM uses .call (str or message list), not LangChain .invoke
+                result_text = self.llm.call(prompt)
+                if not isinstance(result_text, str):
+                    result_text = str(result_text)
 
                 span.set_attribute("output.raw_length", len(result_text))
 
