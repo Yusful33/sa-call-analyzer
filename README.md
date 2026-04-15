@@ -11,7 +11,7 @@ AI-powered tooling for **Solution Architect sales calls** and related demos: a *
 | **CRM / analytics** | **`/api/prospect-overview`** — unified view from **BigQuery** (Salesforce, Gong summaries, Pendo, FullStory, etc.) when your warehouse and credentials are configured. |
 | **Custom demo builder** | **`/api/classify-demo`**, **`/api/generate-demo`**, **`/api/generate-demo-stream`** — pick use case + framework (e.g. LangGraph, CrewAI), run LLM pipelines, send traces to **Arize** (optional Space ID / API key in the request). **`/api/export-script`** downloads a standalone Python script; **`/api/create-online-evals`** sets up Arize online evals after a run. |
 | **Hypothesis research** | **`/api/hypothesis-research`** — LangGraph agent: web search (**Brave**), optional BigQuery, LLM-driven hypotheses (see **`hypothesis_tool/TRACE_FLOW.md`** for trace layout). |
-| **Deliverables** | **`/api/generate-recap-slide`** — PowerPoint recap download from structured recap JSON. |
+| **Deliverables** | **`/api/generate-recap-slide`** — PowerPoint recap download from structured recap JSON. **`/api/generate-poc-document`** — Word (.docx) PoC SaaS / PoC VPC / PoT: fills in-template placeholders using BigQuery prospect data and an LLM (no separate appendix). |
 
 Open **`http://localhost:8080/docs`** for interactive **OpenAPI** documentation.
 

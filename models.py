@@ -889,3 +889,22 @@ class ProspectOverview(BaseModel):
     
     # Any errors during data fetch
     errors: List[str] = Field(default_factory=list)
+
+
+DocumentTemplateId = Literal["pot", "poc_saas", "poc_vpc"]
+
+
+class GeneratePocDocumentRequest(BaseModel):
+    """Build a populated PoC / PoT Word document from BigQuery prospect data."""
+
+    account_name: str = Field(..., min_length=1, description="Company / account name for BigQuery lookup")
+    domain: Optional[str] = None
+    document_template: DocumentTemplateId
+    manual_notes: Optional[str] = Field(
+        default=None,
+        description="Optional free text merged into the generated appendix.",
+    )
+
+    def model_post_init(self, __context):
+        if not (self.account_name or "").strip():
+            raise ValueError("'account_name' must be non-empty")

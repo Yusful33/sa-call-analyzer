@@ -11,9 +11,14 @@ RUN apt-get update && apt-get install -y \
 # Copy application code
 COPY . .
 
-# Install uv for faster installs, then install dependencies.
-# Clear uv cache after install to keep image smaller (if build fails with "No space left on device", run: docker system prune -a).
-RUN pip install uv && uv pip install --system . && uv cache clean
+# Install dependencies with pip/uv caches disabled so wheel extract does not fill /root/.cache
+# (common on Docker Desktop ARM when the VM disk is tight). After install, delete caches.
+# If the build still fails with errno 28: docker builder prune -af && docker system prune -f
+# or raise Docker Desktop → Settings → Resources → disk image size.
+RUN pip install --no-cache-dir uv && \
+    UV_NO_CACHE=1 uv pip install --system --no-cache . && \
+    uv cache clean 2>/dev/null || true && \
+    rm -rf /root/.cache/pip /root/.cache/uv /root/.local/share/uv 2>/dev/null || true
 
 # Disable CrewAI's interactive tracing prompt (adds 20s delay per crew)
 RUN mkdir -p /root/.config/crewai && \
@@ -59,7 +64,8 @@ fi\n\
 echo "=== Starting uvicorn ===" \n\
 # Unset proxy base URLs so LLM calls go direct to providers\n\
 unset OPENAI_BASE_URL\n\
-exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}\n\
+# Use python -m so we do not rely on a console_scripts entrypoint on PATH\n\
+exec python3 -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
 CMD ["/bin/bash", "/app/start.sh"]

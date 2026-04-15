@@ -713,32 +713,37 @@
 
         .tabs-container {
             display: flex;
+            flex-direction: column;
             gap: 0;
-            min-height: 500px;
+            min-height: 0;
         }
 
         .tabs {
             display: flex;
-            flex-direction: column;
-            gap: 5px;
-            width: 220px;
-            min-width: 220px;
-            padding-right: 20px;
-            border-right: 2px solid #e0e0e0;
-            margin-right: 20px;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: stretch;
+            gap: 6px;
+            width: 100%;
+            padding-bottom: 14px;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #e0e0e0;
         }
 
         .tab {
-            padding: 15px 20px;
+            padding: 12px 14px;
             background: none;
             border: none;
-            border-left: 3px solid transparent;
+            border-bottom: 3px solid transparent;
             color: #666;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
-            text-align: left;
-            border-radius: 0 8px 8px 0;
+            transition: all 0.2s;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 0.9em;
         }
 
         .tab:hover {
@@ -748,13 +753,143 @@
 
         .tab.active {
             color: #667eea;
-            border-left-color: #667eea;
+            border-bottom-color: #667eea;
             background: #f0f4ff;
         }
 
         .tab-content-wrapper {
             flex: 1;
             min-width: 0;
+            padding-top: 8px;
+        }
+
+        .pocpot-reference {
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .trial-types-matrix {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.12);
+            background: #fff;
+        }
+
+        .trial-types-matrix .trial-types-title {
+            margin: 0;
+            padding: 14px 16px;
+            font-size: 1.1em;
+            font-weight: 700;
+            color: #2f1ca0;
+            background: linear-gradient(135deg, #f0f4ff 0%, #ede9fe 100%);
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .trial-types-scroll {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .trial-types-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82em;
+            min-width: 640px;
+        }
+
+        .trial-types-table th,
+        .trial-types-table td {
+            padding: 10px 12px;
+            vertical-align: middle;
+            border: 1px solid #cbd5e1;
+            line-height: 1.45;
+        }
+
+        .trial-types-table thead th {
+            font-weight: 700;
+            color: #1e293b;
+            background: #f1f5f9;
+            text-align: center;
+        }
+
+        .trial-types-table thead tr.subhead th {
+            font-size: 0.95em;
+            padding: 8px 10px;
+        }
+
+        .trial-types-table th.col-workshop,
+        .trial-types-table td.col-workshop {
+            background: #f8fafc;
+        }
+
+        .trial-types-table th.col-pot,
+        .trial-types-table td.col-pot {
+            background: #f8fafc;
+        }
+
+        .trial-types-table thead th.col-saas {
+            background: #fce7f3;
+            color: #831843;
+        }
+
+        .trial-types-table thead th.col-vpc {
+            background: #fbcfe8;
+            color: #701a35;
+        }
+
+        .trial-types-table th.row-label {
+            text-align: left;
+            font-weight: 700;
+            color: #334155;
+            background: #fff;
+            width: 11em;
+            white-space: nowrap;
+        }
+
+        .trial-types-table tbody tr.row-purpose td.data {
+            background: #eef2ff;
+            color: #312e81;
+        }
+
+        .trial-types-table tbody tr.row-deploy td.data {
+            background: #fce7f3;
+            color: #831843;
+        }
+
+        .trial-types-table tbody tr.row-length td.data {
+            background: #ede9fe;
+            color: #4c1d95;
+        }
+
+        .trial-types-table tbody tr.row-cost td.data {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+
+        .trial-types-table tbody tr.row-urgency td.data {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+
+        .trial-types-table tbody tr.row-effort td.data {
+            background: #ccfbf1;
+            color: #115e59;
+        }
+
+        .trial-types-table td.data {
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .trial-types-footnotes {
+            padding: 10px 14px 12px;
+            font-size: 0.78em;
+            color: #64748b;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
+            line-height: 1.5;
         }
 
         .tab-content {
@@ -782,6 +917,7 @@
                     <button class="tab active" data-tab="prospect" onclick="switchTab('prospect', event)">📊 Prospect Overview</button>
                     <button class="tab" data-tab="demo" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
                     <button class="tab" data-tab="gong" onclick="switchTab('gong', event)">Single Call Analysis</button>
+                    <button class="tab" data-tab="pocpot" onclick="switchTab('pocpot', event)">📄 PoC / PoT Document</button>
                 </div>
 
                 <div class="tab-content-wrapper">
@@ -959,6 +1095,110 @@
                 </p>
             </div>
 
+            <div id="pocpot-tab" class="tab-content">
+                <section class="pocpot-reference" aria-labelledby="trial-types-heading">
+                    <div class="trial-types-matrix" role="region">
+                        <h3 class="trial-types-title" id="trial-types-heading">Arize AX trial types</h3>
+                        <div class="trial-types-scroll">
+                            <table class="trial-types-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col"></th>
+                                        <th scope="col" class="col-workshop">Technical Workshop (Demo)</th>
+                                        <th scope="col" class="col-pot">Proof of Technology (PoT)</th>
+                                        <th scope="colgroup" colspan="2">Proof of Concept (PoC)</th>
+                                    </tr>
+                                    <tr class="subhead">
+                                        <th scope="col"></th>
+                                        <th scope="col" class="col-workshop"></th>
+                                        <th scope="col" class="col-pot"></th>
+                                        <th scope="col" class="col-saas">SaaS</th>
+                                        <th scope="col" class="col-vpc">VPC</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="row-purpose">
+                                        <th scope="row" class="row-label">Purpose</th>
+                                        <td class="data col-workshop">Demonstrate AX value in a demo.</td>
+                                        <td class="data col-pot">Workshops to map AX to your use cases and challenges.</td>
+                                        <td class="data col-saas">Prove AX fits your GenAI stack and hit agreed success criteria.</td>
+                                        <td class="data col-vpc">Prove AX fits your GenAI stack in your environment via agreed success criteria.</td>
+                                    </tr>
+                                    <tr class="row-deploy">
+                                        <th scope="row" class="row-label">Deployment / data</th>
+                                        <td class="data col-workshop">SaaS demo</td>
+                                        <td class="data col-pot">SaaS / synthetic data</td>
+                                        <td class="data col-saas">SaaS / customer data<sup>*</sup></td>
+                                        <td class="data col-vpc">VPC / customer data</td>
+                                    </tr>
+                                    <tr class="row-length">
+                                        <th scope="row" class="row-label">Length of trial</th>
+                                        <td class="data col-workshop">1 day</td>
+                                        <td class="data col-pot">&lt; 1 week</td>
+                                        <td class="data col-saas">&lt; 2 weeks</td>
+                                        <td class="data col-vpc">&lt; 4 weeks</td>
+                                    </tr>
+                                    <tr class="row-cost">
+                                        <th scope="row" class="row-label">Cost</th>
+                                        <td class="data col-workshop">Free</td>
+                                        <td class="data col-pot">Free</td>
+                                        <td class="data col-saas">Free</td>
+                                        <td class="data col-vpc">TBD</td>
+                                    </tr>
+                                    <tr class="row-urgency">
+                                        <th scope="row" class="row-label">Customer urgency</th>
+                                        <td class="data col-workshop">Very high</td>
+                                        <td class="data col-pot">High</td>
+                                        <td class="data col-saas">Medium</td>
+                                        <td class="data col-vpc">Low</td>
+                                    </tr>
+                                    <tr class="row-effort">
+                                        <th scope="row" class="row-label">Level of effort</th>
+                                        <td class="data col-workshop">None</td>
+                                        <td class="data col-pot">Low</td>
+                                        <td class="data col-saas">High</td>
+                                        <td class="data col-vpc">Very high<sup>**</sup></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="trial-types-footnotes">
+                            <div><sup>*</sup> PII/PHI can be redacted within a SaaS PoC.</div>
+                            <div><sup>**</sup> Requires infrastructure resources.</div>
+                        </div>
+                    </div>
+                </section>
+                <div class="input-section">
+                    <label for="pocAccountName">Company name</label>
+                    <input type="text" id="pocAccountName" placeholder="e.g., Acme Corp, Stripe" autocomplete="off">
+                    <p class="help-text">Used for BigQuery account resolution (same warehouse as Prospect Overview).</p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="pocDocTemplate">Document type</label>
+                    <select id="pocDocTemplate" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
+                        <option value="pot">Proof of Technology (PoT)</option>
+                        <option value="poc_saas" selected>Proof of Concept — SaaS (PoC SaaS)</option>
+                        <option value="poc_vpc">Proof of Concept — VPC (PoC VPC)</option>
+                    </select>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="pocAccountDomain">Email domain (optional)</label>
+                    <input type="text" id="pocAccountDomain" placeholder="e.g., acme.com" autocomplete="off" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+                    <p class="help-text">When set with company name, <strong>both</strong> must match. Leave blank to search by name only.</p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="pocManualNotes">Notes for the writer (optional)</label>
+                    <textarea id="pocManualNotes" rows="3" placeholder="Deal context, success criteria hints, or anything not in Gong/Pendo yet." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                </div>
+                <p class="help-text" style="margin-top: 15px; padding: 12px; background: #e8f5e9; border-radius: 8px;">
+                    📄 <strong>PoC / PoT Document</strong> loads Salesforce, Gong, Pendo, and FullStory from BigQuery, then fills the in-template placeholders (for example <code>[Company Name]</code>, stack choices, and trial schedule lines) in the official Word file for download.
+                </p>
+                <div class="button-group" style="margin-top: 20px;">
+                    <button type="button" class="btn-primary" onclick="downloadPocDocument()" id="pocDownloadBtn">Generate &amp; download Word</button>
+                </div>
+            </div>
+
+            <div id="sharedAnalyzeControls">
             <div class="input-section" style="margin-bottom: 20px;">
                 <label for="modelSelect">AI Model</label>
                 <select id="modelSelect" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
@@ -977,6 +1217,7 @@
                 <button class="btn-primary" onclick="handleAnalyze()" id="analyzeBtn">
                     Analyze
                 </button>
+            </div>
             </div>
                 </div>
             </div>
@@ -1036,6 +1277,23 @@
 
     <script>
         let currentTab = 'prospect';
+        /** Which tab last populated #results (prospect | hypothesis | demo | gong). PoC/PoT does not use this panel. */
+        let stillnessResultsOwnerTab = null;
+
+        function setStillnessResultsOwner(tabId) {
+            stillnessResultsOwnerTab = tabId;
+        }
+
+        function syncResultsPanelForTab(tab) {
+            const results = document.getElementById('results');
+            if (!results) return;
+            results.style.display = '';
+            if (stillnessResultsOwnerTab && tab === stillnessResultsOwnerTab && results.innerHTML.trim()) {
+                results.classList.add('show');
+            } else {
+                results.classList.remove('show');
+            }
+        }
 
         // Initialize button state on page load
         document.addEventListener('DOMContentLoaded', function() {
@@ -1044,6 +1302,7 @@
             const modelSection = modelSelect ? modelSelect.parentElement : null;
             if (analyzeBtn) analyzeBtn.textContent = 'Get Prospect Overview';
             if (modelSection) modelSection.style.display = 'none';
+            syncResultsPanelForTab('prospect');
         });
 
         function switchTab(tab, evt) {
@@ -1052,7 +1311,8 @@
             // Update tab buttons (use currentTarget so we get the button, not a child node like text)
             const tabButtons = document.querySelectorAll('.tab');
             tabButtons.forEach(btn => btn.classList.remove('active'));
-            const target = (evt && evt.currentTarget) || Array.from(tabButtons).find(btn => btn.getAttribute('data-tab') === tab) || tabButtons[['hypothesis','prospect','demo','gong'].indexOf(tab)];
+            const tabOrder = ['hypothesis', 'prospect', 'demo', 'gong', 'pocpot'];
+            const target = (evt && evt.currentTarget) || Array.from(tabButtons).find(btn => btn.getAttribute('data-tab') === tab) || tabButtons[tabOrder.indexOf(tab)];
             if (target && target.classList) target.classList.add('active');
 
             // Update tab content
@@ -1060,7 +1320,14 @@
             document.getElementById('prospect-tab').classList.toggle('active', tab === 'prospect');
             document.getElementById('demo-tab').classList.toggle('active', tab === 'demo');
             document.getElementById('hypothesis-tab').classList.toggle('active', tab === 'hypothesis');
-            
+            const pocpotEl = document.getElementById('pocpot-tab');
+            if (pocpotEl) pocpotEl.classList.toggle('active', tab === 'pocpot');
+
+            const sharedControls = document.getElementById('sharedAnalyzeControls');
+            if (sharedControls) {
+                sharedControls.style.display = tab === 'pocpot' ? 'none' : 'block';
+            }
+
             // Update button text and hide model selector for prospect overview / demo / hypothesis
             const analyzeBtn = document.getElementById('analyzeBtn');
             const modelSelect = document.getElementById('modelSelect');
@@ -1074,10 +1341,14 @@
             } else if (tab === 'hypothesis') {
                 if (analyzeBtn) analyzeBtn.textContent = 'Research Company';
                 if (modelSection) modelSection.style.display = 'none';
+            } else if (tab === 'pocpot') {
+                if (modelSection) modelSection.style.display = 'none';
             } else {
                 if (analyzeBtn) analyzeBtn.textContent = 'Analyze Call';
                 if (modelSection) modelSection.style.display = 'block';
             }
+
+            syncResultsPanelForTab(tab);
         }
 
         function handleAnalyze() {
@@ -1088,8 +1359,65 @@
                 generateDemo();
             } else if (currentTab === 'hypothesis') {
                 researchHypothesis();
+            } else if (currentTab === 'pocpot') {
+                return;
             } else {
                 analyzeTranscript();
+            }
+        }
+
+        async function downloadPocDocument() {
+            const accountName = document.getElementById('pocAccountName').value.trim();
+            if (!accountName) {
+                alert('Please enter a company name.');
+                return;
+            }
+            const domainRaw = (document.getElementById('pocAccountDomain').value || '').trim();
+            const document_template = document.getElementById('pocDocTemplate').value;
+            const notesRaw = (document.getElementById('pocManualNotes').value || '').trim();
+            const manual_notes = notesRaw.length ? notesRaw : null;
+
+            const loading = document.getElementById('loading');
+            const loadingMsg = document.getElementById('loading-message');
+            loading.style.display = 'block';
+            if (loadingMsg) loadingMsg.textContent = 'Generating Word document (BigQuery + AI)...';
+
+            try {
+                const res = await fetch('/api/generate-poc-document', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_name: accountName,
+                        domain: domainRaw.length ? domainRaw : null,
+                        document_template,
+                        manual_notes,
+                    }),
+                });
+                if (!res.ok) {
+                    let detail = res.statusText;
+                    try {
+                        const j = await res.json();
+                        if (j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+                    } catch (_) {}
+                    throw new Error(detail);
+                }
+                const blob = await res.blob();
+                const cd = res.headers.get('Content-Disposition') || '';
+                let fname = 'arize_ax_document.docx';
+                const m = cd.match(/filename="([^"]+)"/i) || cd.match(/filename=([^;]+)/i);
+                if (m) fname = (m[1] || m[0]).trim().replace(/^["']|["']$/g, '');
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fname;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Document generation failed: ' + (e.message || String(e)));
+            } finally {
+                loading.style.display = 'none';
             }
         }
 
@@ -1119,6 +1447,7 @@
 
             loading.style.display = 'block';
             results.style.display = 'none';
+            results.classList.remove('show');
             confirm.style.display = 'none';
             loadingMsg.textContent = 'Classifying prospect use case...';
 
@@ -1177,8 +1506,10 @@
                 confirm.style.display = 'block';
             } catch (err) {
                 loading.style.display = 'none';
-                results.style.display = 'block';
+                setStillnessResultsOwner('demo');
+                results.style.display = '';
                 results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${err.message || 'Classification failed.'}</div>`;
+                results.classList.add('show');
             }
         }
 
@@ -1198,6 +1529,7 @@
             confirm.style.display = 'none';
             loading.style.display = 'block';
             results.style.display = 'none';
+            results.classList.remove('show');
             loadingMsg.textContent = 'Starting trace generation...';
 
             try {
@@ -1265,12 +1597,13 @@
 
                 loading.style.display = 'none';
                 if (!data) {
-                    results.style.display = 'block';
+                    setStillnessResultsOwner('demo');
+                    results.style.display = '';
                     results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> No response received from server.</div>`;
+                    results.classList.add('show');
                     return;
                 }
 
-                results.style.display = 'block';
                 let html = '<h2>Demo Traces Generated</h2>';
                 html += `<div style="padding: 15px; background: #e8f5e9; border-radius: 8px; margin-bottom: 15px;">`;
                 html += `<p><strong>Prospect:</strong> ${data.prospect_name}</p>`;
@@ -1320,14 +1653,19 @@
                     html += `<p style="color: #666; margin-top: 15px;">Traces were sent to Arize automatically. Open the link above to walk through the demo.</p>`;
                 }
                 results.innerHTML = html;
+                setStillnessResultsOwner('demo');
+                results.style.display = '';
+                results.classList.add('show');
             } catch (err) {
                 loading.style.display = 'none';
-                results.style.display = 'block';
+                setStillnessResultsOwner('demo');
+                results.style.display = '';
                 const isTimeout = err.name === 'AbortError';
                 const msg = isTimeout
                     ? 'Request timed out after 10 minutes. The demo pipeline can take several minutes. Please try again.'
                     : (err.message || 'Network error. Please check your connection and try again.');
                 results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${msg}</div>`;
+                results.classList.add('show');
             }
         }
 
@@ -1345,6 +1683,7 @@
 
             loading.style.display = 'block';
             results.style.display = 'none';
+            results.classList.remove('show');
             loadingMsg.textContent = `AI agent researching ${companyName}... This may take 30-60 seconds.`;
 
             try {
@@ -1373,24 +1712,32 @@
                 }
 
                 if (!res.ok) {
-                    results.style.display = 'block';
+                    setStillnessResultsOwner('hypothesis');
+                    results.style.display = '';
                     const msg = (data && (data.detail || data.message)) || text || res.statusText || `Request failed (${res.status})`;
                     results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${typeof msg === 'string' ? msg : JSON.stringify(msg)}</div>`;
+                    results.classList.add('show');
                     return;
                 }
 
                 if (!data) {
-                    results.style.display = 'block';
+                    setStillnessResultsOwner('hypothesis');
+                    results.style.display = '';
                     results.innerHTML = '<div style="color: red; padding: 20px;">Invalid response: no data.</div>';
+                    results.classList.add('show');
                     return;
                 }
 
-                results.style.display = 'block';
                 results.innerHTML = renderHypothesisResults(data);
+                setStillnessResultsOwner('hypothesis');
+                results.style.display = '';
+                results.classList.add('show');
             } catch (err) {
                 loading.style.display = 'none';
-                results.style.display = 'block';
+                setStillnessResultsOwner('hypothesis');
+                results.style.display = '';
                 results.innerHTML = `<div style="color: red; padding: 20px;"><strong>Error:</strong> ${err.message}</div>`;
+                results.classList.add('show');
             }
         }
 
@@ -2538,6 +2885,8 @@
                 ${userBehaviorHtml}
             `;
 
+            setStillnessResultsOwner('prospect');
+            results.style.display = '';
             results.classList.add('show');
             results.scrollIntoView({ behavior: 'smooth' });
         }
@@ -2710,6 +3059,8 @@
             // Store recap data for later use
             window.currentRecapData = data.recap_data;
 
+            setStillnessResultsOwner('gong');
+            results.style.display = '';
             results.classList.add('show');
             results.scrollIntoView({ behavior: 'smooth' });
         }

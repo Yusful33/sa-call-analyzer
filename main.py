@@ -116,8 +116,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
 from models import (
     AnalyzeRequest, AnalysisResult, RecapSlideData, ProspectTimeline,
-    ProspectOverviewRequest, ProspectOverview
+    ProspectOverviewRequest, ProspectOverview, GeneratePocDocumentRequest,
 )
+from poc_document_generator import AppendixGenerationError, build_poc_document
 from transcript_parser import TranscriptParser
 from crew_analyzer import SACallAnalysisCrew
 from gong_mcp_client import GongMCPClient
@@ -2218,6 +2219,86 @@ async def hypothesis_research(request: HypothesisResearchRequest):
                 raise HTTPException(status_code=504, detail="Request timed out. Try again.")
             else:
                 raise HTTPException(status_code=500, detail=f"Research failed: {error_detail[:200]}")
+
+
+# ============================================================
+# PoC / PoT document (Word) from BigQuery + LLM appendix
+# ============================================================
+
+
+@app.post("/api/generate-poc-document")
+async def generate_poc_document_deliverable(request: GeneratePocDocumentRequest):
+    """
+    Fetch ProspectOverview from BigQuery, run an LLM to fill in-template placeholders
+    in the selected Word master, and return a .docx download.
+    """
+    with tracer.start_as_current_span(
+        f"{SPAN_PREFIX}.generate_poc_document",
+        attributes={
+            "poc_doc.template": request.document_template,
+            "poc_doc.account_name": request.account_name.strip(),
+            "openinference.span.kind": "chain",
+        },
+    ) as span:
+        try:
+            if not bq_client:
+                span.set_status(Status(StatusCode.ERROR, "BigQuery unavailable"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login",
+                )
+
+            domain = (request.domain or "").strip() or None
+            span.add_event(
+                "fetch_prospect_overview",
+                {"account_name": request.account_name.strip(), "domain": domain or ""},
+            )
+            overview = bq_client.get_prospect_overview(
+                account_name=request.account_name.strip(),
+                domain=domain,
+                sfdc_account_id=None,
+                manual_competitors=None,
+            )
+
+            doc_bytes, filename = build_poc_document(
+                overview=overview,
+                document_template=request.document_template,
+                manual_notes=request.manual_notes,
+                llm_model=None,
+            )
+
+            span.set_attribute("poc_doc.filename", filename)
+            span.set_attribute("poc_doc.size_bytes", len(doc_bytes))
+            span.set_status(Status(StatusCode.OK))
+
+            return Response(
+                content=doc_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        except HTTPException:
+            raise
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(status_code=400, detail=str(e))
+        except AppendixGenerationError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(
+                status_code=502,
+                detail=f"Document generation failed (model output): {str(e)[:400]}",
+            )
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate document: {str(e)[:500]}",
+            )
+
+
+_static_dir = BASE_DIR / "frontend" / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 if __name__ == "__main__":
