@@ -1,11 +1,10 @@
 """RAG use-case: shared prompts, queries, documents, retrieval, guardrails, evaluators."""
 
 import random
-from typing import List
+from typing import Any, List
 
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
-from langchain_chroma import Chroma
 
 from .common import industry_key
 
@@ -161,14 +160,22 @@ def fetch_document_metadata(source: str) -> str:
     })
 
 
-_vectorstore_cache: Chroma | None = None
+_vectorstore_cache: Any = None
 
 
-def get_vectorstore(model_name: str = "text-embedding-3-small") -> Chroma:
+def get_vectorstore(model_name: str = "text-embedding-3-small") -> Any:
     """Create or return cached vector store."""
     global _vectorstore_cache
     if _vectorstore_cache is not None:
         return _vectorstore_cache
+    try:
+        from langchain_chroma import Chroma
+    except ImportError as e:
+        raise RuntimeError(
+            "retrieval-augmented-search demos require optional Chroma dependencies. "
+            "Install locally with: uv sync --extra chroma  "
+            '(pip install ".[chroma]").'
+        ) from e
     embeddings = OpenAIEmbeddings(model=model_name)
     _vectorstore_cache = Chroma.from_documents(
         documents=SAMPLE_DOCS,
