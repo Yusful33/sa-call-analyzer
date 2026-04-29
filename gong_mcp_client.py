@@ -978,7 +978,8 @@ class GongMCPClient:
         prospect_name: str,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
-        fuzzy_threshold: float = 0.85
+        fuzzy_threshold: float = 0.85,
+        max_calls_to_scan: Optional[int] = None,
     ) -> List[Dict]:
         """
         Get all calls where the prospect name matches any participant.
@@ -991,6 +992,8 @@ class GongMCPClient:
             from_date: ISO format start date (e.g., "2024-03-01T00:00:00Z")
             to_date: ISO format end date (e.g., "2024-03-31T23:59:59Z")
             fuzzy_threshold: Similarity threshold for matching (0-1, default 0.85)
+            max_calls_to_scan: If set, only scan the first N calls from list_calls (newest-first
+                from Gong). Limits cost when the workspace has very high call volume.
             
         Returns:
             List of call dictionaries where prospect name matches any participant
@@ -1028,6 +1031,8 @@ class GongMCPClient:
                 
                 # Fetch all calls (or calls in date range)
                 all_calls = self.list_calls(from_date=from_date, to_date=to_date)
+                if max_calls_to_scan is not None and len(all_calls) > max_calls_to_scan:
+                    all_calls = all_calls[:max_calls_to_scan]
                 span.set_attribute("calls.total", len(all_calls))
                 # #region agent log
                 _debug_log("gong_mcp_client.py:817", "Fetched calls from Gong", {
@@ -1206,7 +1211,8 @@ class GongMCPClient:
         prospect_name: str,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
-        fuzzy_threshold: float = 0.85
+        fuzzy_threshold: float = 0.85,
+        max_calls_to_scan: Optional[int] = None,
     ) -> Generator[Dict, None, None]:
         """
         Get all calls where the prospect name matches any participant, with progress events.
@@ -1248,6 +1254,8 @@ class GongMCPClient:
 
                 # Fetch all calls (or calls in date range)
                 all_calls = self.list_calls(from_date=from_date, to_date=to_date)
+                if max_calls_to_scan is not None and len(all_calls) > max_calls_to_scan:
+                    all_calls = all_calls[:max_calls_to_scan]
                 span.set_attribute("calls.total", len(all_calls))
 
                 # Stage 2: Retrieved calls, now filtering

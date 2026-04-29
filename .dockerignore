@@ -33,4 +33,7 @@ docs/
 htmlcov/
 .coverage
 
+# Next.js app (built separately; keeps Python image smaller)
+web/
+
 

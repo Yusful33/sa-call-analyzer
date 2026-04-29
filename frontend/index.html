@@ -1251,6 +1251,14 @@
             </div>
         </div>
 
+        <!-- Salesforce account name confirmation (spacing vs CRM) -->
+        <div id="account-suggest-panel" class="card" style="display: none; z-index: 9000; position: relative;">
+            <h3 style="margin-top: 0;">Confirm Salesforce account</h3>
+            <p id="account-suggest-reason" style="color: #555;"></p>
+            <p><span style="color: #666;">You typed: </span><strong id="account-suggest-query"></strong></p>
+            <div id="account-suggest-buttons" style="display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;"></div>
+        </div>
+
         <!-- Progress container for SSE streaming (prospect timeline) -->
         <div id="progress-loading" class="card" style="display: none;">
             <div class="progress-container">
@@ -1279,6 +1287,80 @@
         let currentTab = 'prospect';
         /** Which tab last populated #results (prospect | hypothesis | demo | gong). PoC/PoT does not use this panel. */
         let stillnessResultsOwnerTab = null;
+
+        /**
+         * When the typed company name does not substring-match Salesforce (e.g. two words vs one),
+         * ask the user to pick a CRM record or keep their spelling.
+         * @returns {{ ok: boolean, account_name: string, domain: string|null, sfdc_account_id: string|null }}
+         */
+        async function resolveSalesforceAccountLabel(accountName, domain) {
+            const an = (accountName || '').trim();
+            const dom = (domain || '').trim() || null;
+            if (!an) {
+                return { ok: true, account_name: an, domain: dom, sfdc_account_id: null };
+            }
+            try {
+                const res = await fetch('/api/account-suggestions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ account_name: an, domain: dom }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    return { ok: true, account_name: an, domain: dom, sfdc_account_id: null };
+                }
+                if (data.status === 'ok' && data.matches && data.matches.length === 1) {
+                    const m = data.matches[0];
+                    return { ok: true, account_name: m.name, domain: dom, sfdc_account_id: m.id };
+                }
+                if (data.status !== 'suggest' || !data.matches || !data.matches.length) {
+                    return { ok: true, account_name: an, domain: dom, sfdc_account_id: null };
+                }
+                return await new Promise((resolve) => {
+                    const panel = document.getElementById('account-suggest-panel');
+                    const reasonEl = document.getElementById('account-suggest-reason');
+                    const queryEl = document.getElementById('account-suggest-query');
+                    const btns = document.getElementById('account-suggest-buttons');
+                    reasonEl.textContent = data.reason || '';
+                    queryEl.textContent = an;
+                    btns.innerHTML = '';
+                    const finish = (payload) => {
+                        panel.style.display = 'none';
+                        resolve(payload);
+                    };
+                    data.matches.slice(0, 12).forEach((m) => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.className = 'btn-primary';
+                        b.style.marginBottom = '6px';
+                        b.textContent = m.name + (m.website ? ' — ' + m.website : '');
+                        b.onclick = () => finish({ ok: true, account_name: m.name, domain: dom, sfdc_account_id: m.id });
+                        btns.appendChild(b);
+                    });
+                    const keep = document.createElement('button');
+                    keep.type = 'button';
+                    keep.style.padding = '10px 16px';
+                    keep.style.border = '2px solid #e0e0e0';
+                    keep.style.borderRadius = '8px';
+                    keep.style.background = 'white';
+                    keep.style.cursor = 'pointer';
+                    keep.textContent = 'Keep my spelling';
+                    keep.onclick = () => finish({ ok: true, account_name: an, domain: dom, sfdc_account_id: null });
+                    btns.appendChild(keep);
+                    const cancel = document.createElement('button');
+                    cancel.type = 'button';
+                    cancel.style.padding = '10px 16px';
+                    cancel.style.marginLeft = '8px';
+                    cancel.style.cursor = 'pointer';
+                    cancel.textContent = 'Cancel';
+                    cancel.onclick = () => finish({ ok: false });
+                    btns.appendChild(cancel);
+                    panel.style.display = 'block';
+                });
+            } catch (_) {
+                return { ok: true, account_name: an, domain: dom, sfdc_account_id: null };
+            }
+        }
 
         function setStillnessResultsOwner(tabId) {
             stillnessResultsOwnerTab = tabId;
@@ -1367,12 +1449,19 @@
         }
 
         async function downloadPocDocument() {
-            const accountName = document.getElementById('pocAccountName').value.trim();
+            let accountName = document.getElementById('pocAccountName').value.trim();
             if (!accountName) {
                 alert('Please enter a company name.');
                 return;
             }
-            const domainRaw = (document.getElementById('pocAccountDomain').value || '').trim();
+            let domainRaw = (document.getElementById('pocAccountDomain').value || '').trim();
+            const r0 = await resolveSalesforceAccountLabel(accountName, domainRaw);
+            if (!r0.ok) return;
+            accountName = (r0.account_name || accountName).trim();
+            domainRaw = (r0.domain || domainRaw || '').trim();
+            document.getElementById('pocAccountName').value = accountName;
+            if (domainRaw) document.getElementById('pocAccountDomain').value = domainRaw;
+
             const document_template = document.getElementById('pocDocTemplate').value;
             const notesRaw = (document.getElementById('pocManualNotes').value || '').trim();
             const manual_notes = notesRaw.length ? notesRaw : null;
@@ -1428,11 +1517,15 @@
         let _demoAdditionalContext = '';
 
         async function generateDemo() {
-            const accountName = document.getElementById('demoAccountName').value.trim();
+            let accountName = document.getElementById('demoAccountName').value.trim();
             if (!accountName) {
                 alert('Please enter a prospect/account name.');
                 return;
             }
+            const r0 = await resolveSalesforceAccountLabel(accountName, '');
+            if (!r0.ok) return;
+            accountName = (r0.account_name || accountName).trim();
+            document.getElementById('demoAccountName').value = accountName;
 
             // Save for phase 2
             _demoAccountName = accountName;
@@ -1670,12 +1763,16 @@
         }
 
         async function researchHypothesis() {
-            const companyName = document.getElementById('hypCompanyName').value.trim();
+            let companyName = document.getElementById('hypCompanyName').value.trim();
             if (!companyName) {
                 alert('Please enter a company name.');
                 return;
             }
             const domain = document.getElementById('hypDomain').value.trim() || undefined;
+            const r0 = await resolveSalesforceAccountLabel(companyName, domain || '');
+            if (!r0.ok) return;
+            companyName = (r0.account_name || companyName).trim();
+            if (companyName) document.getElementById('hypCompanyName').value = companyName;
 
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -1989,6 +2086,19 @@
                 return;
             }
 
+            let nm = accountName.trim();
+            let dom = accountDomain.trim();
+            let sid = sfdcAccountId.trim();
+            if (nm && !sid) {
+                const r = await resolveSalesforceAccountLabel(nm, dom);
+                if (!r.ok) return;
+                nm = (r.account_name || nm).trim();
+                dom = (r.domain || dom || '').trim();
+                sid = (r.sfdc_account_id || sid || '').trim();
+                if (nm) document.getElementById('accountName').value = nm;
+                if (sid) document.getElementById('sfdcAccountId').value = sid;
+            }
+
             // Show loading
             analyzeBtn.disabled = true;
             loading.style.display = 'block';
@@ -1997,14 +2107,14 @@
 
             // Build request body
             const requestBody = {};
-            if (accountName.trim()) {
-                requestBody.account_name = accountName.trim();
+            if (nm) {
+                requestBody.account_name = nm;
             }
-            if (accountDomain.trim()) {
-                requestBody.domain = accountDomain.trim();
+            if (dom) {
+                requestBody.domain = dom;
             }
-            if (sfdcAccountId.trim()) {
-                requestBody.sfdc_account_id = sfdcAccountId.trim();
+            if (sid) {
+                requestBody.sfdc_account_id = sid;
             }
 
             try {

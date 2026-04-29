@@ -1,5 +1,9 @@
-# Multi-architecture Dockerfile for Gong MCP HTTP Server
-# Builds for both ARM64 (Mac M1/M2) and AMD64 (Railway/cloud)
+# Gong MCP HTTP server (Node MCP + Python FastAPI wrapper).
+# Do not pin --platform here: local `docker compose` on Apple Silicon should build
+# linux/arm64 so the image matches the host. For amd64-only targets (e.g. pushing
+# from a Mac to Railway), tag under a registry you own — not `gong-http-server:tag`
+# alone (that is docker.io/library/… and push returns "access denied"):
+#   docker buildx build --platform linux/amd64 -t YOUR_DOCKERHUB_USER/gong-mcp:1.0 --push ./gong-http-server
 
 FROM node:20-alpine AS mcp-builder
 

@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Decoded from GCP_CREDENTIALS_BASE64 (local / serverless)
+gcp-credentials.json
+
 # Kubernetes secrets (copy from *.example and fill in; do not commit)
 k8s/secret.yaml
 k8s/litellm-secret.yaml

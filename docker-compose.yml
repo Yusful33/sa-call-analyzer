@@ -1,5 +1,6 @@
 # SA Call Analyzer - Docker Compose
 # All services run together, communicating via HTTP
+# `docker compose up` — FastAPI (legacy UI) + LiteLLM + Gong MCP + Next.js (web/) on :3000
 
 services:
   # Main SA Call Analyzer Application
@@ -64,6 +65,7 @@ services:
             - frontend/
             - gong-http-server/
             - litellm/
+            - web/
         # Rebuild on dependency changes
         - action: rebuild
           path: pyproject.toml
@@ -97,6 +99,9 @@ services:
           target: /app/config.yaml
 
   # Gong MCP Server - Fetches call transcripts from Gong via MCP protocol
+  # If you use `image: ...` with a linux/amd64-only image on Apple Silicon, set:
+  #   platform: linux/amd64
+  # so Docker runs it under emulation (slower but works).
   gong-mcp:
     build: ./gong-http-server
     # image: yusufarize/gong-mcp:latest  # Use for production (from Docker Hub)
@@ -125,6 +130,28 @@ services:
         # Rebuild on package.json changes
         - action: rebuild
           path: ./gong-http-server/mcp-server/package.json
+
+  # Next.js migration shell (v0 / Vercel path); legacy UI remains on app :8080
+  web:
+    image: node:20-bookworm-slim
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_LEGACY_API_URL=http://localhost:${PORT:-8080}
+      - WATCHPACK_POLLING=true
+      - ARIZE_SPACE_ID=${ARIZE_SPACE_ID}
+      - ARIZE_API_KEY=${ARIZE_API_KEY}
+      - ARIZE_PROJECT_NAME=${ARIZE_PROJECT_NAME:-stillness-web}
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    command: ["sh", "-c", "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"]
+    depends_on:
+      - app
+
+volumes:
+  web_node_modules:
 
 networks:
   default:

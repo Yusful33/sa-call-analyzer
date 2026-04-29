@@ -823,6 +823,38 @@ class ProductUsageSummary(BaseModel):
     trend: str = "stable"  # growing, stable, declining
 
 
+class AccountSuggestionMatch(BaseModel):
+    """A Salesforce account candidate for name disambiguation."""
+
+    id: str
+    name: str
+    website: Optional[str] = None
+    match_score: int = 0  # higher = stronger match to the typed query
+
+
+class AccountSuggestionsRequest(BaseModel):
+    """Resolve a typed company/account name against Salesforce (handles spacing, punctuation)."""
+
+    account_name: str = Field(..., min_length=1, description="What the user typed")
+    domain: Optional[str] = Field(
+        default=None,
+        description="When set, only accounts whose website contains this pattern are returned.",
+    )
+
+
+class AccountSuggestionsResponse(BaseModel):
+    """Whether the UI should confirm a different Salesforce account name."""
+
+    status: str = Field(
+        ...,
+        description="'ok' = single confident match; 'suggest' = show alternatives; 'none' = no CRM hits",
+    )
+    reason: str = ""
+    query: str = ""
+    domain: Optional[str] = None
+    matches: List[AccountSuggestionMatch] = Field(default_factory=list)
+
+
 class ProspectOverviewRequest(BaseModel):
     """Request to get prospect overview from BigQuery"""
     # Support multiple lookup methods

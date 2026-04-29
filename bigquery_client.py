@@ -6,6 +6,7 @@ including Salesforce, Gong, Pendo, and FullStory data.
 """
 import os
 import json
+import re
 from collections import Counter, defaultdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -35,6 +36,56 @@ from models import (
     UserLast24hActivity,
     AccountLast24hActivity,
 )
+
+
+def _coerce_gong_transcript_snippet(raw: Any, max_len: int = 1000) -> Optional[str]:
+    """Normalize Gong TRANSCRIPT from BigQuery to a plain string.
+
+    The warehouse column may be plain text, a JSON *string*, or already-parsed JSON
+    (list/dict). Post-init assignment to ``GongCallData.transcript_snippet`` bypasses
+    Pydantic validation, so we must never return structured types.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if isinstance(raw, str):
+        text = raw
+    elif isinstance(raw, (list, dict)):
+        try:
+            text = json.dumps(raw, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(raw)
+    else:
+        text = str(raw)
+    text = text.strip()
+    if not text:
+        return None
+    if len(text) > max_len:
+        return text[:max_len] + "..."
+    return text
+
+
+def _normalize_spotlight_next_steps(raw: Any) -> Optional[str]:
+    """Coerce CALL_SPOTLIGHT_NEXT_STEPS to Optional[str] for GongCallData."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        return s or None
+    if isinstance(raw, list):
+        parts = [str(x).strip() for x in raw if x is not None and str(x).strip()]
+        if not parts:
+            return None
+        return "; ".join(parts)
+    if isinstance(raw, dict):
+        try:
+            out = json.dumps(raw, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            out = str(raw)
+        return out.strip() or None
+    s = str(raw).strip()
+    return s or None
 
 
 class BigQueryClient:
@@ -437,7 +488,165 @@ class BigQueryClient:
             )
         
         return None
-    
+
+    def suggest_salesforce_account_names(
+        self,
+        account_name: str,
+        domain: Optional[str] = None,
+        limit: int = 12,
+    ) -> dict:
+        """Find Salesforce account name candidates when the user's text does not
+        substring-match the CRM name (e.g. \"Alliance Bernstein\" vs
+        \"AllianceBernstein\").
+
+        Returns a dict compatible with :class:`AccountSuggestionsResponse`.
+        """
+        raw = (account_name or "").strip()
+        if not raw:
+            return {
+                "status": "none",
+                "reason": "Empty account name.",
+                "query": "",
+                "domain": domain,
+                "matches": [],
+            }
+
+        dom = (domain or "").strip()
+        domain_sql = ""
+        params_base: list = []
+        if dom:
+            params_base.append(
+                bigquery.ScalarQueryParameter(
+                    "domain_pattern", "STRING", f"%{dom.lower()}%"
+                )
+            )
+            domain_sql = "AND LOWER(IFNULL(a.website, '')) LIKE @domain_pattern"
+
+        def _rows_from_query(extra_where: str, extra_params: list) -> List[dict]:
+            q = f"""
+            SELECT
+                a.id,
+                a.name,
+                a.website,
+                CAST(a.total_active_arr_c AS FLOAT64) AS arr
+            FROM `{self.PROJECT_ID}.salesforce.account` a
+            WHERE a.is_deleted = FALSE
+              {domain_sql}
+              AND ({extra_where})
+            ORDER BY arr DESC NULLS LAST
+            LIMIT 20
+            """
+            cfg = bigquery.QueryJobConfig(query_parameters=params_base + extra_params)
+            out: List[dict] = []
+            for row in self.client.query(q, job_config=cfg).result():
+                out.append(
+                    {
+                        "id": row.id,
+                        "name": row.name,
+                        "website": row.website,
+                        "arr": row.arr,
+                    }
+                )
+            return out
+
+        strict_pat = f"%{raw.lower()}%"
+        strict_rows = _rows_from_query(
+            "LOWER(a.name) LIKE @strict_pat",
+            [bigquery.ScalarQueryParameter("strict_pat", "STRING", strict_pat)],
+        )
+
+        compact_q = re.sub(r"[^a-z0-9]+", "", raw.lower())
+        compact_rows: List[dict] = []
+        if len(compact_q) >= 3:
+            compact_rows = _rows_from_query(
+                "LOWER(REGEXP_REPLACE(a.name, r'[^a-zA-Z0-9]+', '')) LIKE @compact_like",
+                [
+                    bigquery.ScalarQueryParameter(
+                        "compact_like", "STRING", f"%{compact_q}%"
+                    )
+                ],
+            )
+
+        tokens = [t for t in re.findall(r"[a-z0-9]{3,}", raw.lower())][:4]
+        token_rows: List[dict] = []
+        if len(tokens) >= 2:
+            parts = []
+            tparams: list = []
+            for i, tok in enumerate(tokens):
+                pname = f"tok_{i}"
+                parts.append(f"LOWER(a.name) LIKE @{pname}")
+                tparams.append(
+                    bigquery.ScalarQueryParameter(pname, "STRING", f"%{tok}%")
+                )
+            token_rows = _rows_from_query(" AND ".join(parts), tparams)
+
+        by_id: Dict[str, dict] = {}
+        for score, rows in (
+            (100, strict_rows),
+            (85, compact_rows),
+            (70, token_rows),
+        ):
+            for r in rows:
+                prev = by_id.get(r["id"])
+                if not prev or score > prev["match_score"]:
+                    by_id[r["id"]] = {
+                        "id": r["id"],
+                        "name": r["name"],
+                        "website": r["website"],
+                        "match_score": score,
+                        "_arr": r.get("arr"),
+                    }
+
+        merged = sorted(
+            by_id.values(),
+            key=lambda x: (-x["match_score"], -(x["_arr"] or 0)),
+        )[:limit]
+        for m in merged:
+            m.pop("_arr", None)
+
+        strict_ids = {r["id"] for r in strict_rows}
+        n_strict = len(strict_ids)
+
+        if not merged:
+            return {
+                "status": "none",
+                "reason": "No Salesforce accounts matched this name pattern.",
+                "query": raw,
+                "domain": domain,
+                "matches": [],
+            }
+
+        if n_strict == 1:
+            sid = strict_rows[0]["id"]
+            canon = next((m for m in merged if m["id"] == sid), merged[0])
+            return {
+                "status": "ok",
+                "reason": "One Salesforce account matched the typed phrase.",
+                "query": raw,
+                "domain": domain,
+                "matches": [canon],
+            }
+
+        if n_strict > 1:
+            return {
+                "status": "suggest",
+                "reason": "Multiple Salesforce accounts contain that exact phrase; pick one or continue with your text.",
+                "query": raw,
+                "domain": domain,
+                "matches": merged,
+            }
+
+        # No substring hit on the raw string — often spacing / punctuation vs CRM.
+        return {
+            "status": "suggest",
+            "reason": "No Salesforce account name contains that exact phrase. "
+            "Similar accounts (spacing/punctuation-insensitive match) are below — "
+            "did you mean one of these?",
+            "query": raw,
+            "domain": domain,
+            "matches": merged,
+        }
+
     def _get_opportunities(self, account_id: str) -> List[OpportunityData]:
         """Fetch opportunities with enhanced details."""
         
@@ -596,7 +805,7 @@ class BigQueryClient:
                 duration_minutes=row.duration_minutes,
                 spotlight_brief=row.spotlight_brief,
                 spotlight_key_points=key_points,
-                spotlight_next_steps=row.spotlight_next_steps,
+                spotlight_next_steps=_normalize_spotlight_next_steps(row.spotlight_next_steps),
                 spotlight_outcome=row.spotlight_outcome,
                 spotlight_type=row.spotlight_type,
                 talk_ratio=row.talk_ratio,
@@ -631,10 +840,11 @@ class BigQueryClient:
             if row.spotlight_brief:
                 all_briefs.append(row.spotlight_brief)
         
-        # Fetch participants for calls
+        # Fetch participants for ALL calls (not just 10) so the PoC document
+        # generator can rank people by frequency across the full call history.
         if conversation_keys:
-            participants_map = self._get_gong_participants(conversation_keys[:10])  # Top 10 recent calls
-            for call in calls[:10]:
+            participants_map = self._get_gong_participants(conversation_keys)
+            for call in calls:
                 if call.conversation_key and call.conversation_key in participants_map:
                     call.participants = participants_map[call.conversation_key]
         
@@ -734,10 +944,9 @@ class BigQueryClient:
         results = self.client.query(query, job_config=job_config).result()
         
         for row in results:
-            if row.TRANSCRIPT:
-                # Return first 1000 characters of transcript
-                return row.TRANSCRIPT[:1000] + "..." if len(row.TRANSCRIPT) > 1000 else row.TRANSCRIPT
-        
+            if row.TRANSCRIPT is not None:
+                return _coerce_gong_transcript_snippet(row.TRANSCRIPT, max_len=1000)
+
         return None
     
     def _extract_themes(self, briefs: List[str]) -> List[str]:
@@ -2936,6 +3145,20 @@ Return only valid JSON, no markdown formatting or code blocks."""
             days_since_last_activity=days_since,
             deal_summary=deal_summary
         )
+
+    def refresh_gong_dependent_fields(self, overview: ProspectOverview) -> ProspectOverview:
+        """Rebuild deal_summary and sales_engagement after Gong data changes (e.g. MCP enrichment)."""
+        gong = overview.gong_summary
+        deal_summary = None
+        if gong and gong.total_calls > 0:
+            deal_summary = self._build_deal_summary(gong)
+        sales_engagement = self._build_sales_engagement_summary(
+            overview.salesforce,
+            overview.latest_opportunity,
+            gong,
+            deal_summary,
+        )
+        return overview.model_copy(update={"sales_engagement": sales_engagement})
     
     def _build_product_usage_summary(
         self,

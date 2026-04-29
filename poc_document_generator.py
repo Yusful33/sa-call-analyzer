@@ -139,6 +139,121 @@ def _overview_blob(overview: ProspectOverview) -> str:
         return ""
 
 
+def _success_criteria_evidence_digest(overview: ProspectOverview) -> str:
+    """Keyword scan over the full overview JSON to steer success-criteria lines
+    away from generic ML/LLM filler when the opportunity never discussed those topics."""
+    blob = _overview_blob(overview)
+    if not blob.strip():
+        return (
+            "### Evidence scan for success criteria\n"
+            "*No structured overview text — use only TBD / N/A style placeholders; do not invent ML metrics.*"
+        )
+
+    checks: list[tuple[str, tuple[str, ...]]] = [
+        (
+            "LLMs / GenAI / agents / prompts / RAG",
+            (
+                "llm",
+                "large language",
+                "genai",
+                "generative ai",
+                "gpt-",
+                "claude",
+                "openai",
+                "anthropic",
+                "copilot",
+                "bedrock",
+                "vertex ai",
+                "agent",
+                "tool call",
+                "function calling",
+                "rag",
+                "retrieval augmented",
+                "embedding",
+                "vector",
+                "pgvector",
+                "pinecone",
+                "weaviate",
+                "langchain",
+                "langgraph",
+                "llamaindex",
+                "prompt",
+                "hallucination",
+                "chatbot",
+                "assistant",
+                "token",
+            ),
+        ),
+        (
+            "Classical ML / tabular / batch models",
+            (
+                "xgboost",
+                "sklearn",
+                "scikit",
+                "random forest",
+                "tabular",
+                "classification model",
+                "regression model",
+                "feature store",
+                "training pipeline",
+                "batch prediction",
+                "spark ml",
+                "sagemaker",
+            ),
+        ),
+        (
+            "Model monitoring / drift / production performance",
+            (
+                "drift",
+                "psi",
+                "data quality",
+                "model performance",
+                "serving",
+                "inference latency",
+                "shadow deployment",
+                "champion",
+                "challenger",
+            ),
+        ),
+        (
+            "Evaluations / benchmarks / golden sets",
+            (
+                "eval",
+                "evaluation",
+                "benchmark",
+                "golden set",
+                "offline eval",
+                "online eval",
+                "regression test",
+            ),
+        ),
+        (
+            "Tracing / observability for systems",
+            (
+                "trace",
+                "span",
+                "otel",
+                "opentelemetry",
+                "observability",
+                "arize",
+                "instrument",
+            ),
+        ),
+    ]
+
+    found = [label for label, kws in checks if any(kw in blob for kw in kws)]
+    missing = [label for label, _ in checks if label not in found]
+
+    lines = [
+        "### Evidence scan for success criteria (keyword signal over full ProspectOverview JSON)",
+        "**Buckets with at least weak textual support:** "
+        + ("; ".join(found) if found else "*(none detected — be very conservative)*"),
+        "**Buckets with no keyword hit (do not assume in-scope):** "
+        + ("; ".join(missing) if missing else "—"),
+    ]
+    return "\n".join(lines)
+
+
 def _one_line_account_summary(overview: ProspectOverview) -> str:
     bits: list[str] = []
     if overview.salesforce:
@@ -369,125 +484,285 @@ def _table_header_cells(row: Any) -> List[str]:
     return [c.text.strip() for c in row.cells]
 
 
-def _first_customer_participant_from_gong(overview: ProspectOverview) -> Tuple[str, str] | None:
-    """(name, email) for a likely customer-side Gong participant."""
+def _rank_participants_across_calls(
+    overview: ProspectOverview,
+    affiliation_filter: str,
+) -> List[Tuple[str, str, int]]:
+    """Rank participants by frequency + recency across ALL Gong calls.
+
+    affiliation_filter: "customer" to get external/prospect participants,
+                        "arize" to get internal/company participants.
+
+    Returns list of (name, email, call_count) sorted by call_count desc, then
+    by most-recent appearance.
+    """
     gong = overview.gong_summary
     if not gong:
-        return None
-    for call in gong.recent_calls:
+        return []
+
+    is_customer = affiliation_filter == "customer"
+    counts: Dict[str, Dict[str, Any]] = {}
+
+    for idx, call in enumerate(gong.recent_calls):
         for p in call.participants:
             name = (p.name or "").strip()
             if not name:
                 continue
             aff = (p.affiliation or "").strip().lower()
-            if aff in ("company", "internal"):
-                continue
-            # Gong often uses "non_company" for the prospect; also accept explicit external/customer.
-            if aff in ("external", "customer", "prospect", "non_company", ""):
-                email = (p.email or "").strip()
-                return (name, email)
-    return None
+
+            if is_customer:
+                if aff in ("company", "internal"):
+                    continue
+                if aff not in ("external", "customer", "prospect", "non_company", ""):
+                    continue
+            else:
+                if aff != "company":
+                    continue
+
+            key = name.lower()
+            if key not in counts:
+                counts[key] = {
+                    "name": name,
+                    "email": (p.email or "").strip(),
+                    "call_count": 0,
+                    "first_seen_idx": idx,
+                }
+            counts[key]["call_count"] += 1
+            if (p.email or "").strip() and not counts[key]["email"]:
+                counts[key]["email"] = (p.email or "").strip()
+
+    ranked = sorted(
+        counts.values(),
+        key=lambda x: (-x["call_count"], x["first_seen_idx"]),
+    )
+    return [(r["name"], r["email"], r["call_count"]) for r in ranked]
 
 
-def _first_arize_participant_from_gong(overview: ProspectOverview) -> Tuple[str, str, str] | None:
-    """(name, email, title_guess) from Gong when affiliation is host company (Arize)."""
-    gong = overview.gong_summary
-    if not gong:
-        return None
-    for call in gong.recent_calls:
-        for p in call.participants:
-            name = (p.name or "").strip()
-            if not name:
-                continue
-            aff = (p.affiliation or "").strip().lower()
-            if aff != "company":
-                continue
-            email = (p.email or "").strip()
-            return (name, email, "Arize (from recent Gong)")
-    return None
+def _ranked_customer_participants(overview: ProspectOverview) -> List[Tuple[str, str, int]]:
+    return _rank_participants_across_calls(overview, "customer")
 
 
-def _arize_roster_fields(sf: Any) -> Tuple[str, str, str] | None:
-    """(name, title, role_column) for the primary Arize contact row."""
-    sa = (getattr(sf, "assigned_sa", None) or "").strip()
-    cse = (getattr(sf, "assigned_cse", None) or "").strip()
-    ai = (getattr(sf, "assigned_ai_se", None) or "").strip()
-    if sa:
-        return (sa, "Solution Architect (Arize)", "Arize")
-    if cse:
-        return (cse, "Customer Success Engineer (Arize)", "Arize")
-    if ai:
-        return (ai, "AI Sales Engineer (Arize)", "Arize")
-    return None
+def _ranked_arize_participants(overview: ProspectOverview) -> List[Tuple[str, str, int]]:
+    return _rank_participants_across_calls(overview, "arize")
 
 
-def _arize_roster_line(overview: ProspectOverview) -> Tuple[str, str, str, str] | None:
-    """name, title, role_column, email (may be empty) for the primary Arize contact row."""
+def _arize_roster_lines(overview: ProspectOverview) -> List[Tuple[str, str, str, str]]:
+    """Build ordered list of (name, title, role, email) for Arize team members.
+
+    Sources in priority order:
+    1. Salesforce team assignments (SA, CSE, AI SE, owner)
+    2. Arize participants ranked across ALL Gong calls
+    Deduplicates by lowered name.
+    """
+    seen: set[str] = set()
+    lines: List[Tuple[str, str, str, str]] = []
+
     if overview.salesforce:
-        line = _arize_roster_fields(overview.salesforce)
-        if line:
-            nm, title, role = line
-            return (nm, title, role, "")
-    gong_line = _first_arize_participant_from_gong(overview)
-    if gong_line:
-        nm, email, title = gong_line
-        return (nm, title, "Arize", email)
-    if overview.salesforce:
-        owner = (getattr(overview.salesforce, "owner_name", None) or "").strip()
-        if owner:
-            return (owner, "Account Owner (SFDC)", "Arize", "")
-    return None
+        sf = overview.salesforce
+        assignments = [
+            ((getattr(sf, "assigned_sa", None) or "").strip(), "Solution Architect"),
+            ((getattr(sf, "assigned_cse", None) or "").strip(), "Customer Success Engineer"),
+            ((getattr(sf, "assigned_ai_se", None) or "").strip(), "AI Sales Engineer"),
+            ((getattr(sf, "assigned_csm", None) or "").strip(), "Customer Success Manager"),
+            ((getattr(sf, "owner_name", None) or "").strip(), "Account Owner"),
+        ]
+        for name, title in assignments:
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                lines.append((name, f"{title} (Arize)", "Arize", ""))
+
+    for name, email, _count in _ranked_arize_participants(overview):
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            lines.append((name, "Arize (from Gong calls)", "Arize", email))
+
+    return lines
+
+
+def _fill_empty_data_rows(
+    table: Any,
+    header_check: List[str],
+    rows_data: List[List[str]],
+) -> None:
+    """Fill empty data rows in a Word table, skipping the header row."""
+    if _table_header_cells(table.rows[0]) != header_check:
+        return
+    data_row_idx = 1
+    for values in rows_data:
+        if data_row_idx >= len(table.rows):
+            break
+        if _row_data_cells_empty(table.rows[data_row_idx]):
+            for ci, val in enumerate(values):
+                if ci < len(table.rows[data_row_idx].cells):
+                    _set_cell_text(table.rows[data_row_idx].cells[ci], val[:240])
+            data_row_idx += 1
+        else:
+            data_row_idx += 1
 
 
 def fill_structured_roster_cells(
     doc: Document, overview: ProspectOverview, document_template: str
 ) -> None:
-    """
-    PoC SaaS/VPC templates include roster and kickoff tables with no bracket placeholders.
-    Fill the first data row when still blank, using Gong (customer) and Salesforce (Arize).
+    """Fill roster and kickoff tables using ranked participants from ALL Gong calls
+    plus Salesforce team assignments.
+
+    Customer roster: people ranked by how many calls they appeared in (most active first).
+    Arize roster: Salesforce assignments first, then Gong-ranked Arize participants.
     """
     if document_template not in ("poc_saas", "poc_vpc") or len(doc.tables) < 4:
         return
 
-    t1 = doc.tables[1]
-    if _table_header_cells(t1.rows[0]) == [
-        "Name",
-        "Role / Team",
-        "% Time Committed",
-        "Responsibilities",
-    ] and _row_data_cells_empty(t1.rows[1]):
-        ext = _first_customer_participant_from_gong(overview)
-        if ext:
-            name, email = ext
-            _set_cell_text(t1.rows[1].cells[0], name[:240])
-            _set_cell_text(t1.rows[1].cells[1], "Customer team (from recent Gong)")
-            _set_cell_text(t1.rows[1].cells[2], "TBD")
-            _set_cell_text(t1.rows[1].cells[3], (email or "—")[:240])
+    # --- Customer roster (table 1): Name | Role / Team | % Time Committed | Responsibilities ---
+    customer_ranked = _ranked_customer_participants(overview)
+    if customer_ranked:
+        customer_rows = []
+        for name, email, call_count in customer_ranked[:6]:
+            role_hint = f"Customer ({call_count} call{'s' if call_count != 1 else ''})"
+            customer_rows.append([name, role_hint, "TBD", email or "—"])
+        _fill_empty_data_rows(
+            doc.tables[1],
+            ["Name", "Role / Team", "% Time Committed", "Responsibilities"],
+            customer_rows,
+        )
 
-    t2 = doc.tables[2]
-    if _table_header_cells(t2.rows[0]) == ["Name", "Title", "Email", "Role"] and _row_data_cells_empty(
-        t2.rows[1]
-    ):
-        line = _arize_roster_line(overview)
-        if line:
-            nm, title, role, email_cell = line
-            _set_cell_text(t2.rows[1].cells[0], nm[:240])
-            _set_cell_text(t2.rows[1].cells[1], title[:240])
-            _set_cell_text(t2.rows[1].cells[2], (email_cell or "")[:240])
-            _set_cell_text(t2.rows[1].cells[3], role)
+    # --- Arize roster (table 2): Name | Title | Email | Role ---
+    arize_lines = _arize_roster_lines(overview)
+    if arize_lines:
+        arize_rows = [[nm, title, email, role] for nm, title, role, email in arize_lines[:6]]
+        _fill_empty_data_rows(
+            doc.tables[2],
+            ["Name", "Title", "Email", "Role"],
+            arize_rows,
+        )
 
+    # --- Kickoff table (table 3): Primary Escalation Contact ---
     t3 = doc.tables[3]
     if _table_header_cells(t3.rows[0]) == ["Item", "Details"]:
-        arize = _arize_roster_line(overview)
-        if arize:
-            nm, _, _, _ = arize
+        escalation_name = arize_lines[0][0] if arize_lines else None
+        if escalation_name:
             for ri in range(1, len(t3.rows)):
                 label = t3.rows[ri].cells[0].text.strip()
                 if "Primary Escalation Contact (Arize)" in label and _cell_is_effectively_empty(
                     t3.rows[ri].cells[1]
                 ):
-                    _set_cell_text(t3.rows[ri].cells[1], nm[:240])
+                    _set_cell_text(t3.rows[ri].cells[1], escalation_name[:240])
                     break
+
+
+def _build_account_context_summary(overview: ProspectOverview) -> str:
+    """Distill the account's specific context from ALL Gong calls + opportunity
+    data into a concise summary the LLM can use to tailor success criteria
+    and other template fields."""
+    sections: list[str] = []
+
+    # Gong: BigQuery only stores what Gong synced (Spotlight columns may be NULL).
+    # We surface title/date for every call, plus Spotlight and transcript snippets when present,
+    # so PoC/PoT is closer to Gong UI even when CALL_SPOTLIGHT_* is empty.
+    gong = overview.gong_summary
+    if gong and gong.recent_calls:
+        timeline_lines: list[str] = []
+        transcript_excerpts: list[str] = []
+        themes = []
+        next_steps_mentioned = []
+        use_cases_discussed = []
+        pain_points = []
+        for call in gong.recent_calls:
+            title = (call.call_title or "Untitled").strip()
+            date = (call.call_date or "")[:10] or "?"
+            has_spotlight = bool(
+                call.spotlight_brief
+                or call.spotlight_key_points
+                or call.spotlight_next_steps
+                or call.spotlight_outcome
+            )
+            status = "Spotlight + details in warehouse" if has_spotlight else "title/metadata only (no CALL_SPOTLIGHT_* in export)"
+            tl = f"{date} — **{title}** — {status}"
+            if call.spotlight_brief:
+                snip = call.spotlight_brief[:320]
+                if len(call.spotlight_brief) > 320:
+                    snip += "…"
+                tl += f" — Brief: {snip}"
+            timeline_lines.append(tl)
+
+            if call.transcript_snippet and len(call.transcript_snippet.strip()) > 30:
+                excerpt = (call.transcript_snippet or "")[:700]
+                if len(call.transcript_snippet or "") > 700:
+                    excerpt += "…"
+                transcript_excerpts.append(f"- **{date} {title}:** {excerpt}")
+
+            if call.spotlight_brief:
+                themes.append(call.spotlight_brief)
+            if call.spotlight_key_points:
+                for kp in call.spotlight_key_points:
+                    use_cases_discussed.append(str(kp))
+            if call.spotlight_next_steps:
+                next_steps_mentioned.append(call.spotlight_next_steps)
+            if call.spotlight_outcome:
+                pain_points.append(call.spotlight_outcome)
+
+        sections.append(
+            "**Gong calls (from BigQuery `gong.CALLS`; Gong UI may show more if Spotlight did not sync):**\n"
+            + "\n".join(f"- {line}" for line in timeline_lines[:15])
+        )
+        if transcript_excerpts:
+            sections.append(
+                "**Transcript excerpts (warehouse `CALL_TRANSCRIPTS`, truncated; not all calls loaded):**\n"
+                + "\n".join(transcript_excerpts[:5])
+            )
+        if themes:
+            sections.append(
+                f"**Gong Spotlight briefs only ({len(themes)} with text):** "
+                + " | ".join(themes[:8])
+            )
+        if use_cases_discussed:
+            sections.append(
+                "**Key discussion points (Spotlight):** " + " | ".join(use_cases_discussed[:15])
+            )
+        if next_steps_mentioned:
+            sections.append(
+                "**Next steps (Spotlight):** " + " | ".join(next_steps_mentioned[:5])
+            )
+        if gong.key_themes:
+            sections.append("**Extracted themes:** " + ", ".join(gong.key_themes[:10]))
+
+    # Opportunity context
+    opp = overview.latest_opportunity
+    if opp:
+        bits = []
+        if opp.name:
+            bits.append(f"Opportunity: {opp.name}")
+        if opp.stage_name:
+            bits.append(f"Stage: {opp.stage_name}")
+        if opp.description:
+            bits.append(f"Description: {opp.description[:500]}")
+        if opp.next_step:
+            bits.append(f"Next step: {opp.next_step}")
+        if bits:
+            sections.append("**Latest opportunity:** " + " · ".join(bits))
+
+    # Salesforce notes
+    sf = overview.salesforce
+    if sf:
+        if sf.next_steps:
+            sections.append(f"**SFDC next steps:** {sf.next_steps[:400]}")
+        if sf.customer_notes:
+            sections.append(f"**Customer notes:** {sf.customer_notes[:400]}")
+        if sf.is_using_llms:
+            sections.append(f"**Using Arize for LLMs:** {sf.is_using_llms}")
+        if sf.deployment_types:
+            sections.append(f"**Deployment type:** {sf.deployment_types}")
+
+    # Product usage hints
+    if overview.product_usage and overview.product_usage.adoption_status:
+        sections.append(f"**Adoption status:** {overview.product_usage.adoption_status}")
+
+    # Key participants for context
+    customer_folks = _ranked_customer_participants(overview)
+    if customer_folks:
+        top_names = [f"{n} ({c} calls)" for n, _e, c in customer_folks[:5]]
+        sections.append("**Top customer contacts (by call frequency):** " + ", ".join(top_names))
+
+    return "\n".join(sections) if sections else "No additional context available."
 
 
 def _template_instructions(document_template: str) -> str:
@@ -533,9 +808,19 @@ def generate_integrated_fills(
             f"{manual_notes.strip()}\n"
         )
 
+    account_context = _build_account_context_summary(overview)
+    success_digest = _success_criteria_evidence_digest(overview)
+    eg_keys = [k for k in keys if k.startswith("e.g.,")]
+    eg_keys_json = json.dumps(eg_keys, indent=2, ensure_ascii=False)
+
     prompt = f"""{_template_instructions(document_template)}
 
 You will receive JSON: a **ProspectOverview** from our warehouse (Salesforce, Gong, Pendo, FullStory, etc.).
+
+## Account context (synthesized from ALL Gong calls + CRM data)
+{account_context}
+
+{success_digest}
 
 ## Your task
 Return **only** a JSON object with a single property `"replacements"` whose keys are **exactly** the strings listed
@@ -548,6 +833,22 @@ in KEYS below (same spelling, punctuation, and spacing). Each value replaces tha
 - For bracket keys, keep values **brief** (typically under ~200 characters) so they fit Word table cells.
 - For the long `e.g., ...` lines and the `Start: _____ / End: _____ - [X] Weeks  ` line, return a **complete finished line** of similar length (replace the entire template line).
 - For `___________________________________________`, replace with **one** short headline-style sentence summarizing the opportunity (no underscores).
+
+### Success criteria — opportunity-first (mandatory)
+These rules apply especially to KEYS whose text starts with `e.g.,` (success-metric example lines). Use **Account context**, **Evidence scan**, and the latest opportunity together.
+
+1. **No invented ML/LLM scope** — If **"LLMs / GenAI / agents / prompts / RAG"** does *not* appear under *Buckets with at least weak textual support* above, then:
+   - Do **not** populate prompt-/LLM-specific outcomes (prompt variant counts, LLM eval cadence, chat token SLOs, etc.). For any `e.g.,` template line that is clearly about prompts or LLM iteration, replace the **entire line** with something like: `N/A — not in scope for this opportunity: no LLM/GenAI discussion in Gong, CRM, or product signals.`
+   - Likewise, if **"Classical ML / tabular / batch models"** is unsupported, do not invent tabular-model metrics; use N/A or reframed ops criteria that *are* supported.
+
+2. **Match the deal, not the template boilerplate** — Each `e.g.,` value should read like a **credible success check for this specific opportunity** (stage, opp description, call themes, Pendo surfaces). Prefer **one** concrete, testable sentence tied to evidence. If the template example topic (drift, prompts, MTTR, etc.) does not fit the evidence scan, **replace the line** with N/A *or* **repurpose** the slot to a different measurable outcome that *does* match the evidence (do not keep the original example wording).
+
+3. **Add value where data supports it** — If the evidence scan or narratives show strong themes that no `e.g.,` line captures, you may **repurpose** a loosely related `e.g.,` slot to propose **one additional** measurable trial outcome (still one sentence, no fabricated numbers). If nothing fits, use N/A rather than generic filler.
+
+4. **Quantification** — Use numeric targets only when similar numbers appear in the JSON or SA notes; otherwise use "TBD — baseline in kickoff" or qualitative acceptance language.
+
+## Success-criteria template keys in this file (each needs a full replacement line)
+{eg_keys_json}
 
 ## KEYS (required JSON keys under "replacements")
 {keys_json}
@@ -592,6 +893,19 @@ def _safe_filename_part(name: str) -> str:
     return s.replace(" ", "_")[:80] or "Account"
 
 
+# Human-readable segment for download filenames (filesystem-safe, no slashes).
+DOCUMENT_EXPORT_TYPE_LABELS: dict[str, str] = {
+    "poc_saas": "PoC-SaaS",
+    "poc_vpc": "PoC-VPC",
+    "pot": "PoT",
+}
+
+
+def _export_type_filename_part(document_template: str) -> str:
+    label = DOCUMENT_EXPORT_TYPE_LABELS.get(document_template, document_template)
+    return _safe_filename_part(label)
+
+
 def build_poc_document(
     overview: ProspectOverview,
     document_template: str,
@@ -621,9 +935,8 @@ def build_poc_document(
     buf = io.BytesIO()
     doc.save(buf)
     date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
-    label = overview.lookup_value or ""
-    if overview.salesforce and getattr(overview.salesforce, "name", None):
-        label = overview.salesforce.name or label
-    safe = _safe_filename_part(label or "Account")
-    fname = f"Arize_AX_{document_template}_{safe}_{date_part}.docx"
+    account_safe = _safe_filename_part(_company_display_name(overview))
+    type_safe = _export_type_filename_part(document_template)
+    # Account name + document type first so downloads sort clearly by customer.
+    fname = f"Arize_AX_{account_safe}_{type_safe}_{date_part}.docx"
     return buf.getvalue(), fname

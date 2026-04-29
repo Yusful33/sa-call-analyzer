@@ -53,6 +53,10 @@ dev = [
     "ruff>=0.1.0",
 ]
 
+[project.scripts]
+# Tells Vercel where to load the FastAPI `app` (see deploy docs — main.py is not a default entry name).
+app = "main:app"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

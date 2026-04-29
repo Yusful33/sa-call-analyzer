@@ -60,6 +60,10 @@ docker compose up -d
 docker compose logs -f app
 ```
 
+**Next.js (`web/`):** migration shell for Vercel / v0; Compose also starts it on **http://localhost:3000** (`npm run dev` in Docker). Legacy FastAPI UI stays on **http://localhost:8080**.
+
+See **[`web/README.md`](web/README.md)** for host-side `npm run dev` without Compose.
+
 **BigQuery from Docker:** the compose file mounts host **`~/.config/gcloud/application_default_credentials.json`** read-only for local ADC; adjust or use a service account file if needed. **`GOOGLE_CLOUD_PROJECT`** defaults in compose for the marketing analytics project—change it if your data lives elsewhere.
 
 ---

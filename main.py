@@ -25,9 +25,13 @@ def setup_gcp_credentials():
         try:
             # Decode the base64 credentials
             creds_json = base64.b64decode(gcp_creds_b64).decode('utf-8')
-            
-            # Write to file
-            creds_path = BASE_DIR / "gcp-credentials.json"
+
+            # Vercel serverless disks are typically read-only outside TMPDIR/RAM.
+            creds_root = Path(os.getenv("TMPDIR", "/tmp")) if os.getenv("VERCEL") else BASE_DIR
+            creds_path = creds_root / "gcp-credentials.json"
+            creds_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write decoded key for google-auth credential discovery
             with open(creds_path, 'w') as f:
                 f.write(creds_json)
             
@@ -117,6 +121,7 @@ from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingRes
 from models import (
     AnalyzeRequest, AnalysisResult, RecapSlideData, ProspectTimeline,
     ProspectOverviewRequest, ProspectOverview, GeneratePocDocumentRequest,
+    AccountSuggestionsRequest, AccountSuggestionsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
 from transcript_parser import TranscriptParser
@@ -141,6 +146,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # So browsers can read Content-Disposition on cross-origin blob downloads (e.g. Next :3000 → API :8080)
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -199,6 +206,14 @@ try:
 except Exception as e:
     bq_client = None
     print(f"⚠️  BigQuery client not available: {e}")
+
+
+def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOverview:
+    """When warehouse Gong context is thin, supplement from Gong MCP (GONG_MCP_URL)."""
+    from gong_mcp_enrichment import maybe_enrich_overview_with_gong_mcp
+
+    return maybe_enrich_overview_with_gong_mcp(overview, gong_client, bq_client)
+
 
 print("🤖 Using CrewAI Multi-Agent System (4 specialized agents)")
 print("   1. 🔍 Call Classifier")
@@ -843,6 +858,26 @@ async def analyze_prospect_stream(request: AnalyzeProspectRequest):
     )
 
 
+@app.post("/api/account-suggestions", response_model=AccountSuggestionsResponse)
+async def account_suggestions(request: AccountSuggestionsRequest):
+    """
+    Resolve a typed account/company name against Salesforce for disambiguation.
+
+    Helps when spacing or punctuation differs from the CRM record
+    (e.g. \"Alliance Bernstein\" vs \"AllianceBernstein\").
+    """
+    if not bq_client:
+        raise HTTPException(
+            status_code=503,
+            detail="BigQuery client not available.",
+        )
+    data = bq_client.suggest_salesforce_account_names(
+        account_name=request.account_name.strip(),
+        domain=(request.domain or "").strip() or None,
+    )
+    return AccountSuggestionsResponse.model_validate(data)
+
+
 @app.post("/api/prospect-overview", response_model=ProspectOverview)
 async def get_prospect_overview(request: ProspectOverviewRequest):
     """
@@ -890,9 +925,12 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
                 sfdc_account_id=request.sfdc_account_id,
                 manual_competitors=request.manual_competitors
             )
-            
+            overview = _with_optional_gong_mcp_enrichment(overview)
+
             # Log results
             span.set_attribute("result.data_sources", ", ".join(overview.data_sources_available))
+            if "gong_mcp" in (overview.data_sources_available or []):
+                span.set_attribute("result.gong_mcp_enriched", True)
             span.set_attribute("result.has_salesforce", overview.salesforce is not None)
             span.set_attribute("result.opportunity_count", len(overview.all_opportunities))
             span.set_attribute("result.gong_call_count", overview.gong_summary.total_calls if overview.gong_summary else 0)
@@ -2259,6 +2297,7 @@ async def generate_poc_document_deliverable(request: GeneratePocDocumentRequest)
                 sfdc_account_id=None,
                 manual_competitors=None,
             )
+            overview = _with_optional_gong_mcp_enrichment(overview)
 
             doc_bytes, filename = build_poc_document(
                 overview=overview,
