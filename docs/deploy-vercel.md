@@ -1,68 +1,161 @@
-# Deploying this monorepo (Vercel and friends)
+# Deploying everything on Vercel (single repo, three projects)
 
-The repo is split into deployable **slices** under `apps/` and `infra/`. [Vercel](https://vercel.com) is ideal for the **Next.js** UI; long‑running Python APIs, LLM proxies, and Gong bridges usually belong on a **container** or **VM** host.
+This monorepo deploys as **three separate Vercel projects** that all point to the same Git repository but use different **Root Directory** settings. **LiteLLM is replaced by Vercel AI Gateway** — there is no separate LiteLLM project.
 
-## Layout (what goes where)
+| # | Vercel project | Root Directory | What it is |
+|---|----------------|----------------|------------|
+| 1 | `id-pain-web` | `apps/web` | Next.js 15 UI |
+| 2 | `id-pain-api` | `apps/api` | FastAPI Python (Vercel Python runtime, Fluid Compute) |
+| 3 | `id-pain-gong-mcp` | `apps/gong-mcp` | Node Vercel Functions for Gong API |
+| — | (no project) | — | LLM routing → **[Vercel AI Gateway](https://vercel.com/docs/ai-gateway)** instead of LiteLLM |
 
-| Path | Role | Typical host |
-|------|------|----------------|
-| `apps/web/` | Next.js 15 UI | **Vercel** (recommended) |
-| `apps/api/` | FastAPI (CrewAI, BigQuery, legacy HTML, OpenAPI) | **Railway / Fly.io / Render / AWS ECS / EKS** (see `Dockerfile` + `DEPLOYMENT.md`) |
-| `infra/litellm/` | LiteLLM proxy config (+ optional custom image) | Same as API or a small always‑on service (not a great fit for serverless) |
-| `infra/gong-http-server/` | Gong MCP HTTP bridge | Same as API (must be reachable from `apps/api`) |
-
----
-
-## 1. Vercel project: **Next.js** (`apps/web`)
-
-1. In Vercel: **Add New → Project** → import this Git repository.
-2. Under **Root Directory**, set **`apps/web`** (or “Edit” after import and change monorepo root).
-3. **Framework Preset:** Next.js (auto-detected from `package.json`).
-4. **Build & Output:** defaults (`npm run build`, output `.next`).
-5. **Environment variables** (Production + Preview as needed):
-
-   | Name | Example | Purpose |
-   |------|---------|---------|
-   | `NEXT_PUBLIC_LEGACY_API_URL` | `https://api.your-domain.com` | Browser calls your FastAPI backend (no trailing slash). |
-
-6. Deploy. Your production URL is the Next app; it proxies API traffic to `NEXT_PUBLIC_LEGACY_API_URL`.
-
-**CORS:** FastAPI already allows `*` in dev; for production, narrow `allow_origins` in `apps/api/main.py` to your Vercel domain.
+You'll end up with three production URLs (one per project). The web project calls the API project; the API project calls the gong-mcp project; the API project sends LLM traffic through AI Gateway.
 
 ---
 
-## 2. Should FastAPI go on Vercel?
+## 0. Prerequisites
 
-Vercel’s **Python** support targets **short‑lived** request/response functions. This API runs **long analyses**, **CrewAI**, **streaming**, and **BigQuery** — often **beyond** typical serverless timeouts and bundle limits.
-
-**Practical approach:**
-
-- Host **`apps/api`** on a platform that runs **`docker compose`** or the root **`Dockerfile`** (same image as today), e.g. **Railway**, **Fly.io**, **Render**, **Google Cloud Run** (with a high timeout), or **EKS** (see `DEPLOYMENT.md`).
-- Point Vercel’s `NEXT_PUBLIC_LEGACY_API_URL` at that HTTPS URL.
-
-If you still want an experiment on Vercel Python, consult Vercel’s current **Python / FastAPI** docs for route handlers, timeouts, and file-size limits — expect to trim features.
+```bash
+npm i -g vercel        # CLI for `vercel deploy`, env, and link
+vercel login
+```
 
 ---
 
-## 3. Separate Vercel projects (multiple frontends)
+## 1. Project: **id-pain-gong-mcp** (Vercel Functions, Node)
 
-If you later add another Next app under `apps/`, create **another Vercel project** with its own root directory (e.g. `apps/other-ui`). Same repo, multiple projects — each with its own env vars and domain.
+Endpoints provided: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`, `POST /api/call-info` — same shape as the legacy MCP HTTP server.
+
+### Create
+
+1. **Vercel → Add New… → Project** → import this repo.
+2. **Root Directory:** `apps/gong-mcp`.
+3. **Framework Preset:** Other.
+4. **Environment Variables:**
+   - `GONG_ACCESS_KEY`
+   - `GONG_ACCESS_SECRET` (or `GONG_SECRET_KEY`)
+5. **Deploy.** Note the production URL — you'll set it as `GONG_MCP_URL` on the API project.
+
+### CLI alternative
+
+```bash
+cd apps/gong-mcp
+vercel link            # creates a new project the first time
+vercel env add GONG_ACCESS_KEY production
+vercel env add GONG_ACCESS_SECRET production
+vercel deploy --prod
+```
 
 ---
 
-## 4. LiteLLM and Gong as “separate projects” on Vercel
+## 2. Project: **id-pain-api** (FastAPI on Vercel Python)
 
-**Usually no.** LiteLLM and the Gong MCP HTTP server expect a **steady TCP listener** and are built for **containers**, not Edge/serverless routes.
+> **Honest constraints:**
+> - Vercel Python Functions cap at **300s** by default and a fixed bundle size. Heavy CrewAI runs near the limit may time out — that's an OK tradeoff for SA call analysis but not for marathon analyses.
+> - First-request **cold start ≈ 5–10s** (Arize + LangChain + CrewAI imports). Use a "warm" cron or Vercel Functions warming to mitigate.
+> - **`USE_LITELLM` must be `false` on Vercel** (no LiteLLM proxy is running). LLM calls go either to providers directly or through AI Gateway.
 
-Deploy them beside the API instead:
+### Create
 
-- **Docker Compose:** from repo root, `docker compose -f infra/docker-compose.yml up` (dev).
-- **Production:** duplicate that topology on your host (three services: api, litellm, gong-mcp) or fold LiteLLM + Gong into Kubernetes manifests under `infra/k8s/` (see `DEPLOYMENT.md`).
+1. **Vercel → Add New… → Project** → import the same repo.
+2. **Root Directory:** `apps/api`.
+3. **Framework Preset:** Other (the included `vercel.json` configures `@vercel/python` and routes `/(.*)` to `api/index.py`).
+4. **Build & Output:** leave defaults; Vercel reads `requirements.txt`.
+
+### Environment variables
+
+| Name | Why | Notes |
+|------|-----|-------|
+| `USE_LITELLM` | **Set to `false`** | Required on Vercel — no proxy is running |
+| `ANTHROPIC_API_KEY` | LLM provider | Or use AI Gateway (below) |
+| `OPENAI_API_KEY` | LLM provider | Or use AI Gateway (below) |
+| `MODEL_NAME` | Default model | e.g. `claude-haiku-4-5` |
+| `LLM_MODEL` | Hypothesis tool default | e.g. `claude-sonnet-4-20250514` |
+| `BRAVE_API_KEY` | Brave web search (Hypothesis) | optional |
+| `GONG_MCP_URL` | URL of project #1 | e.g. `https://id-pain-gong-mcp.vercel.app` |
+| `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
+| `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
+| `GOOGLE_CLOUD_PROJECT` | BigQuery project | e.g. `mkt-analytics-268801` |
+
+### Use Vercel AI Gateway (replaces LiteLLM)
+
+Vercel AI Gateway exposes an **OpenAI-compatible** endpoint, so you can point any OpenAI-style client (including `litellm`) at it. Add these instead of provider keys when you want centralized observability/fallbacks/billing:
+
+| Name | Value |
+|------|-------|
+| `OPENAI_API_BASE` (or `OPENAI_BASE_URL`) | `https://ai-gateway.vercel.sh/v1` |
+| `OPENAI_API_KEY` | your **AI Gateway** key |
+
+For Anthropic models routed through the Gateway, use `provider/model` strings (e.g. `anthropic/claude-sonnet-4`) and the OpenAI-compatible URL above. See [Vercel AI Gateway docs](https://vercel.com/docs/ai-gateway) for the latest.
+
+### CLI alternative
+
+```bash
+cd apps/api
+vercel link
+vercel env add USE_LITELLM production       # value: false
+vercel env add ANTHROPIC_API_KEY production
+vercel env add GONG_MCP_URL production       # production URL of id-pain-gong-mcp
+vercel deploy --prod
+```
+
+### Notes
+
+- The legacy HTML at `apps/api/frontend/index.html` is still served at `/` from this project; you usually won't hit it on Vercel because the Next app is the user-facing UI.
+- BigQuery: Vercel can't mount your gcloud ADC. Use `GCP_CREDENTIALS_BASE64`; the app already writes it to `/tmp` on startup when `VERCEL` is set.
+- If your CrewAI bundle is too large, trim `pyproject.toml` (e.g. drop the `chroma` extra) and re-export with `uv export` to regenerate `requirements.txt`.
 
 ---
 
-## 5. Checklist after moving folders
+## 3. Project: **id-pain-web** (Next.js)
 
-- Local API: `cd apps/api && uv sync && uv run python main.py` (`.env` at **repository root** is still loaded).
-- Local stack: `docker compose -f infra/docker-compose.yml up` from repo root.
-- Docker image for API: `docker build -t id-pain:latest .` from repo root (uses root `Dockerfile` + `apps/api/`).
+### Create
+
+1. **Vercel → Add New… → Project** → import the same repo.
+2. **Root Directory:** `apps/web`.
+3. **Framework Preset:** Next.js (auto-detected).
+4. **Environment variables:**
+   - `NEXT_PUBLIC_LEGACY_API_URL` = the production URL of **id-pain-api** (no trailing slash).
+
+### CLI alternative
+
+```bash
+cd apps/web
+vercel link
+vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # https://id-pain-api.vercel.app
+vercel deploy --prod
+```
+
+---
+
+## 4. Wiring summary
+
+```
+[ Browser ]
+     │
+     ▼
+[ id-pain-web (Vercel) ]   ← apps/web
+     │  fetch NEXT_PUBLIC_LEGACY_API_URL
+     ▼
+[ id-pain-api (Vercel) ]   ← apps/api
+     │  GONG_MCP_URL                     OPENAI_API_BASE = ai-gateway.vercel.sh/v1
+     ▼                                   │
+[ id-pain-gong-mcp ]               [ Vercel AI Gateway ]
+     │ Gong API                          │ Anthropic / OpenAI / etc
+     ▼                                   ▼
+[ Gong (api.gong.io) ]            [ LLM providers ]
+```
+
+## 5. CORS
+
+`apps/api/main.py` allows `*` for local dev. Before going public, narrow `allow_origins` to your `id-pain-web` and `id-pain-gong-mcp` Vercel domains.
+
+## 6. Local dev unchanged
+
+Docker Compose still works for local dev:
+
+```bash
+docker compose -f infra/docker-compose.yml up
+```
+
+It runs LiteLLM locally even though prod uses AI Gateway — that's fine.

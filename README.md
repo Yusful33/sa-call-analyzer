@@ -4,14 +4,17 @@ AI-powered tooling for **Solution Architect sales calls** and related demos: a *
 
 ## Monorepo layout
 
-| Path | Contents |
-|------|-----------|
-| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** |
-| **`apps/web/`** | Next.js 15 UI |
-| **`infra/`** | `docker-compose.yml`, **`litellm/`**, **`gong-http-server/`**, **`k8s/`**, **`scripts/`** (EKS helpers) |
-| **`docs/`** | Extra guides (e.g. **Vercel** deployment) |
+| Path | Contents | Vercel project |
+|------|-----------|----------------|
+| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** + **`requirements.txt`** | `id-pain-api` (Python runtime, `vercel.json` included) |
+| **`apps/web/`** | Next.js 15 UI | `id-pain-web` |
+| **`apps/gong-mcp/`** | Vercel **Node Functions** that call Gong directly (replaces the old MCP HTTP server) | `id-pain-gong-mcp` |
+| **`infra/`** | `docker-compose.yml`, **`litellm/`**, **`gong-http-server/`** (legacy), **`k8s/`**, **`scripts/`** | local dev / EKS only |
+| **`docs/`** | Extra guides (e.g. **Vercel** deployment) | — |
 
-**Deploying separate Vercel projects:** see **`docs/deploy-vercel.md`**.
+The three Vercel projects all import the **same Git repo**; they differ only by **Root Directory**. **LiteLLM** is replaced in production by **Vercel AI Gateway** — there is no separate LiteLLM Vercel project.
+
+**Deploying:** see **[`docs/deploy-vercel.md`](docs/deploy-vercel.md)** for end-to-end steps.
 
 ## What’s in the app
 
@@ -121,7 +124,7 @@ Prospect timelines and **`/api/classify-demo`** use additional LLM calls; pick s
 ## Deployment & deep dives
 
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — AWS **EKS**, ECR images (**id-pain**, **litellm**, **gong-http-server**), secrets, Ingress, Grafana, **`infra/scripts/up.sh`** / **`down.sh`**, pod scale scripts.  
-- **[docs/deploy-vercel.md](docs/deploy-vercel.md)** — Vercel **Root Directory** `apps/web`, env vars, and what *not* to put on Vercel.  
+- **[docs/deploy-vercel.md](docs/deploy-vercel.md)** — Three Vercel projects from one repo (`apps/web`, `apps/api`, `apps/gong-mcp`) plus AI Gateway.  
 - **[hypothesis_tool/TRACE_FLOW.md](apps/api/hypothesis_tool/TRACE_FLOW.md)** — Hypothesis / **analyze_signals** LLM inputs and Arize span layout.
 
 ---
