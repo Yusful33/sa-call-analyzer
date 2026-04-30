@@ -1,6 +1,17 @@
 # SA Call Analyzer (id-pain)
 
-AI-powered tooling for **Solution Architect sales calls** and related demos: a **CrewAI multi-agent** pipeline scores calls against **Command of the Message**, plus **Gong** and **BigQuery**-backed prospect views, an **Arize**-oriented **custom demo trace generator**, and **hypothesis research** for accounts.
+AI-powered tooling for **Solution Architect sales calls** and related demos: a **CrewAI multi-agent** pipeline scores calls against **Command of the Message**, plus **Gong** and **BigQuery**-backed prospect views, **classification + prompts for the Claude arize-synthetic-demo skill**, and **hypothesis research** for accounts.
+
+## Monorepo layout
+
+| Path | Contents |
+|------|-----------|
+| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** |
+| **`apps/web/`** | Next.js 15 UI |
+| **`infra/`** | `docker-compose.yml`, **`litellm/`**, **`gong-http-server/`**, **`k8s/`**, **`scripts/`** (EKS helpers) |
+| **`docs/`** | Extra guides (e.g. **Vercel** deployment) |
+
+**Deploying separate Vercel projects:** see **`docs/deploy-vercel.md`**.
 
 ## What’s in the app
 
@@ -9,8 +20,8 @@ AI-powered tooling for **Solution Architect sales calls** and related demos: a *
 | **Call analysis** | Paste a transcript or **Gong URL** → structured feedback (timestamps, strengths, improvements). Technical and sales methodology crews run **in parallel** for faster runs (~2–5 minutes typical). |
 | **Prospect timeline** | **`/api/analyze-prospect`** (and **SSE** **`/api/analyze-prospect-stream`**) — all Gong calls matching a prospect, analyzed into a cumulative timeline. **`/api/calls-by-account`** lists calls without full analysis. |
 | **CRM / analytics** | **`/api/prospect-overview`** — unified view from **BigQuery** (Salesforce, Gong summaries, Pendo, FullStory, etc.) when your warehouse and credentials are configured. |
-| **Custom demo builder** | **`/api/classify-demo`**, **`/api/generate-demo`**, **`/api/generate-demo-stream`** — pick use case + framework (e.g. LangGraph, CrewAI), run LLM pipelines, send traces to **Arize** (optional Space ID / API key in the request). **`/api/export-script`** downloads a standalone Python script; **`/api/create-online-evals`** sets up Arize online evals after a run. |
-| **Hypothesis research** | **`/api/hypothesis-research`** — LangGraph agent: web search (**Brave**), optional BigQuery, LLM-driven hypotheses (see **`hypothesis_tool/TRACE_FLOW.md`** for trace layout). |
+| **Synthetic demo (skill)** | **`/api/classify-demo`** (+ optional overrides) classifies Gong/CRM signals and returns a ready-to-paste prompt for the **[arize-synthetic-demo](https://github.com/Arize-ai/solutions-resources/blob/main/.claude/skills/arize-synthetic-demo/SKILL.md)** Claude skill (`generator.py` / AX uploads run in Claude — not in this server). **`GET /api/custom-demo/skill`** returns static skill pointers. |
+| **Hypothesis research** | **`/api/hypothesis-research`** — LangGraph agent: web search (**Brave**), optional BigQuery, LLM-driven hypotheses (see **`apps/api/hypothesis_tool/TRACE_FLOW.md`** for trace layout). |
 | **Deliverables** | **`/api/generate-recap-slide`** — PowerPoint recap download from structured recap JSON. **`/api/generate-poc-document`** — Word (.docx) PoC SaaS / PoC VPC / PoT: fills in-template placeholders using BigQuery prospect data and an LLM (no separate appendix). |
 
 Open **`http://localhost:8080/docs`** for interactive **OpenAPI** documentation.
@@ -22,23 +33,20 @@ Open **`http://localhost:8080/docs`** for interactive **OpenAPI** documentation.
 ### 1. Install dependencies
 
 ```bash
-# Install uv (if you don't have it)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install project dependencies
-uv sync
+cd apps/api && uv sync
 ```
 
 ### 2. Configure environment
 
-Copy **`.env.example`** to **`.env`** and set at least **`ANTHROPIC_API_KEY`**. For Gong transcript fetch, set **`GONG_ACCESS_KEY`** and **`GONG_SECRET_KEY`**. For hypothesis search, set **`BRAVE_API_KEY`**. For BigQuery-backed features, configure **Google Application Default Credentials** or a service account (see **Docker** section below for compose mounts).
+Copy **`.env.example`** from the repo root to **`.env`** at the repo root (`main.py` loads `../.env` relative to **`apps/api/`**). Set at least **`ANTHROPIC_API_KEY`**. For Gong transcript fetch, set **`GONG_ACCESS_KEY`** and **`GONG_SECRET_KEY`**. For hypothesis search, set **`BRAVE_API_KEY`**. For BigQuery-backed features, configure **Google Application Default Credentials** or a service account (see **Docker** section below for compose mounts).
 
 Get an Anthropic key from [console.anthropic.com](https://console.anthropic.com/).
 
 ### 3. Run the app
 
 ```bash
-uv run python main.py
+cd apps/api && uv run python main.py
 ```
 
 Open **http://localhost:8080** in your browser (or **http://localhost:8080/docs** for the API).
@@ -47,22 +55,20 @@ Open **http://localhost:8080** in your browser (or **http://localhost:8080/docs*
 
 ## Docker Compose
 
-Runs the **app**, **LiteLLM** (port **4000**), and **Gong MCP** (host port **8081** → container **8080**). Compose uses **`./litellm/config.yaml`** for LiteLLM and wires **`GONG_MCP_URL=http://gong-mcp:8080`**.
+Runs **`apps/api`** (the Python app), **LiteLLM** (port **4000**), and **Gong MCP** (host **8081** → container **8080**). Config: **`infra/litellm/config.yaml`**. From the **repository root**:
 
 ```bash
-# First time: copy env template (`.env` is not committed)
 cp .env.example .env
-# Edit .env — at minimum set ANTHROPIC_API_KEY (and OPENAI_API_KEY if your LiteLLM config uses OpenAI)
+# Edit .env
 
-docker compose up -d
+docker compose -f infra/docker-compose.yml up -d
 
-# Logs for the main web app (service name is "app")
-docker compose logs -f app
+docker compose -f infra/docker-compose.yml logs -f app
 ```
 
-**Next.js (`web/`):** migration shell for Vercel / v0; Compose also starts it on **http://localhost:3000** (`npm run dev` in Docker). Legacy FastAPI UI stays on **http://localhost:8080**.
+**Next.js (`apps/web/`):** the same compose file can start the UI on **http://localhost:3000**. Legacy FastAPI UI stays on **http://localhost:8080**.
 
-See **[`web/README.md`](web/README.md)** for host-side `npm run dev` without Compose.
+See **[`apps/web/README.md`](apps/web/README.md)** for host-side `npm run dev` without Compose.
 
 **BigQuery from Docker:** the compose file mounts host **`~/.config/gcloud/application_default_credentials.json`** read-only for local ADC; adjust or use a service account file if needed. **`GOOGLE_CLOUD_PROJECT`** defaults in compose for the marketing analytics project—change it if your data lives elsewhere.
 
@@ -108,14 +114,15 @@ Each insight can include what happened (with timestamp), why it matters, a bette
 | Claude 3.5 Haiku (or mapped successor) | $0.25–0.50 | Strong |
 | Claude 3.5 Sonnet (or mapped successor) | $1.50–2.50 | Highest |
 
-Custom demo generation and prospect timelines use additional LLM calls; use **`arize_demo_traces`** cost guards and smaller models for experiments.
+Prospect timelines and **`/api/classify-demo`** use additional LLM calls; pick smaller models via env where supported and keep experiments bounded.
 
 ---
 
 ## Deployment & deep dives
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** — AWS **EKS**, ECR images (**id-pain**, **litellm**, **gong-http-server**), secrets, Ingress, Grafana, **`scripts/up.sh`** / **`down.sh`**, pod scale scripts.  
-- **[hypothesis_tool/TRACE_FLOW.md](hypothesis_tool/TRACE_FLOW.md)** — Hypothesis / **analyze_signals** LLM inputs and Arize span layout.
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** — AWS **EKS**, ECR images (**id-pain**, **litellm**, **gong-http-server**), secrets, Ingress, Grafana, **`infra/scripts/up.sh`** / **`down.sh`**, pod scale scripts.  
+- **[docs/deploy-vercel.md](docs/deploy-vercel.md)** — Vercel **Root Directory** `apps/web`, env vars, and what *not* to put on Vercel.  
+- **[hypothesis_tool/TRACE_FLOW.md](apps/api/hypothesis_tool/TRACE_FLOW.md)** — Hypothesis / **analyze_signals** LLM inputs and Arize span layout.
 
 ---
 
@@ -136,4 +143,4 @@ curl -X POST http://localhost:8080/api/analyze \
 curl http://localhost:8080/health
 ```
 
-Other notable routes: **`POST /api/prospect-overview`**, **`POST /api/analyze-prospect`**, **`POST /api/hypothesis-research`**, **`POST /api/generate-demo`** / **`/api/generate-demo-stream`**. Full schemas live at **`/docs`**.
+Other notable routes: **`POST /api/prospect-overview`**, **`POST /api/analyze-prospect`**, **`POST /api/hypothesis-research`**, **`POST /api/classify-demo`**. Full schemas live at **`/docs`**.

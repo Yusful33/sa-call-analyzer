@@ -46,7 +46,7 @@ docker tag litellm:latest $ECR_URI/litellm:latest
 docker push $ECR_URI/litellm:latest
 
 # 3. Gong HTTP server (build from gong-http-server/ subdirectory)
-docker build -t gong-http-server:latest ./gong-http-server
+docker build -t gong-http-server:latest ./infra/gong-http-server
 docker tag gong-http-server:latest $ECR_URI/gong-http-server:latest
 docker push $ECR_URI/gong-http-server:latest
 ```
@@ -68,7 +68,7 @@ eksctl create cluster \
   --nodes-max 10
 ```
 
-When not in use, scale the node group to 0 (`./scripts/down-pods.sh`) to stop EC2 cost; scale back to 10 (`./scripts/up-pods.sh`) when you need the app.
+When not in use, scale the node group to 0 (`./infra/scripts/down-pods.sh`) to stop EC2 cost; scale back to 10 (`./infra/scripts/up-pods.sh`) when you need the app.
 
 **Option B – AWS Console**  
 Create cluster via EKS → Create cluster (Fargate or managed node groups).
@@ -83,7 +83,7 @@ aws eks update-kubeconfig --region $AWS_REGION --name id-pain-demo
 
 ## 4. Kubernetes manifests
 
-Manifests live in **`k8s/`**. All three apps run in the **`id-pain`** namespace. id-pain is wired to LiteLLM at `http://litellm:4000` and to the Gong MCP server at `http://gong-http-server:8080` via the id-pain ConfigMap.
+Manifests live in **`infra/k8s/`**. All three apps run in the **`id-pain`** namespace. id-pain is wired to LiteLLM at `http://litellm:4000` and to the Gong MCP server at `http://gong-http-server:8080` via the id-pain ConfigMap.
 
 | Component          | ConfigMap / Secret      | Key env vars |
 |-------------------|-------------------------|--------------|
@@ -99,26 +99,26 @@ Copy each example to a real secret file, fill in values, then apply (do not comm
 
 ```bash
 # id-pain (main app + Arize, GCP, etc.)
-cp k8s/secret.yaml.example k8s/secret.yaml
-# Edit k8s/secret.yaml: ARIZE_*, ANTHROPIC_*, OPENAI_*, GONG_* (optional for id-pain), GCP_CREDENTIALS_BASE64
-kubectl apply -f k8s/secret.yaml
+cp infra/k8s/secret.yaml.example infra/k8s/secret.yaml
+# Edit infra/k8s/secret.yaml: ARIZE_*, ANTHROPIC_*, OPENAI_*, GONG_* (optional for id-pain), GCP_CREDENTIALS_BASE64
+kubectl apply -f infra/k8s/secret.yaml
 
 # LiteLLM (needs LLM provider keys; config.yaml reads os.environ/ANTHROPIC_API_KEY, OPENAI_API_KEY)
-cp k8s/litellm-secret.yaml.example k8s/litellm-secret.yaml
-# Edit k8s/litellm-secret.yaml
-kubectl apply -f k8s/litellm-secret.yaml
+cp infra/k8s/litellm-secret.yaml.example infra/k8s/litellm-secret.yaml
+# Edit infra/k8s/litellm-secret.yaml
+kubectl apply -f infra/k8s/litellm-secret.yaml
 
 # Gong HTTP server (Gong API credentials)
-cp k8s/gong-secret.yaml.example k8s/gong-secret.yaml
-# Edit k8s/gong-secret.yaml
-kubectl apply -f k8s/gong-secret.yaml
+cp infra/k8s/gong-secret.yaml.example infra/k8s/gong-secret.yaml
+# Edit infra/k8s/gong-secret.yaml
+kubectl apply -f infra/k8s/gong-secret.yaml
 ```
 
 To generate **GCP_CREDENTIALS_BASE64**:
 
 ```bash
 base64 -w0 /path/to/your-service-account.json
-# Paste into k8s/secret.yaml under GCP_CREDENTIALS_BASE64
+# Paste into infra/k8s/secret.yaml under GCP_CREDENTIALS_BASE64
 ```
 
 ### 4.2 Deploy (order matters)
@@ -141,7 +141,7 @@ Then run the steps below. Each block explains what the step does.
 All resources (id-pain, LiteLLM, Gong) run in a single namespace so they can talk to each other by service name.
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f infra/k8s/namespace.yaml
 ```
 
 - **What it does:** Creates the `id-pain` namespace. Everything else (ConfigMaps, Secrets, Deployments, Services) is created inside this namespace.
@@ -153,15 +153,15 @@ kubectl apply -f k8s/namespace.yaml
 LiteLLM runs first so id-pain can send LLM requests to it once id-pain is deployed.
 
 ```bash
-kubectl apply -f k8s/litellm-configmap.yaml
-kubectl apply -f k8s/litellm-secret.yaml
-sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" k8s/litellm-deployment.yaml | kubectl apply -f -
-kubectl apply -f k8s/litellm-service.yaml
+kubectl apply -f infra/k8s/litellm-configmap.yaml
+kubectl apply -f infra/k8s/litellm-secret.yaml
+sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" infra/k8s/litellm-deployment.yaml | kubectl apply -f -
+kubectl apply -f infra/k8s/litellm-service.yaml
 ```
 
 - **litellm-configmap.yaml** – Non-sensitive config (e.g. `PORT=4000`) injected into the LiteLLM pods as environment variables.
 - **litellm-secret.yaml** – API keys (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) used by LiteLLM’s `config.yaml` via `os.environ/...`. Stored as a Secret so they aren’t in plain YAML.
-- **litellm-deployment.yaml** – Defines the LiteLLM workload: which ECR image to run, how many replicas, resource limits, and liveness/readiness probes. The `sed` replaces `<AWS_ACCOUNT_ID>` and `<AWS_REGION>` in the image URL (e.g. `574016082345.dkr.ecr.us-east-1.amazonaws.com/litellm:latest`) so Kubernetes pulls from your ECR. If the file already has real values, you can run `kubectl apply -f k8s/litellm-deployment.yaml` instead.
+- **litellm-deployment.yaml** – Defines the LiteLLM workload: which ECR image to run, how many replicas, resource limits, and liveness/readiness probes. The `sed` replaces `<AWS_ACCOUNT_ID>` and `<AWS_REGION>` in the image URL (e.g. `574016082345.dkr.ecr.us-east-1.amazonaws.com/litellm:latest`) so Kubernetes pulls from your ECR. If the file already has real values, you can run `kubectl apply -f infra/k8s/litellm-deployment.yaml` instead.
 - **litellm-service.yaml** – Creates a ClusterIP Service named `litellm` on port 4000. Other pods in the namespace (e.g. id-pain) reach LiteLLM at `http://litellm:4000`.
 
 ---
@@ -171,9 +171,9 @@ kubectl apply -f k8s/litellm-service.yaml
 The Gong server runs next so id-pain can call it for Gong-related features.
 
 ```bash
-kubectl apply -f k8s/gong-secret.yaml
-sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" k8s/gong-deployment.yaml | kubectl apply -f -
-kubectl apply -f k8s/gong-service.yaml
+kubectl apply -f infra/k8s/gong-secret.yaml
+sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" infra/k8s/gong-deployment.yaml | kubectl apply -f -
+kubectl apply -f infra/k8s/gong-service.yaml
 ```
 
 - **gong-secret.yaml** – Gong API credentials (`GONG_ACCESS_KEY`, `GONG_SECRET_KEY`) used by the Gong MCP server to call the Gong API. No ConfigMap is needed; only these env vars are required.
@@ -187,15 +187,15 @@ kubectl apply -f k8s/gong-service.yaml
 With LiteLLM and Gong running, deploy the main app so it can use them.
 
 ```bash
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/secret.yaml
-sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" k8s/deployment.yaml | kubectl apply -f -
-kubectl apply -f k8s/service.yaml
+kubectl apply -f infra/k8s/configmap.yaml
+kubectl apply -f infra/k8s/secret.yaml
+sed -e "s/<AWS_ACCOUNT_ID>/$AWS_ACCOUNT_ID/g" -e "s/<AWS_REGION>/$AWS_REGION/g" infra/k8s/deployment.yaml | kubectl apply -f -
+kubectl apply -f infra/k8s/service.yaml
 ```
 
 - **configmap.yaml** – Non-sensitive id-pain config: `PORT`, `MODEL_NAME`, `USE_LITELLM`, `LITELLM_BASE_URL` (points to the LiteLLM service), `GONG_MCP_URL` (points to the Gong service), and CrewAI/OTEL toggles.
 - **secret.yaml** – Sensitive id-pain config: `ARIZE_API_KEY`, `ARIZE_SPACE_ID`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, optional `GONG_*`, and `GCP_CREDENTIALS_BASE64` for BigQuery. The container’s startup script uses `GCP_CREDENTIALS_BASE64` to write a credentials file at runtime.
-- **deployment.yaml** – Defines the id-pain workload (ECR image, env from ConfigMap + Secret, resources, health checks). `sed` fills in the ECR image URL; if already set, use `kubectl apply -f k8s/deployment.yaml` directly.
+- **deployment.yaml** – Defines the id-pain workload (ECR image, env from ConfigMap + Secret, resources, health checks). `sed` fills in the ECR image URL; if already set, use `kubectl apply -f infra/k8s/deployment.yaml` directly.
 - **service.yaml** – Creates a ClusterIP Service for id-pain (port 80 → container 8080). This is what you port-forward to or what the Ingress targets.
 
 ---
@@ -205,7 +205,7 @@ kubectl apply -f k8s/service.yaml
 Only run this if you have the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/) installed in the cluster and want to give id-pain a public URL.
 
 ```bash
-kubectl apply -f k8s/ingress.yaml
+kubectl apply -f infra/k8s/ingress.yaml
 ```
 
 - **ingress.yaml** – Creates an Ingress that tells the AWS Load Balancer Controller to create an ALB and route traffic to the id-pain Service. Without the controller, this resource will not create a working load balancer.
@@ -248,7 +248,7 @@ Stop the forward with `Ctrl+C`.
 For a stable URL that others can use (e.g. for demos or sharing):
 
 1. Install the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.6/deploy/installation/) in your EKS cluster (Helm or manifest).
-2. Apply the Ingress: `kubectl apply -f k8s/ingress.yaml`
+2. Apply the Ingress: `kubectl apply -f infra/k8s/ingress.yaml`
 3. Wait for the ALB to be created and get its DNS name:
    ```bash
    kubectl get ingress -n id-pain
@@ -358,10 +358,10 @@ If you prefer to run everything in the cluster instead of Grafana Cloud:
 | 1 | Build and push **id-pain**, **litellm**, and **gong-http-server** images to ECR (Section 2) |
 | 2 | Create or use an EKS cluster; update kubeconfig |
 | 3 | Create secrets from examples: `secret.yaml`, `litellm-secret.yaml`, `gong-secret.yaml`; fill in and apply |
-| 4 | Apply `k8s/` manifests in order: namespace → LiteLLM → Gong → id-pain (Section 4.2) |
+| 4 | Apply `infra/k8s/` manifests in order: namespace → LiteLLM → Gong → id-pain (Section 4.2) |
 | 5 | Access the app: port-forward (Section 4.4) or Ingress for a public URL |
 | 6 | (Optional) Set up Grafana Cloud: install Grafana Agent, add `/metrics` to id-pain, create dashboard (Section 5) |
-| 7 | To save cost: run `./scripts/down.sh` to delete the cluster; run `./scripts/up.sh` to recreate and deploy (Section 8) |
+| 7 | To save cost: run `./infra/scripts/down.sh` to delete the cluster; run `./infra/scripts/up.sh` to recreate and deploy (Section 8) |
 
 ---
 
@@ -388,8 +388,8 @@ You can delete the EKS cluster when you’re not using it (to avoid paying for t
 | What | Where it lives | When you delete the cluster |
 |------|----------------|------------------------------|
 | **Container images** | ECR (AWS) | Stay in ECR; no action needed |
-| **Manifests** (k8s/*.yaml) | Git / your machine | Stay; re-apply when you bring the cluster back |
-| **Secrets** (API keys, GCP base64) | Local files: `k8s/secret.yaml`, `k8s/litellm-secret.yaml`, `k8s/gong-secret.yaml` | Stay on your machine (they’re in .gitignore). Don’t delete these files |
+| **Manifests** (`infra/k8s/*.yaml`) | Git / your machine | Stay; re-apply when you bring the cluster back |
+| **Secrets** (API keys, GCP base64) | Local files: `infra/k8s/secret.yaml`, `infra/k8s/litellm-secret.yaml`, `infra/k8s/gong-secret.yaml` | Stay on your machine (they’re in .gitignore). Don’t delete these files |
 | **Application data** | id-pain is stateless; BigQuery/Arize/Gong are external | No in-cluster data to lose |
 | **Grafana Cloud** | Grafana’s servers | Unaffected; metrics and dashboards remain |
 
@@ -402,7 +402,7 @@ Keeps the cluster and all k8s resources (Deployments, Services, Secrets, ConfigM
 **Pods down (stop running workloads):**
 
 ```bash
-./scripts/down-pods.sh
+./infra/scripts/down-pods.sh
 ```
 
 This runs `eksctl scale nodegroup ... --nodes=0`. No worker nodes → no place for pods → your app is effectively off.
@@ -410,7 +410,7 @@ This runs `eksctl scale nodegroup ... --nodes=0`. No worker nodes → no place f
 **Pods up (start workloads again):**
 
 ```bash
-./scripts/up-pods.sh
+./infra/scripts/up-pods.sh
 ```
 
 This scales the node group back to 2 (override with `EKS_NODES=1` if you want). Nodes come up, the scheduler places your existing Deployments’ pods, and the app is back. **No need to re-apply manifests or push images.**
@@ -418,8 +418,8 @@ This scales the node group back to 2 (override with `EKS_NODES=1` if you want). 
 Override cluster/nodegroup/region:
 
 ```bash
-EKS_CLUSTER_NAME=id-pain-demo EKS_NODEGROUP_NAME=standard-workers AWS_REGION=us-east-1 ./scripts/down-pods.sh
-EKS_NODES=1 ./scripts/up-pods.sh
+EKS_CLUSTER_NAME=id-pain-demo EKS_NODEGROUP_NAME=standard-workers AWS_REGION=us-east-1 ./infra/scripts/down-pods.sh
+EKS_NODES=1 ./infra/scripts/up-pods.sh
 ```
 
 ### 8.3 Option B: Delete the cluster (zero EKS cost)
@@ -429,7 +429,7 @@ When you want **no EKS cost at all** (e.g. not using the app for weeks), delete 
 **Bring down (delete cluster):**
 
 ```bash
-./scripts/down.sh
+./infra/scripts/down.sh
 ```
 
 This runs `eksctl delete cluster --name id-pain-demo --region us-east-1`. Cluster and nodes are removed. ECR images and your local secret YAML files are **not** deleted.
@@ -439,7 +439,7 @@ This runs `eksctl delete cluster --name id-pain-demo --region us-east-1`. Cluste
 **Prerequisites:** You’ve already pushed images to ECR (Section 2) and created the three secret files from the `.example` templates at least once.
 
 ```bash
-./scripts/up.sh
+./infra/scripts/up.sh
 ```
 
 This creates the cluster (~15–25 min), updates kubeconfig, and applies all k8s manifests. Then:
@@ -449,7 +449,7 @@ kubectl port-forward -n id-pain svc/id-pain 9090:80
 # Open http://localhost:9090
 ```
 
-Override cluster name or region: `EKS_CLUSTER_NAME=my-demo AWS_REGION=us-west-2 ./scripts/down.sh` (and same for `up.sh`).
+Override cluster name or region: `EKS_CLUSTER_NAME=my-demo AWS_REGION=us-west-2 ./infra/scripts/down.sh` (and same for `up.sh`).
 
 ### 8.4 If pods stay Pending (Insufficient memory / Too many pods)
 
@@ -470,7 +470,7 @@ kubectl get nodes
 kubectl get pods -n id-pain
 ```
 
-New clusters created with `./scripts/up.sh` use **10 × t3.micro** by default. When not in use, scale to 0 with `./scripts/down-pods.sh`; scale back to 10 with `./scripts/up-pods.sh`.
+New clusters created with `./infra/scripts/up.sh` use **10 × t3.micro** by default. When not in use, scale to 0 with `./infra/scripts/down-pods.sh`; scale back to 10 with `./infra/scripts/up-pods.sh`.
 
 ### 8.5 Summary: which option to use
 

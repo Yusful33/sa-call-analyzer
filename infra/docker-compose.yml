@@ -1,0 +1,128 @@
+# SA Call Analyzer - Docker Compose (monorepo)
+# Run from repo root: docker compose -f infra/docker-compose.yml up
+# Stack: FastAPI (legacy UI) + LiteLLM + Gong MCP + Next.js (apps/web) on :3000
+
+services:
+  # Main SA Call Analyzer Application (Python in apps/api/)
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    env_file:
+      - ../.env
+    environment:
+      - PORT=${PORT:-8080}
+      - USE_LITELLM=true
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_API_KEY=dummy
+      - MODEL_NAME=${MODEL_NAME:-claude-3-5-haiku-20241022}
+      - GONG_MCP_URL=http://gong-mcp:8080
+      - CREWAI_TRACING_ENABLED=false
+      - ARIZE_TRACE_DEBUG=${ARIZE_TRACE_DEBUG:-0}
+      - GONG_ACCESS_KEY=${GONG_ACCESS_KEY}
+      - GONG_SECRET_KEY=${GONG_SECRET_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-20250514}
+      - GOOGLE_CLOUD_PROJECT=mkt-analytics-268801
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+    depends_on:
+      - litellm
+      - gong-mcp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    develop:
+      watch:
+        - action: sync+restart
+          path: ../apps/api
+          target: /app
+          ignore:
+            - .venv/
+            - __pycache__/
+            - .git/
+            - .env
+            - "*.md"
+        - action: rebuild
+          path: ../apps/api/pyproject.toml
+        - action: rebuild
+          path: ../apps/api/uv.lock
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /health/liveness HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/4000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./litellm/config.yaml
+          target: /app/config.yaml
+
+  gong-mcp:
+    build: ./gong-http-server
+    ports:
+      - "8081:8080"
+    env_file:
+      - ../.env
+    environment:
+      - GONG_ACCESS_KEY=${GONG_ACCESS_KEY}
+      - GONG_ACCESS_SECRET=${GONG_SECRET_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./gong-http-server/server.py
+          target: /app/http_server.py
+        - action: rebuild
+          path: ./gong-http-server/mcp-server/src
+        - action: rebuild
+          path: ./gong-http-server/mcp-server/package.json
+
+  web:
+    image: node:20-bookworm-slim
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_LEGACY_API_URL=http://localhost:${PORT:-8080}
+      - WATCHPACK_POLLING=true
+      - ARIZE_SPACE_ID=${ARIZE_SPACE_ID}
+      - ARIZE_API_KEY=${ARIZE_API_KEY}
+      - ARIZE_PROJECT_NAME=${ARIZE_PROJECT_NAME:-stillness-web}
+    volumes:
+      - ../apps/web:/app
+      - web_node_modules:/app/node_modules
+    command: ["sh", "-c", "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"]
+    depends_on:
+      - app
+
+volumes:
+  web_node_modules:
+
+networks:
+  default:
+    name: id-pain-network

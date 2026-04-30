@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy application code
-COPY . .
+# Copy FastAPI application (monorepo: apps/api)
+COPY apps/api/ .
 
 # Install dependencies with pip/uv caches disabled so wheel extract does not fill /root/.cache
 # (common on Docker Desktop ARM when the VM disk is tight). After install, delete caches.

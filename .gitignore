@@ -5,9 +5,9 @@
 gcp-credentials.json
 
 # Kubernetes secrets (copy from *.example and fill in; do not commit)
-k8s/secret.yaml
-k8s/litellm-secret.yaml
-k8s/gong-secret.yaml
+infra/k8s/secret.yaml
+infra/k8s/litellm-secret.yaml
+infra/k8s/gong-secret.yaml
 
 # Python
 __pycache__/
@@ -42,3 +42,6 @@ Thumbs.db
 
 # Test data
 test_transcripts/
+
+# Vercel CLI (local project link; do not commit)
+.vercel/
