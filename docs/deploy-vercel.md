@@ -30,11 +30,13 @@ Endpoints provided: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`
 
 1. **Vercel → Add New… → Project** → import this repo.
 2. **Root Directory:** `apps/gong-mcp`.
-3. **Framework Preset:** Other.
-4. **Environment Variables:**
+3. **Framework Preset:** **Other** (not Next.js, not Vite).
+4. **Build & Output Settings** (Project → Settings → General, or during import):
+   - **Output Directory:** leave **empty** unless you know you need one. If you see an error like *“No Output Directory named public found”*, either clear **Output Directory** here, or keep the repo’s committed **`public/index.html`** (this repo includes it so a `public` output exists if Vercel still expects it).
+5. **Environment Variables:**
    - `GONG_ACCESS_KEY`
    - `GONG_ACCESS_SECRET` (or `GONG_SECRET_KEY`)
-5. **Deploy.** Note the production URL — you'll set it as `GONG_MCP_URL` on the API project.
+6. **Deploy.** Note the production URL — you'll set it as `GONG_MCP_URL` on the API project.
 
 ### CLI alternative
 

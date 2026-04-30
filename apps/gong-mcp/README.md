@@ -25,6 +25,7 @@ These match the **legacy** routes (`/health`, `/calls`, `/transcript`, `/call-in
 1. **Vercel → Add New… → Project** → import this repo.
 2. **Root Directory:** `apps/gong-mcp`.
 3. **Framework preset:** **Other** (Vercel auto-detects the `api/` folder as Functions).
+4. **Output Directory:** leave **empty**. If Vercel still expects `public`, this repo includes **`public/index.html`** so the build output folder exists.
 4. Add the env vars above (Production + Preview).
 5. Deploy. Your URL becomes the new `GONG_MCP_URL` for the API project.
 
