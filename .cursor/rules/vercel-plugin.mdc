@@ -1,0 +1,23 @@
+---
+description: Use the official Vercel Cursor plugin for deployments, env vars, logs, and platform guidance
+alwaysApply: true
+---
+
+# Vercel plugin (Cursor)
+
+This repo deploys to **Vercel** (`apps/web`, `apps/api`, `apps/gong-mcp`). Prefer the **Vercel ecosystem plugin** over improvising CLI flags or outdated platform knowledge.
+
+## Install (once per machine / Cursor setup)
+
+Run from any terminal (adds plugin + skills for Cursor):
+
+```bash
+npx plugins add vercel/vercel-plugin
+```
+
+Docs: [Vercel plugin for AI coding agents](https://vercel.com/docs/agent-resources/vercel-plugin)
+
+## Agent behavior
+
+- For **deploy**, **preview URLs**, **`vercel env`**, **logs**, **project link**, or **Vercel-specific errors**, use the **Vercel plugin / bundled skills** and official docs rather than guessing.
+- Repo-specific steps stay in **`docs/deploy-vercel.md`**; combine with plugin workflows when the user is deploying or debugging Vercel.
