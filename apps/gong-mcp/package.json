@@ -5,7 +5,7 @@
   "description": "Vercel Functions wrapper for Gong API (replaces the legacy MCP HTTP server)",
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo ok"
+    "build": "node scripts/ensure-public.mjs"
   },
   "dependencies": {
     "zod": "^3.23.8"
