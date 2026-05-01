@@ -7,3 +7,6 @@ uv.lock
 gcp-credentials.json
 .env
 .env.*
+tests/
+.pytest_cache/
+.ruff_cache/

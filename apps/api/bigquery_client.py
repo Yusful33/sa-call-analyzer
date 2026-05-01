@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError
-import litellm
+from openai_compat_completion import completion as llm_completion
 
 from models import (
     SalesforceAccountData,
@@ -1972,7 +1972,7 @@ Write 4-7 short sentences:
 Do not claim you watched a recording. Do not include markdown headings or bullet characters — plain paragraphs only."""
 
         try:
-            response = litellm.completion(
+            response = llm_completion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
@@ -2799,7 +2799,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
             # Use Claude Haiku for fast, cost-effective responses
             model = os.environ.get("COMPETITIVE_ANALYSIS_MODEL", "claude-3-5-haiku-20241022")
             
-            response = litellm.completion(
+            response = llm_completion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,

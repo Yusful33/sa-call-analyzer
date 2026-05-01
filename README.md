@@ -6,13 +6,14 @@ AI-powered tooling for **Solution Architect sales calls** and related demos: a *
 
 | Path | Contents | Vercel project |
 |------|-----------|----------------|
-| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** + **`requirements.txt`** | `id-pain-api` (Python runtime, `vercel.json` included) |
+| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** + **`requirements.txt`** | `id-pain-api` — **light** bundle (`API_SERVICE_MODE=light`, no CrewAI in `requirements.txt`) |
+| **`apps/api-crew/`** | Vercel-only shim: **`vercel.json`**, **`api/index.py`**, crew **`requirements.txt`**; copies **`../api`** into **`_api_src/`** at install | `id-pain-api-crew` — CrewAI-heavy routes (`/api/analyze`, recap, prospect timeline) |
 | **`apps/web/`** | Next.js 15 UI | `id-pain-web` |
 | **`apps/gong-mcp/`** | Vercel **Node Functions** that call Gong directly (replaces the old MCP HTTP server) | `id-pain-gong-mcp` |
 | **`infra/`** | `docker-compose.yml`, **`litellm/`**, **`gong-http-server/`** (legacy), **`k8s/`**, **`scripts/`** | local dev / EKS only |
 | **`docs/`** | Extra guides (e.g. **Vercel** deployment) | — |
 
-The three Vercel projects all import the **same Git repo**; they differ only by **Root Directory**. **LiteLLM** is replaced in production by **Vercel AI Gateway** — there is no separate LiteLLM Vercel project.
+The **four** Vercel projects all use the **same Git repo**; they differ by **Root Directory**. **LiteLLM** is replaced in production by **Vercel AI Gateway** — there is no separate LiteLLM Vercel project.
 
 **Deploying:** see **[`docs/deploy-vercel.md`](docs/deploy-vercel.md)** for end-to-end steps.
 
@@ -37,8 +38,10 @@ Open **`http://localhost:8080/docs`** for interactive **OpenAPI** documentation.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-cd apps/api && uv sync
+cd apps/api && uv sync --extra crew --extra litellm --extra hypothesis
 ```
+
+**`--extra crew`** installs CrewAI + Chroma (needed for **`/api/analyze`**, recap slide, **`/api/analyze-prospect`**). Add **`--extra litellm`** if you use **`USE_LITELLM=true`** (LiteLLM proxy). Add **`--extra hypothesis`** for **`/api/hypothesis-research`**. A truly minimal install (`uv sync` only) matches the **Vercel light** worker — use **`API_SERVICE_MODE=light`** if you skip the crew extra.
 
 ### 2. Configure environment
 
@@ -124,7 +127,7 @@ Prospect timelines and **`/api/classify-demo`** use additional LLM calls; pick s
 ## Deployment & deep dives
 
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — AWS **EKS**, ECR images (**id-pain**, **litellm**, **gong-http-server**), secrets, Ingress, Grafana, **`infra/scripts/up.sh`** / **`down.sh`**, pod scale scripts.  
-- **[docs/deploy-vercel.md](docs/deploy-vercel.md)** — Three Vercel projects from one repo (`apps/web`, `apps/api`, `apps/gong-mcp`) plus AI Gateway.  
+- **[docs/deploy-vercel.md](docs/deploy-vercel.md)** — Four Vercel projects from one repo (`apps/web`, `apps/api`, `apps/api-crew`, `apps/gong-mcp`) plus AI Gateway.  
 - **[hypothesis_tool/TRACE_FLOW.md](apps/api/hypothesis_tool/TRACE_FLOW.md)** — Hypothesis / **analyze_signals** LLM inputs and Arize span layout.
 
 ---

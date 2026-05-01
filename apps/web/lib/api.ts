@@ -1,6 +1,29 @@
 const BASE =
   process.env.NEXT_PUBLIC_LEGACY_API_URL ?? "http://localhost:8080";
 
+/** CrewAI-heavy routes (second Vercel project when `NEXT_PUBLIC_CREW_API_URL` is set). */
+const CREW_API_PREFIXES = [
+  "/api/analyze-prospect-stream",
+  "/api/analyze-prospect",
+  "/api/generate-recap-slide",
+  "/api/analyze",
+] as const;
+
+function baseUrlForPath(path: string): string {
+  const crewBase = process.env.NEXT_PUBLIC_CREW_API_URL?.replace(/\/$/, "");
+  if (!crewBase) return BASE;
+  for (const prefix of CREW_API_PREFIXES) {
+    if (
+      path === prefix ||
+      path.startsWith(`${prefix}?`) ||
+      path.startsWith(`${prefix}/`)
+    ) {
+      return crewBase;
+    }
+  }
+  return BASE;
+}
+
 /** Parse Content-Disposition for a download filename (handles quoted and RFC 5987 forms). */
 function parseFilenameFromContentDisposition(cd: string | null): string | null {
   if (!cd) return null;
@@ -31,7 +54,7 @@ export async function apiPost<T = unknown>(
   }
   const signal = opts?.signal ?? controller.signal;
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${baseUrlForPath(path)}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -55,7 +78,7 @@ export async function apiPostBlob(
   /** Used when the browser cannot see Content-Disposition (CORS) or the header is missing. */
   filenameFallback?: string
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${baseUrlForPath(path)}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -94,7 +117,7 @@ export function apiStreamPost(
   }
   const signal = opts?.signal ?? controller.signal;
 
-  const promise = fetch(`${BASE}${path}`, {
+  const promise = fetch(`${baseUrlForPath(path)}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

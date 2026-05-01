@@ -32,6 +32,16 @@ class AnalyzeRequest(BaseModel):
             raise ValueError("Provide either 'transcript' or 'gong_url', not both")
 
 
+class AnalyzeProspectRequest(BaseModel):
+    """Request to analyze all calls for a prospect (Gong + CrewAI timeline)."""
+
+    prospect_name: str
+    fuzzy_threshold: Optional[float] = 0.85
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+    model: Optional[str] = None
+
+
 # ============================================================================
 # EVIDENCE & OPPORTUNITY TRACKING
 # ============================================================================

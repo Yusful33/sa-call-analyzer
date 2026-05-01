@@ -121,15 +121,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
 from models import (
-    AnalyzeRequest, AnalysisResult, RecapSlideData, ProspectTimeline,
-    ProspectOverviewRequest, ProspectOverview, GeneratePocDocumentRequest,
-    AccountSuggestionsRequest, AccountSuggestionsResponse,
+    ProspectOverviewRequest,
+    ProspectOverview,
+    GeneratePocDocumentRequest,
+    AccountSuggestionsRequest,
+    AccountSuggestionsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
 from transcript_parser import TranscriptParser
-from crew_analyzer import SACallAnalysisCrew
 from gong_mcp_client import GongMCPClient
-from prospect_timeline_analyzer import ProspectTimelineAnalyzer
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel
@@ -180,7 +180,7 @@ async def arize_project_middleware(request, call_next):
 # Initialize tracer for main API
 tracer = trace.get_tracer("sa-call-analyzer-api")
 
-# Verify tracer provider is still ours after CrewAI import
+# Verify tracer provider after core imports
 current_provider = trace.get_tracer_provider()
 print(f"🔍 Tracer provider after imports: {type(current_provider).__name__}")
 if tracer_provider:
@@ -188,9 +188,6 @@ if tracer_provider:
         print("   ✅ Arize tracer provider is still active")
     else:
         print(f"   ⚠️  WARNING: Tracer provider was overridden! Expected {type(tracer_provider).__name__}, got {type(current_provider).__name__}")
-
-# Initialize the CrewAI analyzer
-analyzer = SACallAnalysisCrew()
 
 # Initialize Gong MCP client
 try:
@@ -200,14 +197,21 @@ except Exception as e:
     gong_client = None
     print(f"⚠️  Gong MCP client not available: {e}")
 
-# Initialize BigQuery client for Prospect Overview
-try:
-    from bigquery_client import BigQueryClient
-    bq_client = BigQueryClient()
-    print("✅ BigQuery client initialized")
-except Exception as e:
-    bq_client = None
-    print(f"⚠️  BigQuery client not available: {e}")
+_API_SERVICE_MODE = os.environ.get("API_SERVICE_MODE", "full").lower()
+
+# Initialize BigQuery (not needed on crew-only workers)
+bq_client = None
+if _API_SERVICE_MODE in ("full", "light"):
+    try:
+        from bigquery_client import BigQueryClient
+
+        bq_client = BigQueryClient()
+        print("✅ BigQuery client initialized")
+    except Exception as e:
+        bq_client = None
+        print(f"⚠️  BigQuery client not available: {e}")
+else:
+    print("ℹ️  Skipping BigQuery init (API_SERVICE_MODE=crew)")
 
 
 def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOverview:
@@ -217,11 +221,17 @@ def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOv
     return maybe_enrich_overview_with_gong_mcp(overview, gong_client, bq_client)
 
 
-print("🤖 Using CrewAI Multi-Agent System (4 specialized agents)")
-print("   1. 🔍 Call Classifier")
-print("   2. 🛠️ Technical Evaluator")
-print("   3. 💡 Sales Methodology & Discovery Expert")
-print("   4. 📝 Report Compiler")
+if _API_SERVICE_MODE in ("full", "crew"):
+    from routes_crew import register_crew_routes
+
+    register_crew_routes(app, gong_client=gong_client, tracer=tracer)
+    print("🤖 CrewAI routes registered (analyze, recap, prospect timeline)")
+    print("   1. 🔍 Call Classifier")
+    print("   2. 🛠️ Technical Evaluator")
+    print("   3. 💡 Sales Methodology & Discovery Expert")
+    print("   4. 📝 Report Compiler")
+else:
+    print(f"ℹ️  API_SERVICE_MODE={_API_SERVICE_MODE!r} — CrewAI routes not loaded on this worker")
 
 
 @app.get("/")
@@ -250,290 +260,9 @@ async def health_check():
     api_key = os.getenv("ANTHROPIC_API_KEY")
     return {
         "status": "healthy",
-        "api_key_configured": bool(api_key)
+        "api_key_configured": bool(api_key),
+        "service_mode": _API_SERVICE_MODE,
     }
-
-
-# Map retired Anthropic model IDs to current ones (avoids 404 on Railway/production).
-MODEL_ID_ALIASES = {
-    "claude-3-5-haiku-20241022": "claude-haiku-4-5",
-    "claude-3-5-sonnet-20241022": "claude-sonnet-4-20250514",
-}
-
-
-def _resolve_model_id(model: Optional[str]) -> Optional[str]:
-    """Return current model ID; map retired IDs so requests don't 404."""
-    if not model:
-        return None
-    return MODEL_ID_ALIASES.get(model.strip(), model.strip())
-
-
-@app.post("/api/analyze", response_model=AnalysisResult)
-async def analyze_transcript(request: AnalyzeRequest):
-    """
-    Analyze a call transcript and provide actionable feedback for the sales rep.
-
-    You can provide either:
-    - transcript: Manual transcript text (with or without speaker labels)
-    - gong_url: Gong call URL (will fetch transcript automatically via MCP)
-    """
-    # Add user/session tracking if available
-    try:
-        from tracing_enhancements import trace_with_metadata
-        # Extract user/session info from request if available
-        user_id = getattr(request, 'user_id', None) or os.getenv('USER_ID')
-        session_id = getattr(request, 'session_id', None) or f"session_{int(time.time())}"
-        metadata_context = trace_with_metadata(
-            user_id=user_id,
-            session_id=session_id,
-            tags=["api", "call_analysis"],
-            metadata={
-                "request_id": f"req_{int(time.time())}",
-                "model": request.model or "default",
-            }
-        )
-    except ImportError:
-        metadata_context = None
-        user_id = None
-        session_id = None
-    
-    # Use context manager if available
-    context_manager = metadata_context if metadata_context else nullcontext()
-    
-    with context_manager:
-        with tracer.start_as_current_span(
-            f"{SPAN_PREFIX}.analyze",
-            attributes={
-                "request.input_type": "gong_url" if request.gong_url else "manual_transcript",
-                "request.model": request.model or "default",
-                "input.value": json.dumps({
-                    "gong_url": request.gong_url,
-                    "transcript": request.transcript[:1000] + "..." if request.transcript and len(request.transcript) > 1000 else request.transcript,
-                    "model": request.model
-                })[:2000],
-                "input.mime_type": "application/json",
-                "openinference.span.kind": "CHAIN",
-            }
-        ) as span:
-            try:
-                # Fetch transcript from Gong if URL is provided
-                if request.gong_url:
-                    span.add_event("fetching_from_gong", {
-                        "gong.url": request.gong_url
-                    })
-
-                    if not gong_client:
-                        span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
-                        raise HTTPException(
-                            status_code=503,
-                            detail="Gong MCP client not available. Check that Gong MCP server is running."
-                        )
-
-                    try:
-                        print(f"📞 Fetching transcript from Gong URL: {request.gong_url}")
-                        # Extract call ID and fetch raw transcript data
-                        call_id = gong_client.extract_call_id_from_url(request.gong_url)
-                        transcript_data = gong_client.get_transcript(call_id)
-                        raw_transcript = gong_client.format_transcript_for_analysis(transcript_data)
-                        
-                        # Get call date from Gong metadata
-                        call_date = gong_client.get_call_date(call_id)
-                        if call_date:
-                            print(f"📅 Call date: {call_date}")
-                            span.set_attribute("call.date", call_date)
-                        
-                        print(f"✅ Fetched {len(raw_transcript)} characters from Gong")
-                        span.set_attribute("transcript.source", "gong")
-                        span.set_attribute("transcript.raw_length", len(raw_transcript))
-                        span.add_event("gong_fetch_success", {
-                            "transcript.length": len(raw_transcript),
-                            "call.date": call_date or "not_available"
-                        })
-                    except Exception as e:
-                        span.set_status(Status(StatusCode.ERROR, f"Gong fetch failed: {str(e)}"))
-                        span.record_exception(e)
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Failed to fetch transcript from Gong: {str(e)}"
-                        )
-                else:
-                    raw_transcript = request.transcript
-                    transcript_data = None  # No raw data for manual transcripts
-                    call_date = ""  # No date for manual transcripts
-                    span.set_attribute("transcript.source", "manual")
-                    span.set_attribute("transcript.raw_length", len(raw_transcript))
-                    span.add_event("using_manual_transcript")
-
-                # Validate transcript is not empty
-                if not raw_transcript or not raw_transcript.strip():
-                    span.set_status(Status(StatusCode.ERROR, "Empty transcript"))
-                    raise HTTPException(status_code=400, detail="Transcript cannot be empty")
-
-                # Parse the transcript
-                with tracer.start_as_current_span("parse_transcript") as parse_span:
-                    parse_span.set_attribute("openinference.span.kind", "chain")
-                    parsed_lines, has_labels = TranscriptParser.parse(raw_transcript)
-                    parse_span.set_attribute("transcript.has_labels", has_labels)
-                    parse_span.set_attribute("transcript.line_count", len(parsed_lines))
-                    span.add_event("transcript_parsed", {
-                        "has_labels": has_labels,
-                        "line_count": len(parsed_lines)
-                    })
-
-                # Format for analysis
-                with tracer.start_as_current_span("format_for_analysis") as format_span:
-                    format_span.set_attribute("openinference.span.kind", "chain")
-                    formatted_transcript = TranscriptParser.format_for_analysis(parsed_lines)
-                    format_span.set_attribute("transcript.formatted_length", len(formatted_transcript))
-
-                # Extract speakers if available
-                speakers = TranscriptParser.extract_speakers(parsed_lines) if has_labels else []
-                span.set_attribute("transcript.speaker_count", len(speakers))
-                if speakers:
-                    span.set_attribute("transcript.speakers", ", ".join(speakers))
-
-                span.add_event("starting_crew_analysis", {
-                    "transcript.length": len(formatted_transcript),
-                    "speaker.count": len(speakers)
-                })
-
-                # Perform analysis (run in thread with 5min timeout - LLM calls can be slow,
-                # but technical + sales crews now run in parallel for ~2x speedup)
-                try:
-                    model = _resolve_model_id(request.model) or request.model
-                    result = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            analyzer.analyze_call,
-                            transcript=formatted_transcript,
-                            speakers=speakers,
-                            transcript_data=transcript_data,
-                            call_date=call_date,
-                            model=model
-                        ),
-                        timeout=300.0
-                    )
-                except asyncio.TimeoutError:
-                    span.set_status(Status(StatusCode.ERROR, "Analysis timed out after 5 minutes"))
-                    raise HTTPException(
-                        status_code=504,
-                        detail="Analysis timed out after 5 minutes. Try a shorter transcript or a faster model (e.g. GPT-4o Mini)."
-                    )
-
-                span.set_attribute("analysis.insight_count", len(result.top_insights))
-                span.set_attribute("analysis.strength_count", len(result.strengths))
-                span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
-
-                # OpenInference output - the complete analysis result
-                span.set_attribute("output.value", json.dumps({
-                    "call_summary": result.call_summary,
-                    "top_insights": [
-                        {
-                            "category": insight.category,
-                            "severity": insight.severity,
-                            "timestamp": insight.timestamp,
-                            "conversation_snippet": insight.conversation_snippet,
-                            "what_happened": insight.what_happened,
-                            "why_it_matters": insight.why_it_matters,
-                            "better_approach": insight.better_approach
-                        }
-                        for insight in result.top_insights
-                    ],
-                    "strengths": result.strengths,
-                    "improvement_areas": result.improvement_areas,
-                    "key_moments": result.key_moments
-                }, indent=2))
-                span.set_attribute("output.mime_type", "application/json")
-
-                span.set_status(Status(StatusCode.OK))
-                span.add_event("analysis_complete", {
-                    "insight_count": len(result.top_insights)
-                })
-
-                # Force flush spans to ensure they're sent to Arize immediately
-                from observability import force_flush_spans
-                force_flush_spans()
-
-                return result
-
-            except HTTPException:
-                raise
-            except json.JSONDecodeError as e:
-                span.set_status(Status(StatusCode.ERROR, f"JSON parse error: {str(e)}"))
-                span.record_exception(e)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to parse AI response: {str(e)}"
-                )
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                span.record_exception(e)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Analysis failed: {str(e)}"
-                )
-
-
-@app.post("/api/generate-recap-slide")
-async def generate_recap_slide(recap_data: RecapSlideData):
-    """
-    Generate a PowerPoint presentation with the recap data.
-    
-    Returns the PowerPoint file as a download.
-    """
-    with tracer.start_as_current_span(f"{SPAN_PREFIX}.generate_recap_slide") as span:
-        span.set_attribute("openinference.span.kind", "CHAIN")
-        
-        try:
-            from recap_generator import generate_recap_slide as create_slide
-            
-            # Generate the PowerPoint file
-            pptx_bytes = create_slide(recap_data)
-            
-            # Create filename with date and customer name
-            customer_name = recap_data.customer_name or "Call"
-            call_date = recap_data.call_date or ""
-            
-            print(f"📁 Generating filename - Customer: '{customer_name}', Date: '{call_date}'")
-            
-            safe_name = "".join(c for c in customer_name if c.isalnum() or c in (' ', '-', '_')).strip()
-            safe_name = safe_name.replace(' ', '_')
-            
-            # Include date in filename if available (date first, then name)
-            if call_date:
-                safe_date = "".join(c for c in call_date if c.isalnum() or c in (' ', '-', '_')).strip()
-                safe_date = safe_date.replace(' ', '_')
-                filename = f"Recap_{safe_date}_{safe_name}.pptx"
-            else:
-                filename = f"Recap_{safe_name}.pptx"
-            
-            print(f"📁 Final filename: {filename}")
-            
-            span.set_attribute("presentation.filename", filename)
-            span.set_attribute("presentation.size_bytes", len(pptx_bytes))
-            span.set_status(Status(StatusCode.OK))
-            
-            return Response(
-                content=pptx_bytes,
-                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"'
-                }
-            )
-            
-        except ImportError as e:
-            span.set_status(Status(StatusCode.ERROR, f"Import error: {str(e)}"))
-            raise HTTPException(
-                status_code=503,
-                detail="PowerPoint dependencies not installed. Please install python-pptx."
-            )
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to generate recap slide: {str(e)}"
-            )
-
 
 @app.get("/api/example")
 async def get_example_transcript():
@@ -683,182 +412,6 @@ async def get_calls_by_account(request: CallsByAccountRequest):
                 status_code=500,
                 detail=f"Failed to fetch calls for account: {str(e)}"
             )
-
-
-class AnalyzeProspectRequest(BaseModel):
-    """Request to analyze all calls for a prospect"""
-    prospect_name: str  # Name to search for (e.g., "John Smith" or "Gong")
-    fuzzy_threshold: Optional[float] = 0.85  # Similarity threshold for name matching
-    from_date: Optional[str] = None  # ISO format start date
-    to_date: Optional[str] = None  # ISO format end date
-    model: Optional[str] = None  # LLM model to use
-
-
-@app.post("/api/analyze-prospect", response_model=ProspectTimeline)
-async def analyze_prospect(request: AnalyzeProspectRequest):
-    """
-    Analyze all calls for a prospect and build a cumulative timeline.
-    
-    Searches Gong for all calls where the prospect name matches any participant,
-    analyzes each call with context from prior calls, and returns a timeline view.
-    """
-    with tracer.start_as_current_span(
-        f"{SPAN_PREFIX}.analyze_prospect",
-        attributes={
-            "prospect.name": request.prospect_name,
-            "fuzzy.threshold": request.fuzzy_threshold or 0.85,
-            "openinference.span.kind": "chain",
-        }
-    ) as span:
-        try:
-            if not gong_client:
-                span.set_status(Status(StatusCode.ERROR, "Gong MCP client not available"))
-                raise HTTPException(
-                    status_code=503,
-                    detail="Gong MCP client not available. Check that Gong MCP server is running."
-                )
-            
-            # Initialize timeline analyzer
-            timeline_analyzer = ProspectTimelineAnalyzer(
-                gong_client=gong_client,
-                analyzer=analyzer
-            )
-            
-            span.add_event("analyzing_prospect_timeline", {
-                "prospect_name": request.prospect_name,
-                "date_range": f"{request.from_date} to {request.to_date}" if request.from_date or request.to_date else "all"
-            })
-            
-            # Analyze prospect timeline
-            timeline = timeline_analyzer.analyze_prospect_timeline(
-                prospect_name=request.prospect_name,
-                from_date=request.from_date,
-                to_date=request.to_date,
-                fuzzy_threshold=request.fuzzy_threshold or 0.85,
-                model=request.model
-            )
-            
-            span.set_attribute("timeline.calls_count", len(timeline.calls))
-            span.set_attribute("timeline.matched_names", ", ".join(timeline.matched_participant_names))
-            span.set_status(Status(StatusCode.OK))
-            
-            # Force flush spans
-            from observability import force_flush_spans
-            force_flush_spans()
-            
-            return timeline
-            
-        except ValueError as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=404,
-                detail=str(e)
-            )
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to analyze prospect timeline: {str(e)}"
-            )
-
-
-@app.post("/api/analyze-prospect-stream")
-async def analyze_prospect_stream(request: AnalyzeProspectRequest):
-    """
-    Analyze all calls for a prospect with real-time progress updates via SSE.
-
-    Returns a Server-Sent Events stream with progress updates as each call is analyzed.
-    Progress events include stage, message, and percentage completion.
-
-    Final event contains the complete ProspectTimeline result.
-    """
-    if not gong_client:
-        raise HTTPException(
-            status_code=503,
-            detail="Gong MCP client not available. Check that Gong MCP server is running."
-        )
-
-    # Initialize timeline analyzer
-    timeline_analyzer = ProspectTimelineAnalyzer(
-        gong_client=gong_client,
-        analyzer=analyzer
-    )
-
-    def generate_events():
-        """Generator that yields SSE-formatted events.
-
-        The OTel span lives INSIDE the generator so it stays active for the
-        entire duration of the stream.  Previously the span wrapped the
-        generator creation but exited before iteration began, which meant
-        every child span created during streaming became a separate root
-        trace.
-        """
-        with tracer.start_as_current_span(
-            f"{SPAN_PREFIX}.analyze_prospect_stream",
-            attributes={
-                "prospect.name": request.prospect_name,
-                "fuzzy.threshold": request.fuzzy_threshold or 0.85,
-                "openinference.span.kind": "chain",
-                "streaming": True,
-            }
-        ) as span:
-            try:
-                span.add_event("starting_sse_stream", {
-                    "prospect_name": request.prospect_name
-                })
-
-                # Use fast mode for quick timeline summaries (1 LLM call per call vs 5)
-                for event in timeline_analyzer.analyze_with_progress_fast(
-                    prospect_name=request.prospect_name,
-                    from_date=request.from_date,
-                    to_date=request.to_date,
-                    fuzzy_threshold=request.fuzzy_threshold or 0.85,
-                    model=request.model
-                ):
-                    # Handle the final complete event specially - serialize the result
-                    if event.get("type") == "complete" and "result" in event:
-                        result = event["result"]
-                        # Convert ProspectTimeline to dict for JSON serialization
-                        event_data = {
-                            "type": "complete",
-                            "message": event.get("message", "Analysis complete"),
-                            "progress": 100,
-                            "result": result.model_dump() if hasattr(result, 'model_dump') else result.dict()
-                        }
-                        yield f"data: {json.dumps(event_data)}\n\n"
-                    else:
-                        # Regular progress event
-                        yield f"data: {json.dumps(event)}\n\n"
-
-                span.set_status(Status(StatusCode.OK))
-
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                span.record_exception(e)
-                # Yield error event
-                error_event = {
-                    "type": "error",
-                    "message": f"Analysis failed: {str(e)}"
-                }
-                yield f"data: {json.dumps(error_event)}\n\n"
-
-        # Flush spans after the span context closes so they are exported
-        # before the SSE connection terminates
-        from observability import force_flush_spans
-        force_flush_spans()
-
-    return StreamingResponse(
-        generate_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
-    )
-
 
 @app.post("/api/account-suggestions", response_model=AccountSuggestionsResponse)
 async def account_suggestions(request: AccountSuggestionsRequest):
@@ -1149,7 +702,7 @@ def _classify_use_case_with_llm(
     hint_framework: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Use Claude Haiku to classify use case and framework from prospect signals."""
-    import litellm
+    from openai_compat_completion import completion as llm_completion
 
     combined_text = "\n".join(signals[:30])  # Use more signals so text-to-SQL/ADK mentions aren't dropped
     hints_text = ""
@@ -1202,7 +755,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
     try:
         model = os.environ.get("USE_CASE_CLASSIFICATION_MODEL", "claude-haiku-4-5")
 
-        response = litellm.completion(
+        response = llm_completion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
@@ -1367,29 +920,31 @@ async def custom_demo_skill_info():
 
 # Lazy-initialized hypothesis tool components
 _hypothesis_agent = None
+_hypothesis_init_done = False
 
 
 def _get_hypothesis_agent():
-    """Lazy-init the LangGraph research agent."""
-    global _hypothesis_agent
-    if _hypothesis_agent is None:
+    """Lazy-init the LangGraph research agent (optional deps: ``hypothesis`` extra)."""
+    global _hypothesis_agent, _hypothesis_init_done
+    if _hypothesis_init_done:
+        return _hypothesis_agent
+    _hypothesis_init_done = True
+    try:
+        from hypothesis_tool.agents.research_agent import ResearchAgent
+        from hypothesis_tool.clients.bigquery_client import BigQueryClient as HypBQClient
+        from hypothesis_tool.config import get_settings as get_hyp_settings
+
+        settings = get_hyp_settings()
+        bq = None
         try:
-            from hypothesis_tool.agents.research_agent import ResearchAgent
-            from hypothesis_tool.clients.bigquery_client import BigQueryClient as HypBQClient
-            from hypothesis_tool.config import get_settings as get_hyp_settings
-            settings = get_hyp_settings()
-            bq = None
-            try:
-                bq = HypBQClient(project_id=settings.bq_project_id)
-            except Exception as e:
-                print(f"⚠️ Hypothesis BQ client failed: {e}")
-            _hypothesis_agent = ResearchAgent(bq_client=bq)
-            print("✅ Hypothesis Research Agent initialized")
+            bq = HypBQClient(project_id=settings.bq_project_id)
         except Exception as e:
-            print(f"❌ Failed to init hypothesis agent: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+            print(f"⚠️ Hypothesis BQ client failed: {e}")
+        _hypothesis_agent = ResearchAgent(bq_client=bq)
+        print("✅ Hypothesis Research Agent initialized")
+    except Exception as e:
+        print(f"❌ Hypothesis agent unavailable (install `hypothesis` optional deps): {e}")
+        _hypothesis_agent = None
     return _hypothesis_agent
 
 
@@ -1410,6 +965,11 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             raise HTTPException(status_code=400, detail="Company name must be at least 2 characters.")
 
         agent = _get_hypothesis_agent()
+        if agent is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Hypothesis research is not enabled in this deployment (missing optional dependencies such as langgraph).",
+            )
     except HTTPException:
         raise
     except Exception as e:

@@ -24,7 +24,6 @@ from arize.otel import register
 # NOTE: CrewAI Instrumentor disabled - creates separate root traces for each Crew.kickoff()
 # from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
-from openinference.instrumentation.litellm import LiteLLMInstrumentor
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -246,12 +245,17 @@ def setup_observability(
             separate_trace_from_runtime_context=False,
         )
 
-        # Instrument LiteLLM (captures actual LLM calls with token counts)
-        litellm_instrumentor = LiteLLMInstrumentor()
-        litellm_instrumentor.instrument(
-            tracer_provider=_proxy_provider,
-            skip_dep_check=True
-        )
+        try:
+            from openinference.instrumentation.litellm import LiteLLMInstrumentor
+
+            litellm_instrumentor = LiteLLMInstrumentor()
+            litellm_instrumentor.instrument(
+                tracer_provider=_proxy_provider,
+                skip_dep_check=True,
+            )
+            print("   ✅ LiteLLM instrumentor initialized")
+        except ImportError:
+            print("   ⚠️  LiteLLM instrumentor skipped (install optional extra `litellm`)")
 
         # Propagate trace context to new threads (BigQuery, thread pools, etc. create
         # threads that otherwise would have no parent span → orphan spans in Arize).

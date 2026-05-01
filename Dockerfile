@@ -16,7 +16,7 @@ COPY apps/api/ .
 # If the build still fails with errno 28: docker builder prune -af && docker system prune -f
 # or raise Docker Desktop → Settings → Resources → disk image size.
 RUN pip install --no-cache-dir uv && \
-    UV_NO_CACHE=1 uv pip install --system --no-cache . && \
+    UV_NO_CACHE=1 uv pip install --system --no-cache ".[crew,litellm,hypothesis]" && \
     uv cache clean 2>/dev/null || true && \
     rm -rf /root/.cache/pip /root/.cache/uv /root/.local/share/uv 2>/dev/null || true
 

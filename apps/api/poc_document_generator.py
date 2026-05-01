@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-import litellm
+from openai_compat_completion import completion as llm_completion
 from docx import Document
 from docx.text.paragraph import Paragraph
 from pydantic import BaseModel, Field, ValidationError
@@ -858,7 +858,7 @@ These rules apply especially to KEYS whose text starts with `e.g.,` (success-met
 {notes_block}
 """
 
-    response = litellm.completion(
+    response = llm_completion(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=int(os.environ.get("POC_DOC_MAX_TOKENS", "12288")),

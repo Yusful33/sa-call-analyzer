@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "export PIP_NO_CACHE_DIR=1 && rm -rf _api_src && cp -R ../api _api_src && rm -rf _api_src/hypothesis_tool _api_src/tests _api_src/.pytest_cache && find _api_src -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && python -m pip install -r requirements.txt && python -m pip uninstall -y google-cloud-bigquery google-cloud-core google-crc32c google-resumable-media 2>/dev/null || true && PRUNE_VERCEL_CREW_WORKER=1 python ../api/scripts/vercel_prune_site_packages.py",
+  "functions": {
+    "api/index.py": {
+      "runtime": "@vercel/python@4.5.0",
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+}

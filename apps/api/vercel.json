@@ -1,5 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "env": {
+    "API_SERVICE_MODE": "light"
+  },
+  "installCommand": "python -m pip install -r requirements.txt && python scripts/vercel_prune_site_packages.py",
   "functions": {
     "api/index.py": {
       "runtime": "@vercel/python@4.5.0",
