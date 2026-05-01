@@ -31,6 +31,7 @@ def prune_crew_worker_extras(root: Path) -> None:
 
     - ``onnxruntime/{transformers,quantization,tools}``: not needed for Chroma default embeddings / inference.
     - ``google/cloud/bigquery``: app never imports BQ when ``API_SERVICE_MODE=crew``; ``pip uninstall`` may leave crumbs.
+    - Every ``tests`` / ``__pycache__`` directory under this site root (often tens of MB across NumPy, gRPC, etc.).
     """
     ort = root / "onnxruntime"
     if ort.is_dir():
@@ -40,6 +41,14 @@ def prune_crew_worker_extras(root: Path) -> None:
     _rm(bq)
     for meta in root.glob("google_cloud_bigquery-*.dist-info"):
         _rm(meta)
+    # Delete deepest paths first so os.walk does not descend into removed trees.
+    hits: list[Path] = []
+    for dirpath, dirnames, _filenames in os.walk(root):
+        p = Path(dirpath)
+        if p.name in ("tests", "__pycache__") and p.is_dir():
+            hits.append(p)
+    for p in sorted(hits, key=lambda x: len(x.parts), reverse=True):
+        _rm(p)
 
 
 def prune_root(root: Path) -> None:
