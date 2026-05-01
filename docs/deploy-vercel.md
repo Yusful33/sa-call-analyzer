@@ -124,8 +124,10 @@ vercel deploy --prod
 
 Same **`main:app`** as **`apps/api`**, but:
 
-- **`vercel.json` `installCommand`** runs **`cp -R ../api _api_src`** then **`pip install -r requirements.txt`** (crew extra), then the shared **prune** script under **`../api/scripts/`**.
+- **`vercel.json` `installCommand`** runs **`bash vercel_install.sh`** (under the 256-character limit): copy **`../api` → `_api_src/`** (drops **`hypothesis_tool`**, **`tests`**, **`frontend`**, caches), **`pip install -r requirements.txt`**, uninstall **BigQuery** wheels, then **`vercel_prune_site_packages.py`** with **`PRUNE_VERCEL_CREW_WORKER=1`** (sympy/kubernetes/uv CLI, ONNX training trees, every **`tests/`** and **`__pycache__/`** under `site-packages`, etc.).
 - Runtime sets **`API_SERVICE_MODE=crew`** via `apps/api-crew/api/index.py` (`os.environ.setdefault`), so **BigQuery is skipped** and only Gong + Crew routes matter for that worker.
+
+**250 MiB cap:** CrewAI + Chroma + ONNX Runtime + gRPC OTLP (via **`arize-otel`**) can still exceed Vercel’s uncompressed function limit on Linux even after pruning. If production deploys keep failing, host **`id-pain-api-crew`** on **Railway / Fly / Cloud Run** using the repo **`Dockerfile`**, or keep only **`id-pain-api`** (light) + **`apps/web`** on Vercel and point **`NEXT_PUBLIC_CREW_API_URL`** at the container URL.
 
 ### Create
 
