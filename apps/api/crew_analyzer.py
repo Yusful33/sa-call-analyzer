@@ -4,7 +4,6 @@ import re
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
-from crewai import Agent, Task, Crew, Process
 from models import (
     AnalysisResult,
     ActionableInsight,
@@ -38,9 +37,9 @@ load_dotenv()
 
 class SACallAnalysisCrew:
     """
-    CrewAI-powered Call Analysis System.
+    LangGraph-orchestrated Call Analysis System.
 
-    Uses specialized agents to comprehensively analyze sales call performance:
+    Uses specialized LLM stages to comprehensively analyze sales call performance:
     1. Call Classifier - Classifies the call type (Discovery vs PoC Scoping)
     2. Technical Evaluator - Assesses technical discussion quality
     3. Sales Methodology & Discovery Expert - Evaluates discovery and Command of Message framework
@@ -52,40 +51,15 @@ class SACallAnalysisCrew:
         self.use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
         self.default_model = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
 
-        # Initialize with default model
-        self._configure_llm(self.default_model)
-    
-    def _configure_llm(self, model_name: str):
-        """Configure CrewAI's LLM (CrewAI 1.x rejects LangChain Chat* as Agent.llm)."""
-        from crewai import LLM
+        # Initialize with default model (LangChain chat model)
+        self._chat = None
+        self._configure_chat(self.default_model)
 
-        if self.use_litellm:
-            litellm_base_url = os.getenv("LITELLM_BASE_URL", "http://litellm:4000").rstrip("/")
-            print(f"🔧 LiteLLM proxy: model={model_name}, base_url={litellm_base_url}")
-            self.llm = LLM(
-                model=model_name,
-                is_litellm=True,
-                base_url=f"{litellm_base_url}/v1",
-                api_key=os.getenv("LITELLM_API_KEY", "dummy"),
-                temperature=0.7,
-                max_tokens=2048,
-            )
-        else:
-            # Native routing: claude* → Anthropic SDK, gpt* → OpenAI, etc.
-            print(f"🔧 Direct LLM (CrewAI): model={model_name}")
-            api_key = (
-                os.getenv("ANTHROPIC_API_KEY")
-                if "claude" in model_name.lower()
-                else os.getenv("OPENAI_API_KEY")
-            )
-            self.llm = LLM(
-                model=model_name,
-                is_litellm=False,
-                temperature=0.7,
-                max_tokens=2048,
-                api_key=api_key,
-            )
+    def _configure_chat(self, model_name: str) -> None:
+        """Configure LangChain chat model for analysis and recap."""
+        from call_analysis_llm import build_chat_model
 
+        self._chat = build_chat_model(model_name)
         self.model_name = model_name
 
     def _extract_snippet_from_transcript(self, transcript: str, timestamp: str, max_chars: int = 500) -> Optional[str]:
@@ -210,7 +184,7 @@ class SACallAnalysisCrew:
         """
         Generate a quick summary of a call with a single LLM call.
 
-        Much faster than full analyze_call() which uses 4 CrewAI agents.
+        Much faster than full analyze_call() which uses the multi-stage LangGraph pipeline.
         Ideal for getting someone up to speed quickly on an account.
 
         Args:
@@ -227,7 +201,7 @@ class SACallAnalysisCrew:
             try:
                 # Configure model if specified
                 if model and model != self.model_name:
-                    self._configure_llm(model)
+                    self._configure_chat(model)
 
                 # Limit transcript size for speed (first ~15000 chars is usually enough)
                 truncated_transcript = transcript[:15000]
@@ -267,8 +241,9 @@ Return ONLY the JSON object, no additional text."""
                 span.set_attribute("input.transcript_length", len(transcript))
                 span.set_attribute("input.truncated", len(transcript) > 15000)
 
-                # CrewAI LLM uses .call (str or message list), not LangChain .invoke
-                result_text = self.llm.call(prompt)
+                from call_analysis_llm import chat_invoke_text
+
+                result_text = chat_invoke_text(self._chat, prompt)
                 if not isinstance(result_text, str):
                     result_text = str(result_text)
 
@@ -316,103 +291,6 @@ Return ONLY the JSON object, no additional text."""
                     "participants_mentioned": [],
                     "sentiment": "neutral"
                 }
-
-    def create_agents(self):
-        """Create all specialized agents"""
-
-        technical_evaluator = Agent(
-            role='Senior Technical Architect & Evaluator',
-            goal='Assess the Solution Architect\'s technical depth, accuracy, and demonstration quality',
-            backstory="""You are a seasoned technical architect with 15+ years of experience.
-            You evaluate:
-            - Technical accuracy and depth of explanations
-            - Architecture and design discussions
-            - Demo quality and effectiveness
-            - Ability to explain complex technical concepts simply
-            - Integration and implementation feasibility
-            You provide specific, actionable feedback on technical performance.""",
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
-        sales_methodology_expert = Agent(
-            role='Sales Methodology & Discovery Expert',
-            goal='Evaluate discovery quality and score Command of the Message framework performance',
-            backstory="""You are a world-class sales coach certified in Command of the Message framework.
-
-            IMPORTANT: Recognize that small talk and rapport building at the beginning of calls is NORMAL and VALUABLE.
-            Do not penalize SAs for spending 1-3 minutes on greetings, weather, weekend plans, or casual conversation.
-            This is an essential part of building trust and relationships with customers.
-
-            You evaluate TWO key areas:
-
-            1. DISCOVERY & ENGAGEMENT:
-               - Quality and depth of discovery questions (after initial rapport building)
-               - Active listening skills and follow-up questions
-               - Engagement with customer responses
-               - Uncovering pain points and needs
-               - Building rapport and trust (including appropriate small talk)
-
-            2. COMMAND OF THE MESSAGE FRAMEWORK (score each 1-10):
-               - Problem Identification: Did they uncover real business problems?
-               - Differentiation: Did they articulate unique value vs competitors?
-               - Proof/Evidence: Did they provide case studies, metrics, demos?
-               - Required Capabilities: Did they tie technical features to business outcomes?
-
-            You provide specific examples with timestamps and actionable recommendations.""",
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
-        report_compiler = Agent(
-            role='Executive Performance Coach & Report Writer',
-            goal='Synthesize all feedback into actionable, specific recommendations with timestamps',
-            backstory="""You are an executive coach who creates clear, actionable performance reports.
-            You compile insights from all analysts and create:
-            - Overall performance scores
-            - Top 3-5 high-impact improvements with timestamps
-            - Specific alternative phrases and approaches
-            - Strengths to reinforce
-            - Key moments from the call
-            Your reports are concise, specific, and immediately actionable.""",
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
-        call_classifier = Agent(
-            role='Sales Call Type Classifier & Criteria Assessor',
-            goal='Classify calls as Discovery or PoC Scoping and assess completion of required criteria',
-            backstory="""You are an expert sales operations analyst who specializes in classifying 
-            sales calls and assessing deal progression. You understand the critical difference between:
-            
-            DISCOVERY CALLS - Focus on:
-            1. Pain & Current State: Understanding how they debug LLM/agent issues, quantifying MTTD/MTTR
-            2. Stakeholder Map: Identifying technical champion, economic buyer, decision maker
-            3. Required Capabilities: Prioritizing RCs (tracing, evals, monitoring, datasets, compliance)
-            4. Competitive Landscape: Understanding current tools (LangSmith, W&B, Braintrust, Datadog)
-            
-            POC SCOPING CALLS - Focus on:
-            1. Use Case Scoped: Specific LLM apps selected, environment, trace volume, integration complexity
-            2. Implementation Requirements: Data residency, deployment model, blockers identified
-            3. Metrics & Success Criteria: Specific metrics defined, baselines captured
-            4. Timeline & Milestones: PoC duration, key dates, decision date committed
-            5. Resources Committed: Engineering resources allocated, check-in cadence, Slack channel
-            
-            You provide structured assessments with specific evidence from the transcript.""",
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
-        return {
-            'technical_evaluator': technical_evaluator,
-            'sales_methodology_expert': sales_methodology_expert,
-            'report_compiler': report_compiler,
-            'call_classifier': call_classifier
-        }
 
     def _format_prior_insights(self, prior_call_insights: Optional[List[Dict]]) -> str:
         """
@@ -476,9 +354,7 @@ Return ONLY the JSON object, no additional text."""
         # Configure model if specified (allows per-request model selection)
         if model and model != self.model_name:
             print(f"🔄 Switching model from {self.model_name} to {model}")
-            self._configure_llm(model)
-            # Recreate agents with new LLM
-            self.agents = self.create_agents()
+            self._configure_chat(model)
 
         # Format prior call insights for context
         prior_context = self._format_prior_insights(prior_call_insights)
@@ -510,793 +386,195 @@ Return ONLY the JSON object, no additional text."""
             
             result = None  # Initialize result
             try:
-                agents = self.create_agents()
-                
-                # DEBUG: Verify agents have LLM with proper callbacks
-                if agents and isinstance(agents, dict) and len(agents) > 0:
-                    first_agent = list(agents.values())[0]
-                    if first_agent and hasattr(first_agent, 'llm'):
-                        print(f"🔍 Agent LLM type: {type(first_agent.llm).__name__}")
-                        if hasattr(first_agent.llm, 'callbacks'):
-                            callbacks = first_agent.llm.callbacks
-                            print(f"🔍 Agent LLM callbacks: {type(callbacks).__name__}")
-                            if hasattr(callbacks, 'handlers'):
-                                print(f"🔍 Callback handlers count: {len(callbacks.handlers) if callbacks.handlers else 0}")
+                from call_analysis_graph import run_call_analysis_pipeline
 
-                # ============================================================
-                # STEP 1: Run Call Classification (separate crew for clean output)
-                # ============================================================
-                # Add prompt template tracking for classification
-                classification_prompt_template = """Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
-
-Transcript:
-{transcript}
-
-DISCOVERY CALL CRITERIA - Look for evidence of:
-1. PAIN & CURRENT STATE VALIDATED
-2. STAKEHOLDER MAP COMPLETE
-3. REQUIRED CAPABILITIES (RCs) PRIORITIZED
-4. COMPETITIVE LANDSCAPE UNDERSTOOD
-
-POC SCOPING CALL CRITERIA - Look for evidence of:
-1. USE CASE SCOPED
-2. IMPLEMENTATION REQUIREMENTS
-3. METRICS & SUCCESS CRITERIA
-4. TIMELINE & MILESTONES
-5. RESOURCES COMMITTED"""
-                
-                try:
-                    from tracing_enhancements import trace_with_prompt_template
-                    prompt_context = trace_with_prompt_template(
-                        template=classification_prompt_template,
-                        version="1.0",
-                        variables={"transcript": transcript[:2000] + "..." if len(transcript) > 2000 else transcript}
-                    )
-                except ImportError:
-                    from contextlib import nullcontext
-                    prompt_context = nullcontext()
-                
-                with prompt_context:
-                    with tracer.start_as_current_span("call_classification") as class_span:
-                        class_span.set_attribute("openinference.span.kind", "agent")
-                        class_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                        class_span.set_attribute("input.mime_type", "text/plain")
-
-                        classification_task = Task(
-                        description=f"""Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
-{prior_context}
-                    Transcript:
-                    {transcript}
-
-                    DISCOVERY CALL CRITERIA - Look for evidence of:
-
-                    1. PAIN & CURRENT STATE VALIDATED:
-                       - What is the primary Use Case? (Development or Production focus?)
-                       - DEVELOPMENT: How do they iterate on prompts/models today?
-                       - PRODUCTION: How do they debug LLM/agent issues today?
-                       - For either: What is the situation? What have they done to resolve? What outcomes?
-                       - Frequency quantified (how often?)
-                       - Duration quantified (how long?)
-                       - Impact quantified (how much?) - People, Process, Technology
-                       - METRICS: MTTD/MTTR for LLM failures quantified?
-                       - METRICS: Average time to experiment with new prompts/models?
-
-                    2. STAKEHOLDER MAP COMPLETE:
-                       - Technical Champion identified and engaged?
-                       - Economic Buyer identified?
-                       - Decision Maker confirmed?
-
-                    3. REQUIRED CAPABILITIES (RCs) PRIORITIZED:
-                       - Top 2-3 RCs ranked by prospect?
-                       - Core capabilities discussed:
-                         * LLM/Agent Tracing
-                         * LLM Evaluations
-                         * Production Monitoring
-                         * Prompt Management
-                         * Prompt Experimentation
-                         * Monitoring
-                         * Compliance (SOC2, SSO, GDPR, etc.)
-                       - "Must have" vs "nice to have" distinguished?
-                       - Deal-breakers identified?
-
-                    4. COMPETITIVE LANDSCAPE UNDERSTOOD:
-                       - Current/prior tools evaluated (LangSmith, W&B, Braintrust, Datadog LLM)?
-                       - Why they're looking vs. staying with current solution?
-                       - Key differentiators that matter to this prospect?
-
-                    POC SCOPING CALL CRITERIA - Look for evidence of:
-
-                    1. USE CASE SCOPED:
-                       - Specific LLM application(s) selected for PoC (not to exceed one use case)?
-                       - Production vs. staging environment decision made?
-                       - Expected trace volume estimated?
-                       - LLM Provider identified (for gateway implementation)?
-                       - Integration complexity assessed (# services, frameworks)?
-
-                    2. IMPLEMENTATION REQUIREMENTS VALIDATED:
-                       - Data residency / deployment model confirmed (Cloud, VPC, On-prem)?
-                       - Any blockers identified (firewall, procurement, security review)?
-
-                    3. METRICS & SUCCESS CRITERIA DEFINED:
-                       - Prospect-specific metrics defined (e.g., "reduce debugging from 4hr to 30min")?
-                       - Baseline measurements captured for before/after comparison?
-                       - Agreement on how success will be measured?
-                       - Success criteria favorable for Arize AX vs competitors (Galileo, Braintrust, LangSmith)?
-
-                    4. TIMELINE & MILESTONES AGREED:
-                       - PoC duration defined (typically 2-4 weeks)?
-                       - Key milestones with dates (kickoff, integration complete, eval review, decision)?
-                       - Decision date committed?
-                       - Next steps after successful PoC discussed?
-
-                    5. RESOURCES COMMITTED:
-                       - Prospect engineering resources allocated (names, % time)?
-                       - Weekly check-in cadence established?
-                       - Slack/communication channel created?
-
-                    IMPORTANT: For each criteria section, you MUST provide:
-                    1. "evidence" - Array of evidence items showing WHERE and WHAT was captured
-                    2. "missed_opportunities" - Array of moments where we COULD have gathered more info
-                    
-                    MISSED OPPORTUNITIES - CRITICAL VALIDATION RULE:
-                    Before flagging ANY missed opportunity, you MUST:
-                    1. Check the "evidence" array for the SAME criteria_name
-                    2. Review the FULL transcript chronologically - if the information appears later in the call, do NOT include it as missed
-                    3. If evidence exists with a LATER timestamp, this is NOT a missed opportunity (information was collected, just later)
-                    4. Only flag as "missed_opportunity" if the information was NEVER collected anywhere in the call
-                    
-                    Example:
-                    - If customer mentions "we use React" at [05:00] but SA doesn't ask about framework
-                    - BUT framework is discussed and confirmed at [15:30] in evidence array
-                    - This should NOT be flagged as a missed opportunity (information was collected, just later)
-                    - Only flag if framework was NEVER discussed/confirmed anywhere in the call
-                    
-                    MISSED OPPORTUNITIES STRUCTURE (REQUIRED for ALL criteria sections):
-                    Every missed_opportunity MUST include ALL of these fields:
-                    {{
-                        "criteria_name": "name of the uncaptured criteria",
-                        "timestamp": "[MM:SS]",
-                        "context": "What happened - what the customer said and what the SA did instead",
-                        "suggested_question": "A specific discovery question the SA should have asked (REQUIRED - never empty)",
-                        "why_important": "Why asking this question matters for the deal"
-                    }}
-                    
-                    The "suggested_question" field is CRITICAL - it must be a specific, actionable question
-                    the SA could ask to uncover more information. NEVER leave it empty or as "".
-                    
-                    REMEMBER: Only include opportunities where the information was TRULY never collected.
-                    If information appears later in the transcript, exclude it from missed_opportunities.
-
-                    Return your analysis as JSON with this EXACT structure:
-                    {{
-                        "call_type": "discovery" | "poc_scoping" | "mixed" | "unclear",
-                        "confidence": "high" | "medium" | "low",
-                        "reasoning": "Brief explanation of classification",
-                        "discovery_criteria": {{
-                            "pain_current_state": {{
-                                "primary_use_case": "development" | "production" | "both" | null,
-                                "prompt_model_iteration_understood": true/false,
-                                "debugging_process_documented": true/false,
-                                "situation_understood": true/false,
-                                "resolution_attempts_documented": true/false,
-                                "outcomes_documented": true/false,
-                                "frequency_quantified": true/false,
-                                "duration_quantified": true/false,
-                                "impact_quantified": true/false,
-                                "people_impact_understood": true/false,
-                                "process_impact_understood": true/false,
-                                "technology_impact_understood": true/false,
-                                "mttd_mttr_quantified": true/false,
-                                "experiment_time_quantified": true/false,
-                                "notes": "summary of pain/current state understanding",
-                                "evidence": [
-                                    {{
-                                        "criteria_name": "situation_understood",
-                                        "captured": true,
-                                        "timestamp": "[MM:SS]",
-                                        "conversation_snippet": "Customer: 'We're struggling with...'",
-                                        "speaker": "Customer Name"
-                                    }}
-                                ],
-                                "missed_opportunities": [
-                                    {{
-                                        "criteria_name": "mttd_mttr_quantified",
-                                        "timestamp": "[MM:SS]",
-                                        "context": "Customer mentioned debugging issues but SA moved on",
-                                        "suggested_question": "How long does it typically take your team to detect when an LLM response is incorrect?",
-                                        "why_important": "Quantifying MTTD establishes baseline for ROI calculation"
-                                    }}
-                                ]
-                            }},
-                            "stakeholder_map": {{
-                                "technical_champion_identified": true/false,
-                                "technical_champion_engaged": true/false,
-                                "economic_buyer_identified": true/false,
-                                "decision_maker_confirmed": true/false,
-                                "notes": "stakeholder summary",
-                                "evidence": [],
-                                "missed_opportunities": [
-                                    {{
-                                        "criteria_name": "decision_maker_confirmed",
-                                        "timestamp": "[MM:SS]",
-                                        "context": "Customer mentioned their manager but SA did not ask about decision process",
-                                        "suggested_question": "Who else needs to be involved in the decision to move forward? What does your approval process look like?",
-                                        "why_important": "Understanding decision maker ensures we're building consensus with the right stakeholders"
-                                    }}
-                                ]
-                            }},
-                            "required_capabilities": {{
-                                "top_rcs_ranked": true/false,
-                                "llm_agent_tracing_important": true/false/null,
-                                "llm_evaluations_important": true/false/null,
-                                "production_monitoring_important": true/false/null,
-                                "prompt_management_important": true/false/null,
-                                "prompt_experimentation_important": true/false/null,
-                                "monitoring_important": true/false/null,
-                                "compliance_important": true/false/null,
-                                "must_have_vs_nice_to_have_distinguished": true/false,
-                                "deal_breakers_identified": true/false,
-                                "notes": "RC summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }},
-                            "competitive_landscape": {{
-                                "current_tools_evaluated": true/false,
-                                "tools_mentioned": ["list", "of", "tools"],
-                                "why_looking_vs_staying": true/false,
-                                "key_differentiators_identified": true/false,
-                                "notes": "competitive summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }}
-                        }},
-                        "poc_scoping_criteria": {{
-                            "use_case_scoped": {{
-                                "llm_applications_selected": true/false,
-                                "applications_list": ["list", "of", "apps"],
-                                "environment_decided": true/false,
-                                "environment_type": "production" | "staging" | "both" | null,
-                                "trace_volume_estimated": true/false,
-                                "estimated_volume": "e.g., 10K traces/day" | null,
-                                "llm_provider_identified": true/false,
-                                "llm_provider": "e.g., OpenAI, Anthropic, Azure OpenAI" | null,
-                                "integration_complexity_assessed": true/false,
-                                "notes": "use case summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }},
-                            "implementation_requirements": {{
-                                "data_residency_confirmed": true/false,
-                                "deployment_model": "cloud" | "vpc" | "on-prem" | null,
-                                "blockers_identified": true/false,
-                                "blockers_list": ["list", "of", "blockers"],
-                                "notes": "implementation summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }},
-                            "metrics_success_criteria": {{
-                                "specific_metrics_defined": true/false,
-                                "example_metrics": ["list", "of", "metrics"],
-                                "baseline_captured": true/false,
-                                "success_measurement_agreed": true/false,
-                                "competitive_favorable_criteria": true/false,
-                                "notes": "metrics summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }},
-                            "timeline_milestones": {{
-                                "poc_duration_defined": true/false,
-                                "duration_weeks": 2-4 | null,
-                                "key_milestones_with_dates": true/false,
-                                "milestones": ["list", "of", "milestones"],
-                                "decision_date_committed": true/false,
-                                "decision_date": "date string" | null,
-                                "next_steps_discussed": true/false,
-                                "notes": "timeline summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }},
-                            "resources_committed": {{
-                                "engineering_resources_allocated": true/false,
-                                "resource_names": ["names"],
-                                "checkin_cadence_established": true/false,
-                                "cadence": "weekly" | "bi-weekly" | null,
-                                "communication_channel_created": true/false,
-                                "notes": "resources summary",
-                                "evidence": [],
-                                "missed_opportunities": []
-                            }}
-                        }},
-                        "missing_elements": {{
-                            "discovery": ["REQUIRED: 3-5 bullet points summarizing the KEY discovery gaps, e.g. 'Did not quantify business impact', 'Missing stakeholder map'"],
-                            "poc_scoping": ["REQUIRED: 3-5 bullet points summarizing the KEY PoC scoping gaps, e.g. 'No success metrics defined', 'Timeline not discussed'"]
-                        }},
-                        "recommendations": ["Specific actions with example questions for next call"]
-                        
-                        IMPORTANT: The "missing_elements" field is REQUIRED and must contain a summary of the most important gaps.
-                        - For discovery calls: Focus on pain/impact, stakeholders, competitive landscape gaps
-                        - For poc_scoping calls: Focus on use case, metrics, timeline, resources gaps
-                        - Always include at least 3 items in the relevant category based on call_type
-                    }}
-                    """,
-                        agent=agents['call_classifier'],
-                        expected_output="JSON classification with detailed criteria assessment"
-                    )
-
-                    # Run classification crew
-                    class_span.add_event("starting_classification_crew")
-                    classification_crew = Crew(
-                        agents=[agents['call_classifier']],
-                        tasks=[classification_task],
-                        process=Process.sequential,
-                        verbose=True
-                    )
-                    classification_result = classification_crew.kickoff()
-                    classification_text = str(classification_result)
-                    class_span.set_attribute("output.value", classification_text[:3000])
-                    class_span.set_attribute("output.mime_type", "application/json")
-                    class_span.add_event("classification_complete", {
-                        "result_length": len(classification_text)
-                    })
-
-                    # Parse classification result
-                    call_classification = self._parse_classification(classification_text)
-                    if call_classification:
-                        class_span.set_attribute("classification.call_type", call_classification.call_type.value)
-                        class_span.set_attribute("classification.confidence", call_classification.confidence)
-                        class_span.set_attribute("classification.discovery_score", call_classification.discovery_completion_score)
-                        class_span.set_attribute("classification.poc_score", call_classification.poc_scoping_completion_score)
-                    class_span.set_status(Status(StatusCode.OK))
-
-                # ============================================================
-                # STEP 2: Run Main Analysis (technical, sales methodology, report)
-                # ============================================================
-
-                # Task 3-5: Parallel analysis by different experts
-                technical_task = Task(
-                    description=f"""Analyze the technical performance of the sales rep in this call.
-{prior_context}
-                    Transcript:
-                    {transcript}
-
-                    Evaluate:
-                    - Technical depth and accuracy
-                    - Architecture/integration discussions
-                    - Demo quality
-
-                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
-                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
-                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
-
-                    Return your analysis as JSON with an array of findings:
-                    {{
-                        "findings": [
-                            {{
-                                "timestamp": "[24:49]",
-                                "issue": "Brief description of the technical issue or observation",
-                                "recommendation": "Specific actionable recommendation"
-                            }}
-                        ]
-                    }}
-
-                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
-                    """,
-                    agent=agents['technical_evaluator'],
-                    expected_output="Technical evaluation with timestamps and specific feedback"
+                classification_text, final_report_text = run_call_analysis_pipeline(
+                    self._chat, transcript, prior_context, tracer
                 )
+                call_classification = self._parse_classification(classification_text)
+                analysis_data_from_crew = None
 
-                sales_methodology_task = Task(
-                    description=f"""Analyze the sales rep's sales methodology and discovery performance in this call.
-{prior_context}
-                    Transcript:
-                    {transcript}
+                # Parse JSON from the final LLM report
+                with tracer.start_as_current_span("parse_crew_report") as parse_span:
+                    parse_span.set_attribute("openinference.span.kind", "chain")
+                    parse_span.set_attribute("report.raw_length", len(final_report_text))
+                    # OpenInference input - raw report text
+                    parse_span.set_attribute("input.value", final_report_text)
+                    parse_span.set_attribute("input.mime_type", "text/plain")
 
-                    IMPORTANT CONTEXT: Small talk and rapport building at the start of calls (1-3 minutes) is EXPECTED and VALUABLE.
-                    Do NOT penalize the SA for casual conversation, greetings, or relationship building at the beginning.
-                    Focus your evaluation on the discovery and sales methodology AFTER the initial rapport phase.
+                    try:
+                        analysis_data = None
 
-                    Evaluate TWO areas:
+                        # Pre-parsed JSON path (unused with LangGraph; kept for compatibility)
+                        if analysis_data_from_crew:
+                            analysis_data = analysis_data_from_crew
+                            parse_span.add_event("using_pre_parsed_json")
+                            parse_span.set_attribute("parsing.method", "pre_parsed_json")
 
-                    1. DISCOVERY & ENGAGEMENT:
-                       - Discovery question quality (after initial small talk)
-                       - Active listening
-                       - Engagement with customer
-                       - Rapport building (including appropriate small talk)
-                       Identify missed opportunities and suggest better questions.
-                       
-                       CRITICAL: Before identifying a missed opportunity, review the FULL transcript chronologically.
-                       Only flag as "missed" if the information was NEVER collected anywhere in the call.
-                       If information was collected later (even if it could have been asked earlier), do NOT flag it as missed.
-                       Focus on truly missed information, not timing preferences.
+                        # If not, try to extract JSON from the report
+                        if analysis_data is None:
+                            # Try markdown code blocks first
+                            code_block_pattern = r'```(?:json)?\s*([\s\S]*?)```'
+                            code_blocks = re.findall(code_block_pattern, final_report_text)
 
-                    2. COMMAND OF THE MESSAGE FRAMEWORK:
-                       - Problem Identification: Uncovering business problems
-                       - Differentiation: Unique value vs competitors
-                       - Proof/Evidence: Case studies, metrics, demos
-                       - Required Capabilities: Features tied to business outcomes
+                            for block in code_blocks:
+                                block = block.strip()
+                                if block.startswith('{'):
+                                    try:
+                                        analysis_data = json.loads(block)
+                                        parse_span.add_event("json_parsed_from_code_block")
+                                        parse_span.set_attribute("parsing.method", "code_block")
+                                        break
+                                    except json.JSONDecodeError:
+                                        continue
 
-                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
-                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
-                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
+                        # If still no data, try finding raw JSON
+                        if analysis_data is None:
+                            json_start = final_report_text.find('{')
+                            json_end = final_report_text.rfind('}') + 1
 
-                    Return your analysis as JSON:
-                    {{
-                        "findings": [
-                            {{
-                                "timestamp": "[12:34]",
-                                "category": "Discovery Depth",
-                                "observation": "What the SA did well or needs improvement",
-                                "recommendation": "Specific actionable recommendation"
-                            }}
-                        ]
-                    }}
+                            if json_start >= 0 and json_end > json_start:
+                                json_str = final_report_text[json_start:json_end]
+                                # Clean up common issues
+                                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                                json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+                                analysis_data = json.loads(json_str)
+                                parse_span.add_event("json_parsed_from_raw")
+                                parse_span.set_attribute("parsing.method", "raw_extraction")
+                            else:
+                                raise ValueError("No JSON found in report")
 
-                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
-                    """,
-                    agent=agents['sales_methodology_expert'],
-                    expected_output="Sales methodology evaluation with timestamps and Command of Message feedback"
-                )
+                        parse_span.set_attribute("parsing.success", True)
 
-                # Task 4: Compile report (depends on all previous tasks)
-                compile_task = Task(
-                    description=f"""Compile a comprehensive, actionable performance report for the sales rep.
-{prior_context}
-                    Based on all the analysis from technical and sales methodology experts,
-                    create a final report with:
+                    except (json.JSONDecodeError, ValueError) as e:
+                        print(f"⚠️  WARNING: Could not parse JSON from crew report: {e}")
+                        print(f"📄 Raw report length: {len(final_report_text)} chars")
+                        print(f"📄 Raw report (first 1000 chars):\n{final_report_text[:1000]}")
+                        print(f"📄 Raw report (last 500 chars):\n{final_report_text[-500:]}")
 
-                    1. Top 3-5 actionable insights with:
-                       - Category (which skill area)
-                       - Severity (critical/important/minor)
-                       - Timestamp (REQUIRED - MUST be included for EVERY insight)
-                       - Conversation snippet (MISSED OPPORTUNITY - where the SA could have asked a probing question but didn't)
-                       - What happened
-                       - Why it matters
-                       - Better approach
-                       - Example phrasing (A Command of the Message discovery question the SA should have asked)
-
-                    CRITICAL: Sort all insights in CHRONOLOGICAL ORDER by timestamp (earliest first).
-                    This allows readers to follow the call from beginning to end.
-                    2. List of strengths (2-3 items)
-                    3. List of improvement areas (2-3 items)
-                    4. Key moments with timestamps
-
-                    CRITICAL TIMESTAMP REQUIREMENT:
-                    EVERY insight in "top_insights" MUST have an EXACT timestamp in [MM:SS] or [HH:MM:SS] format.
-
-                    Extract exact timestamps from the expert analyses (they have already identified specific moments).
-                    Examples of CORRECT timestamps: "[05:23]", "[0:16]", "[15:30]", "[~10:00]"
-                    Examples of INCORRECT timestamps: "Early in call", "Mid-call", "During demo", null, empty string
-
-                    CONVERSATION SNIPPET REQUIREMENT (MISSED OPPORTUNITY):
-                    For each insight, the "conversation_snippet" should describe the MISSED OPPORTUNITY moment:
-                    - What did the customer say that opened a door for deeper discovery?
-                    - What did the SA do instead of asking a probing question?
-                    Example: "Customer mentioned struggling with compliance reviews taking weeks; SA immediately pivoted to product demo instead of exploring the business impact of delays."
-
-                    EXAMPLE PHRASING REQUIREMENT (DISCOVERY QUESTION):
-                    For each insight, the "example_phrasing" should be a specific Command of the Message discovery question:
-                    - Focus on uncovering pain, business impact, stakeholders, or required capabilities
-                    - Phrase it as an actual question the SA could ask
-                    - Make it specific to the context of the missed opportunity
-                    Example: "What happens to your team's other priorities when a compliance review takes longer than expected? How does that impact your quarterly goals?"
-
-                    Make it specific and actionable. Focus on high-impact improvements.
-                    Return as valid JSON that matches this structure:
-                    {{
-                        "call_summary": "2-3 sentence summary",
-                        "top_insights": [
-                            {{
-                                "category": "Discovery Depth",
-                                "severity": "critical",
-                                "timestamp": "[05:23]",
-                                "conversation_snippet": "Customer mentioned struggling with compliance reviews; SA immediately pivoted to product demo instead of exploring the pain deeper.",
-                                "what_happened": "Brief description",
-                                "why_it_matters": "Business impact",
-                                "better_approach": "What to do differently",
-                                "example_phrasing": "What's the business impact when a compliance review takes longer than expected? How does that affect your team's other priorities?"
-                            }}
-                        ],
-                        "strengths": [...],
-                        "improvement_areas": [...],
-                        "key_moments": [
-                            {{
-                                "timestamp": "[12:45]",
-                                "description": "Key moment description"
-                            }}
-                        ]
-                    }}
-
-                    Sort insights chronologically (earliest timestamp first).
-                    """,
-                    agent=agents['report_compiler'],
-                    expected_output="Complete JSON analysis report",
-                    context=[technical_task, sales_methodology_task]
-                )
-
-                # ============================================================
-                # Run technical + sales agents IN PARALLEL (they're independent)
-                # ============================================================
-
-                def _run_tech_crew():
-                    tech_crew = Crew(
-                        agents=[agents['technical_evaluator']],
-                        tasks=[technical_task],
-                        process=Process.sequential,
-                        verbose=True,
-                    )
-                    result = tech_crew.kickoff()
-                    return result.raw if hasattr(result, 'raw') else str(result)
-
-                def _run_sales_crew():
-                    sales_crew = Crew(
-                        agents=[agents['sales_methodology_expert']],
-                        tasks=[sales_methodology_task],
-                        process=Process.sequential,
-                        verbose=True,
-                    )
-                    result = sales_crew.kickoff()
-                    return result.raw if hasattr(result, 'raw') else str(result)
-
-                print("⚡ Running technical + sales methodology analysis in parallel...")
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    # Propagate OTel context into worker threads so spans attach
-                    # to the current request trace instead of becoming orphan roots.
-                    tech_ctx = contextvars.copy_context()
-                    sales_ctx = contextvars.copy_context()
-                    tech_future = executor.submit(tech_ctx.run, _run_tech_crew)
-                    sales_future = executor.submit(sales_ctx.run, _run_sales_crew)
-
-                    tech_output = tech_future.result()
-                    sales_output = sales_future.result()
-
-                # Record spans for the parallel results
-                with tracer.start_as_current_span("agent.technical_evaluator") as tech_span:
-                    tech_span.set_attribute("openinference.span.kind", "agent")
-                    tech_span.set_attribute("agent.name", "technical_evaluator")
-                    tech_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                    tech_span.set_attribute("input.mime_type", "text/plain")
-                    tech_span.set_attribute("output.value", tech_output[:5000])
-                    tech_span.set_attribute("output.mime_type", "text/plain")
-                    tech_span.set_status(Status(StatusCode.OK))
-                print(f"✅ Technical evaluation complete ({len(tech_output)} chars)")
-
-                with tracer.start_as_current_span("agent.sales_methodology_expert") as sales_span:
-                    sales_span.set_attribute("openinference.span.kind", "agent")
-                    sales_span.set_attribute("agent.name", "sales_methodology_expert")
-                    sales_span.set_attribute("input.value", transcript[:2000] + "..." if len(transcript) > 2000 else transcript)
-                    sales_span.set_attribute("input.mime_type", "text/plain")
-                    sales_span.set_attribute("output.value", sales_output[:5000])
-                    sales_span.set_attribute("output.mime_type", "text/plain")
-                    sales_span.set_status(Status(StatusCode.OK))
-                print(f"✅ Sales methodology evaluation complete ({len(sales_output)} chars)")
-
-                # --- Agent 3: Report Compiler ---
-                # Inject the prior agent outputs into the task description
-                # so the compiler has full context (replaces CrewAI's context= param)
-                compile_task_with_context = Task(
-                    description=f"""{compile_task.description}
-
-                    ===== TECHNICAL EVALUATION OUTPUT =====
-                    {tech_output}
-
-                    ===== SALES METHODOLOGY OUTPUT =====
-                    {sales_output}
-                    """,
-                    agent=agents['report_compiler'],
-                    expected_output=compile_task.expected_output,
-                )
-
-                with tracer.start_as_current_span("agent.report_compiler") as compile_span:
-                    compile_span.set_attribute("openinference.span.kind", "agent")
-                    compile_span.set_attribute("agent.name", "report_compiler")
-                    compile_span.set_attribute("input.value", json.dumps({
-                        "technical_output_length": len(tech_output),
-                        "sales_output_length": len(sales_output),
-                    }))
-                    compile_span.set_attribute("input.mime_type", "application/json")
-
-                    compile_crew = Crew(
-                        agents=[agents['report_compiler']],
-                        tasks=[compile_task_with_context],
-                        process=Process.sequential,
-                        verbose=True,
-                    )
-                    final_report = compile_crew.kickoff()
-                    final_report_text = final_report.raw if hasattr(final_report, 'raw') else str(final_report)
-
-                    # Check if CrewAI already parsed the JSON for us
-                    if hasattr(final_report, 'json_dict') and final_report.json_dict:
-                        print(f"✅ Using pre-parsed json_dict from CrewOutput")
-                        analysis_data_from_crew = final_report.json_dict
-                    else:
-                        analysis_data_from_crew = None
-
-                    compile_span.set_attribute("output.value", final_report_text[:5000])
-                    compile_span.set_attribute("output.mime_type", "application/json")
-                    compile_span.set_status(Status(StatusCode.OK))
-                    print(f"✅ Report compilation complete ({len(final_report_text)} chars)")
-
-                    # Parse JSON from the final report (inside crew_analysis_execution)
-                    with tracer.start_as_current_span("parse_crew_report") as parse_span:
-                        parse_span.set_attribute("openinference.span.kind", "chain")
-                        parse_span.set_attribute("report.raw_length", len(final_report_text))
-                        # OpenInference input - raw crew report text
-                        parse_span.set_attribute("input.value", final_report_text)
-                        parse_span.set_attribute("input.mime_type", "text/plain")
-
+                        # Try one more time with aggressive cleaning
                         try:
-                            analysis_data = None
-                            
-                            # First, check if CrewAI already parsed the JSON for us
-                            if analysis_data_from_crew:
-                                analysis_data = analysis_data_from_crew
-                                parse_span.add_event("using_crew_json_dict")
-                                parse_span.set_attribute("parsing.method", "crew_json_dict")
-                            
-                            # If not, try to extract JSON from the report
-                            if analysis_data is None:
-                                # Try markdown code blocks first
-                                code_block_pattern = r'```(?:json)?\s*([\s\S]*?)```'
-                                code_blocks = re.findall(code_block_pattern, final_report_text)
-                                
-                                for block in code_blocks:
-                                    block = block.strip()
-                                    if block.startswith('{'):
-                                        try:
-                                            analysis_data = json.loads(block)
-                                            parse_span.add_event("json_parsed_from_code_block")
-                                            parse_span.set_attribute("parsing.method", "code_block")
-                                            break
-                                        except json.JSONDecodeError:
-                                            continue
-                            
-                            # If still no data, try finding raw JSON
-                            if analysis_data is None:
-                                json_start = final_report_text.find('{')
-                                json_end = final_report_text.rfind('}') + 1
+                            # Remove any control characters and clean the text
+                            cleaned_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', final_report_text)
+                            # Remove ANSI escape codes
+                            cleaned_text = re.sub(r'\x1b\[[0-9;]*m', '', cleaned_text)
+                            # Remove any box-drawing characters
+                            cleaned_text = re.sub(r'[│╭╮╯╰─]', '', cleaned_text)
 
-                                if json_start >= 0 and json_end > json_start:
-                                    json_str = final_report_text[json_start:json_end]
-                                    # Clean up common issues
-                                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
-                                    json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
-                                    analysis_data = json.loads(json_str)
-                                    parse_span.add_event("json_parsed_from_raw")
-                                    parse_span.set_attribute("parsing.method", "raw_extraction")
-                                else:
-                                    raise ValueError("No JSON found in report")
-                            
-                            parse_span.set_attribute("parsing.success", True)
+                            json_start = cleaned_text.find('{')
+                            json_end = cleaned_text.rfind('}') + 1
 
-                        except (json.JSONDecodeError, ValueError) as e:
-                            print(f"⚠️  WARNING: Could not parse JSON from crew report: {e}")
-                            print(f"📄 Raw report length: {len(final_report_text)} chars")
-                            print(f"📄 Raw report (first 1000 chars):\n{final_report_text[:1000]}")
-                            print(f"📄 Raw report (last 500 chars):\n{final_report_text[-500:]}")
-                            
-                            # Try one more time with aggressive cleaning
-                            try:
-                                # Remove any control characters and clean the text
-                                cleaned_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', final_report_text)
-                                # Remove ANSI escape codes
-                                cleaned_text = re.sub(r'\x1b\[[0-9;]*m', '', cleaned_text)
-                                # Remove any box-drawing characters
-                                cleaned_text = re.sub(r'[│╭╮╯╰─]', '', cleaned_text)
-                                
-                                json_start = cleaned_text.find('{')
-                                json_end = cleaned_text.rfind('}') + 1
-                                
-                                if json_start >= 0 and json_end > json_start:
-                                    json_str = cleaned_text[json_start:json_end]
-                                    json_str = re.sub(r',\s*}', '}', json_str)
-                                    json_str = re.sub(r',\s*]', ']', json_str)
-                                    analysis_data = json.loads(json_str)
-                                    parse_span.add_event("json_parsed_after_cleaning")
-                                    parse_span.set_attribute("parsing.success", True)
-                                    parse_span.set_attribute("parsing.method", "cleaned")
-                                    print(f"✅ JSON parsed successfully after cleaning!")
-                                else:
-                                    raise ValueError("No JSON found after cleaning")
-                            except (json.JSONDecodeError, ValueError) as e2:
-                                print(f"⚠️  Cleaning also failed: {e2}")
-                                parse_span.add_event("json_parse_failed", {
-                                    "error": str(e),
-                                    "cleaning_error": str(e2),
-                                    "report_preview": final_report_text[:500]
-                                })
-                                parse_span.set_attribute("parsing.success", False)
-                                parse_span.set_attribute("parsing.fallback", True)
-                                parse_span.set_attribute("error.message", str(e))
+                            if json_start >= 0 and json_end > json_start:
+                                json_str = cleaned_text[json_start:json_end]
+                                json_str = re.sub(r',\s*}', '}', json_str)
+                                json_str = re.sub(r',\s*]', ']', json_str)
+                                analysis_data = json.loads(json_str)
+                                parse_span.add_event("json_parsed_after_cleaning")
+                                parse_span.set_attribute("parsing.success", True)
+                                parse_span.set_attribute("parsing.method", "cleaned")
+                                print(f"✅ JSON parsed successfully after cleaning!")
+                            else:
+                                raise ValueError("No JSON found after cleaning")
+                        except (json.JSONDecodeError, ValueError) as e2:
+                            print(f"⚠️  Cleaning also failed: {e2}")
+                            parse_span.add_event("json_parse_failed", {
+                                "error": str(e),
+                                "cleaning_error": str(e2),
+                                "report_preview": final_report_text[:500]
+                            })
+                            parse_span.set_attribute("parsing.success", False)
+                            parse_span.set_attribute("parsing.fallback", True)
+                            parse_span.set_attribute("error.message", str(e))
 
-                                # Smart fallback: Extract meaningful content from raw text
-                                analysis_data = self._extract_insights_from_raw_text(final_report_text)
+                            # Smart fallback: Extract meaningful content from raw text
+                            analysis_data = self._extract_insights_from_raw_text(final_report_text)
 
                     # Helper function to safely convert to float
-                        def safe_float(value, default=7.0):
-                            """Convert value to float, return default if None or invalid."""
-                            if value is None:
-                                return default
-                            try:
-                                return float(value)
-                            except (ValueError, TypeError):
-                                return default
+                    def safe_float(value, default=7.0):
+                        """Convert value to float, return default if None or invalid."""
+                        if value is None:
+                            return default
+                        try:
+                            return float(value)
+                        except (ValueError, TypeError):
+                            return default
 
                     # Convert to Pydantic models
-                        parse_span.add_event("constructing_pydantic_models")
+                    parse_span.add_event("constructing_pydantic_models")
 
                     # Parse insights and sort chronologically
                     # Note: conversation_snippet is now a synthesized summary generated by the LLM
-                        raw_insights = analysis_data.get("top_insights", [])
-                        
-                        insights = []
-                        for insight in raw_insights:
-                            insights.append(ActionableInsight(**insight))
+                    raw_insights = analysis_data.get("top_insights", [])
+
+                    insights = []
+                    for insight in raw_insights:
+                        insights.append(ActionableInsight(**insight))
 
                     # Sort insights by timestamp (chronological order)
-                        def extract_timestamp_value(timestamp_str):
-                            """Extract numeric value from timestamp for sorting."""
-                            if not timestamp_str:
-                                return 999999  # Put items without timestamps at the end
+                    def extract_timestamp_value(timestamp_str):
+                        """Extract numeric value from timestamp for sorting."""
+                        if not timestamp_str:
+                            return 999999  # Put items without timestamps at the end
 
                         # Remove brackets and handle different formats: [5:23], [0:16], [~10:00]
-                            clean_ts = timestamp_str.strip('[]~')
+                        clean_ts = timestamp_str.strip('[]~')
 
-                            try:
-                            # Split by : to get minutes and seconds
-                                parts = clean_ts.split(':')
-                                if len(parts) == 2:
-                                    minutes, seconds = parts
-                                    return int(minutes) * 60 + int(seconds)
-                                elif len(parts) == 3:  # HH:MM:SS format
-                                    hours, minutes, seconds = parts
-                                    return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-                            except (ValueError, AttributeError):
-                                return 999999  # If parsing fails, put at end
-
-                            return 999999
-
-                        insights.sort(key=lambda x: extract_timestamp_value(x.timestamp))
-
-                        result = AnalysisResult(
-                            call_summary=analysis_data.get("call_summary", ""),
-                            overall_score=safe_float(analysis_data.get("overall_score")),
-                            command_scores=CommandOfMessageScore(
-                                **{k: safe_float(v) for k, v in analysis_data.get("command_scores", {}).items()}
-                            ),
-                            sa_metrics=SAPerformanceMetrics(
-                                **{k: safe_float(v) for k, v in analysis_data.get("sa_metrics", {}).items()}
-                            ),
-                            top_insights=insights,  # Now sorted chronologically
-                            strengths=analysis_data.get("strengths", []),
-                            improvement_areas=analysis_data.get("improvement_areas", []),
-                            key_moments=analysis_data.get("key_moments", []),
-                            call_classification=call_classification  # Add classification result
-                        )
-                        
-                        # Generate recap slide data
                         try:
-                            recap_data = self.generate_recap_data(transcript, call_classification, analysis_data, call_date)
-                            result.recap_data = recap_data
-                            print(f"✅ Recap data generated - Customer: '{recap_data.customer_name}', Date: '{recap_data.call_date}'")
-                        except Exception as e:
-                            print(f"⚠️ Could not generate recap data: {e}")
+                            # Split by : to get minutes and seconds
+                            parts = clean_ts.split(':')
+                            if len(parts) == 2:
+                                minutes, seconds = parts
+                                return int(minutes) * 60 + int(seconds)
+                            elif len(parts) == 3:  # HH:MM:SS format
+                                hours, minutes, seconds = parts
+                                return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+                        except (ValueError, AttributeError):
+                            return 999999  # If parsing fails, put at end
+
+                        return 999999
+
+                    insights.sort(key=lambda x: extract_timestamp_value(x.timestamp))
+
+                    result = AnalysisResult(
+                        call_summary=analysis_data.get("call_summary", ""),
+                        overall_score=safe_float(analysis_data.get("overall_score")),
+                        command_scores=CommandOfMessageScore(
+                            **{k: safe_float(v) for k, v in analysis_data.get("command_scores", {}).items()}
+                        ),
+                        sa_metrics=SAPerformanceMetrics(
+                            **{k: safe_float(v) for k, v in analysis_data.get("sa_metrics", {}).items()}
+                        ),
+                        top_insights=insights,  # Now sorted chronologically
+                        strengths=analysis_data.get("strengths", []),
+                        improvement_areas=analysis_data.get("improvement_areas", []),
+                        key_moments=analysis_data.get("key_moments", []),
+                        call_classification=call_classification  # Add classification result
+                    )
+
+                    # Generate recap slide data
+                    try:
+                        recap_data = self.generate_recap_data(transcript, call_classification, analysis_data, call_date)
+                        result.recap_data = recap_data
+                        print(f"✅ Recap data generated - Customer: '{recap_data.customer_name}', Date: '{recap_data.call_date}'")
+                    except Exception as e:
+                        print(f"⚠️ Could not generate recap data: {e}")
 
                     # Add metadata about the parsed results
-                        parse_span.set_attribute("analysis.insight_count", len(result.top_insights))
-                        parse_span.set_attribute("analysis.strength_count", len(result.strengths))
-                        parse_span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
-                        parse_span.set_attribute("analysis.key_moment_count", len(result.key_moments))
+                    parse_span.set_attribute("analysis.insight_count", len(result.top_insights))
+                    parse_span.set_attribute("analysis.strength_count", len(result.strengths))
+                    parse_span.set_attribute("analysis.improvement_count", len(result.improvement_areas))
+                    parse_span.set_attribute("analysis.key_moment_count", len(result.key_moments))
                     # OpenInference output - parsed and structured analysis result
-                        parse_span.set_attribute("output.value", json.dumps({
-                            "call_summary": result.call_summary,
-                            "insight_count": len(result.top_insights),
-                            "strength_count": len(result.strengths),
-                            "improvement_count": len(result.improvement_areas)
-                        }))
-                        parse_span.set_attribute("output.mime_type", "application/json")
-                        parse_span.set_status(Status(StatusCode.OK))
+                    parse_span.set_attribute("output.value", json.dumps({
+                        "call_summary": result.call_summary,
+                        "insight_count": len(result.top_insights),
+                        "strength_count": len(result.strengths),
+                        "improvement_count": len(result.improvement_areas)
+                    }))
+                    parse_span.set_attribute("output.mime_type", "application/json")
+                    parse_span.set_status(Status(StatusCode.OK))
 
-                    # Create separate child spans for each insight
+                # Create separate child spans for each insight
                 for idx, insight in enumerate(result.top_insights):
                     with tracer.start_as_current_span(
                         f"insight_{idx+1}_{insight.category.lower().replace(' ', '_')}",
@@ -1786,93 +1064,20 @@ PoC Scoping Information:
                 if hasattr(mo, 'suggested_question') and mo.suggested_question:
                     suggested_questions.append(mo.suggested_question)
             
-            # Build the prompt for recap generation
-            recap_task = Task(
-                description=f"""Based on the following call transcript and analysis, generate a recap slide for the next call.
+            from call_analysis_llm import chat_invoke_text
+            from call_analysis_prompts import recap_slide_prompt
 
-TRANSCRIPT:
-{transcript[:10000]}
-
-ANALYSIS CONTEXT:
-{classification_context}
-
-Call Summary: {analysis_data.get('call_summary', 'N/A')}
-
-=== MISSING ELEMENTS (gaps that need to be addressed) ===
-{json.dumps(missing_elements_list[:8], indent=2) if missing_elements_list else 'None identified'}
-
-=== RECOMMENDATIONS FOR NEXT CALL ===
-{json.dumps(recommendations_list, indent=2) if recommendations_list else 'None identified'}
-
-=== SUGGESTED QUESTIONS FROM MISSED OPPORTUNITIES ===
-{json.dumps(suggested_questions, indent=2) if suggested_questions else 'None identified'}
-
-FIRST, extract the following metadata from the transcript:
-- CUSTOMER NAME: The company/organization name of the prospect or customer (e.g., "Fidelity", "Acme Corp", "Netflix"). 
-  Look for introductions like "Hi, I'm [name] from [COMPANY]" or speaker labels like "[Company Name] John Smith:".
-  If multiple customer attendees are present, use their company name.
-- CALL DATE: The date of the call if mentioned in the transcript, otherwise leave empty.
-
-Then generate a recap with these 4 sections:
-
-1. KEY INITIATIVES - What the customer is trying to accomplish (their goals and projects)
-   - Focus on their strategic objectives and what they want to build/achieve
-   - Use specific details from the call (team names, project names, timelines mentioned)
-
-2. CHALLENGES - Pain points and problems they're facing
-   - What's blocking them or causing friction
-   - Be specific about the impact (time wasted, manual processes, lack of visibility)
-
-3. SOLUTION REQUIREMENTS - What they need from a solution
-   - Technical requirements mentioned (integrations, features, capabilities)
-   - Business requirements (security, scalability, ease of use)
-
-4. FOLLOW-UP QUESTIONS - Probing questions to ask on the NEXT call
-   - CRITICAL: Use the MISSING ELEMENTS, RECOMMENDATIONS, and SUGGESTED QUESTIONS above as your PRIMARY source
-   - Convert each gap or recommendation into a specific, actionable question
-   - Format as actual questions starting with "Can you help me understand...", "What would happen if...", "Who is responsible for...", etc.
-   - Include 4-6 high-value questions that directly address the gaps identified
-   - Questions should be specific to THIS customer's situation, not generic
-
-Return as JSON:
-{{
-    "customer_name": "Company name of the prospect/customer",
-    "call_date": "Date if mentioned, otherwise empty string",
-    "key_initiatives": ["Initiative 1 with specific details", "Initiative 2"],
-    "challenges": ["Challenge 1 with impact", "Challenge 2"],
-    "solution_requirements": ["Requirement 1", "Requirement 2", "Requirement 3"],
-    "follow_up_questions": [
-        "Can you help me understand [specific gap from missing elements]?",
-        "What would be the impact if [relates to a challenge]?",
-        "Who on your team is responsible for [specific area]?",
-        "What timeline are you working with for [specific initiative]?"
-    ]
-}}
-
-IMPORTANT: 
-- The customer_name field is REQUIRED - extract the prospect/customer company name from the transcript.
-- The follow_up_questions MUST be derived from the MISSING ELEMENTS and RECOMMENDATIONS sections above. Do NOT generate generic questions - each question should address a specific gap identified in the analysis.
-""",
-                agent=self.agents['report_compiler'] if hasattr(self, 'agents') else Agent(
-                    role="Recap Generator",
-                    goal="Generate actionable recap content with follow-up questions",
-                    backstory="Expert at synthesizing sales calls into actionable recaps with probing questions",
-                    llm=self.llm,
-                    verbose=True
-                ),
-                expected_output="JSON with 4 recap sections including follow-up questions"
+            recap_prompt = recap_slide_prompt(
+                transcript,
+                classification_context,
+                analysis_data.get("call_summary", "N/A"),
+                json.dumps(missing_elements_list[:8], indent=2) if missing_elements_list else "",
+                json.dumps(recommendations_list, indent=2) if recommendations_list else "",
+                json.dumps(suggested_questions, indent=2) if suggested_questions else "",
             )
-            
-            # Run the task
+
             try:
-                recap_crew = Crew(
-                    agents=[recap_task.agent],
-                    tasks=[recap_task],
-                    process=Process.sequential,
-                    verbose=True
-                )
-                result = recap_crew.kickoff()
-                result_text = result.raw if hasattr(result, 'raw') else str(result)
+                result_text = chat_invoke_text(self._chat, recap_prompt)
                 
                 # Parse the JSON result
                 json_start = result_text.find('{')
@@ -1911,7 +1116,7 @@ IMPORTANT:
 
     def _extract_insights_from_raw_text(self, raw_text: str) -> dict:
         """
-        Extract meaningful insights from raw crew output when JSON parsing fails.
+        Extract meaningful insights from raw LLM output when JSON parsing fails.
         Uses regex patterns and heuristics to find strengths, improvements, and key moments.
         """
         insights = []

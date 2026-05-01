@@ -8,4 +8,8 @@ rm -rf _api_src/hypothesis_tool _api_src/tests _api_src/.pytest_cache _api_src/f
 find _api_src -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 python -m pip install -r requirements.txt
 python -m pip uninstall -y google-cloud-bigquery google-cloud-core google-crc32c google-resumable-media 2>/dev/null || true
+# Drop CLIs and unused stacks that still land in the serverless bundle (see Vercel size report).
+for pkg in uv ty kubernetes uvloop; do
+  python -m pip uninstall -y "$pkg" 2>/dev/null || true
+done
 PRUNE_VERCEL_CREW_WORKER=1 python ../api/scripts/vercel_prune_site_packages.py

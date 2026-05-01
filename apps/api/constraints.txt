@@ -1,0 +1,9 @@
+# Constraints file for Vercel deployment
+# 
+# Heavy packages are handled by vercel_prune_site_packages.py AFTER install.
+# This file only blocks packages that would break the install or are truly unnecessary.
+
+# ML frameworks (not needed - using API-based LLMs only)
+# These are NOT deps of crewai so safe to block
+torch < 0
+tensorflow < 0

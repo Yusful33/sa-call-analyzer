@@ -1,0 +1,47 @@
+Analyze the sales rep's sales methodology and discovery performance in this call.
+{prior_context}
+                    Transcript:
+                    {transcript}
+
+                    IMPORTANT CONTEXT: Small talk and rapport building at the start of calls (1-3 minutes) is EXPECTED and VALUABLE.
+                    Do NOT penalize the SA for casual conversation, greetings, or relationship building at the beginning.
+                    Focus your evaluation on the discovery and sales methodology AFTER the initial rapport phase.
+
+                    Evaluate TWO areas:
+
+                    1. DISCOVERY & ENGAGEMENT:
+                       - Discovery question quality (after initial small talk)
+                       - Active listening
+                       - Engagement with customer
+                       - Rapport building (including appropriate small talk)
+                       Identify missed opportunities and suggest better questions.
+                       
+                       CRITICAL: Before identifying a missed opportunity, review the FULL transcript chronologically.
+                       Only flag as "missed" if the information was NEVER collected anywhere in the call.
+                       If information was collected later (even if it could have been asked earlier), do NOT flag it as missed.
+                       Focus on truly missed information, not timing preferences.
+
+                    2. COMMAND OF THE MESSAGE FRAMEWORK:
+                       - Problem Identification: Uncovering business problems
+                       - Differentiation: Unique value vs competitors
+                       - Proof/Evidence: Case studies, metrics, demos
+                       - Required Capabilities: Features tied to business outcomes
+
+                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
+                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
+                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
+
+                    Return your analysis as JSON:
+                    {{
+                        "findings": [
+                            {{
+                                "timestamp": "[12:34]",
+                                "category": "Discovery Depth",
+                                "observation": "What the SA did well or needs improvement",
+                                "recommendation": "Specific actionable recommendation"
+                            }}
+                        ]
+                    }}
+
+                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
+                    

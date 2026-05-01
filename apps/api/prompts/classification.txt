@@ -1,0 +1,256 @@
+Analyze this call transcript and classify it as either a DISCOVERY call or a POC SCOPING call.
+{prior_context}
+                    Transcript:
+                    {transcript}
+
+                    DISCOVERY CALL CRITERIA - Look for evidence of:
+
+                    1. PAIN & CURRENT STATE VALIDATED:
+                       - What is the primary Use Case? (Development or Production focus?)
+                       - DEVELOPMENT: How do they iterate on prompts/models today?
+                       - PRODUCTION: How do they debug LLM/agent issues today?
+                       - For either: What is the situation? What have they done to resolve? What outcomes?
+                       - Frequency quantified (how often?)
+                       - Duration quantified (how long?)
+                       - Impact quantified (how much?) - People, Process, Technology
+                       - METRICS: MTTD/MTTR for LLM failures quantified?
+                       - METRICS: Average time to experiment with new prompts/models?
+
+                    2. STAKEHOLDER MAP COMPLETE:
+                       - Technical Champion identified and engaged?
+                       - Economic Buyer identified?
+                       - Decision Maker confirmed?
+
+                    3. REQUIRED CAPABILITIES (RCs) PRIORITIZED:
+                       - Top 2-3 RCs ranked by prospect?
+                       - Core capabilities discussed:
+                         * LLM/Agent Tracing
+                         * LLM Evaluations
+                         * Production Monitoring
+                         * Prompt Management
+                         * Prompt Experimentation
+                         * Monitoring
+                         * Compliance (SOC2, SSO, GDPR, etc.)
+                       - "Must have" vs "nice to have" distinguished?
+                       - Deal-breakers identified?
+
+                    4. COMPETITIVE LANDSCAPE UNDERSTOOD:
+                       - Current/prior tools evaluated (LangSmith, W&B, Braintrust, Datadog LLM)?
+                       - Why they're looking vs. staying with current solution?
+                       - Key differentiators that matter to this prospect?
+
+                    POC SCOPING CALL CRITERIA - Look for evidence of:
+
+                    1. USE CASE SCOPED:
+                       - Specific LLM application(s) selected for PoC (not to exceed one use case)?
+                       - Production vs. staging environment decision made?
+                       - Expected trace volume estimated?
+                       - LLM Provider identified (for gateway implementation)?
+                       - Integration complexity assessed (# services, frameworks)?
+
+                    2. IMPLEMENTATION REQUIREMENTS VALIDATED:
+                       - Data residency / deployment model confirmed (Cloud, VPC, On-prem)?
+                       - Any blockers identified (firewall, procurement, security review)?
+
+                    3. METRICS & SUCCESS CRITERIA DEFINED:
+                       - Prospect-specific metrics defined (e.g., "reduce debugging from 4hr to 30min")?
+                       - Baseline measurements captured for before/after comparison?
+                       - Agreement on how success will be measured?
+                       - Success criteria favorable for Arize AX vs competitors (Galileo, Braintrust, LangSmith)?
+
+                    4. TIMELINE & MILESTONES AGREED:
+                       - PoC duration defined (typically 2-4 weeks)?
+                       - Key milestones with dates (kickoff, integration complete, eval review, decision)?
+                       - Decision date committed?
+                       - Next steps after successful PoC discussed?
+
+                    5. RESOURCES COMMITTED:
+                       - Prospect engineering resources allocated (names, % time)?
+                       - Weekly check-in cadence established?
+                       - Slack/communication channel created?
+
+                    IMPORTANT: For each criteria section, you MUST provide:
+                    1. "evidence" - Array of evidence items showing WHERE and WHAT was captured
+                    2. "missed_opportunities" - Array of moments where we COULD have gathered more info
+                    
+                    MISSED OPPORTUNITIES - CRITICAL VALIDATION RULE:
+                    Before flagging ANY missed opportunity, you MUST:
+                    1. Check the "evidence" array for the SAME criteria_name
+                    2. Review the FULL transcript chronologically - if the information appears later in the call, do NOT include it as missed
+                    3. If evidence exists with a LATER timestamp, this is NOT a missed opportunity (information was collected, just later)
+                    4. Only flag as "missed_opportunity" if the information was NEVER collected anywhere in the call
+                    
+                    Example:
+                    - If customer mentions "we use React" at [05:00] but SA doesn't ask about framework
+                    - BUT framework is discussed and confirmed at [15:30] in evidence array
+                    - This should NOT be flagged as a missed opportunity (information was collected, just later)
+                    - Only flag if framework was NEVER discussed/confirmed anywhere in the call
+                    
+                    MISSED OPPORTUNITIES STRUCTURE (REQUIRED for ALL criteria sections):
+                    Every missed_opportunity MUST include ALL of these fields:
+                    {{
+                        "criteria_name": "name of the uncaptured criteria",
+                        "timestamp": "[MM:SS]",
+                        "context": "What happened - what the customer said and what the SA did instead",
+                        "suggested_question": "A specific discovery question the SA should have asked (REQUIRED - never empty)",
+                        "why_important": "Why asking this question matters for the deal"
+                    }}
+                    
+                    The "suggested_question" field is CRITICAL - it must be a specific, actionable question
+                    the SA could ask to uncover more information. NEVER leave it empty or as "".
+                    
+                    REMEMBER: Only include opportunities where the information was TRULY never collected.
+                    If information appears later in the transcript, exclude it from missed_opportunities.
+
+                    Return your analysis as JSON with this EXACT structure:
+                    {{
+                        "call_type": "discovery" | "poc_scoping" | "mixed" | "unclear",
+                        "confidence": "high" | "medium" | "low",
+                        "reasoning": "Brief explanation of classification",
+                        "discovery_criteria": {{
+                            "pain_current_state": {{
+                                "primary_use_case": "development" | "production" | "both" | null,
+                                "prompt_model_iteration_understood": true/false,
+                                "debugging_process_documented": true/false,
+                                "situation_understood": true/false,
+                                "resolution_attempts_documented": true/false,
+                                "outcomes_documented": true/false,
+                                "frequency_quantified": true/false,
+                                "duration_quantified": true/false,
+                                "impact_quantified": true/false,
+                                "people_impact_understood": true/false,
+                                "process_impact_understood": true/false,
+                                "technology_impact_understood": true/false,
+                                "mttd_mttr_quantified": true/false,
+                                "experiment_time_quantified": true/false,
+                                "notes": "summary of pain/current state understanding",
+                                "evidence": [
+                                    {{
+                                        "criteria_name": "situation_understood",
+                                        "captured": true,
+                                        "timestamp": "[MM:SS]",
+                                        "conversation_snippet": "Customer: 'We're struggling with...'",
+                                        "speaker": "Customer Name"
+                                    }}
+                                ],
+                                "missed_opportunities": [
+                                    {{
+                                        "criteria_name": "mttd_mttr_quantified",
+                                        "timestamp": "[MM:SS]",
+                                        "context": "Customer mentioned debugging issues but SA moved on",
+                                        "suggested_question": "How long does it typically take your team to detect when an LLM response is incorrect?",
+                                        "why_important": "Quantifying MTTD establishes baseline for ROI calculation"
+                                    }}
+                                ]
+                            }},
+                            "stakeholder_map": {{
+                                "technical_champion_identified": true/false,
+                                "technical_champion_engaged": true/false,
+                                "economic_buyer_identified": true/false,
+                                "decision_maker_confirmed": true/false,
+                                "notes": "stakeholder summary",
+                                "evidence": [],
+                                "missed_opportunities": [
+                                    {{
+                                        "criteria_name": "decision_maker_confirmed",
+                                        "timestamp": "[MM:SS]",
+                                        "context": "Customer mentioned their manager but SA did not ask about decision process",
+                                        "suggested_question": "Who else needs to be involved in the decision to move forward? What does your approval process look like?",
+                                        "why_important": "Understanding decision maker ensures we're building consensus with the right stakeholders"
+                                    }}
+                                ]
+                            }},
+                            "required_capabilities": {{
+                                "top_rcs_ranked": true/false,
+                                "llm_agent_tracing_important": true/false/null,
+                                "llm_evaluations_important": true/false/null,
+                                "production_monitoring_important": true/false/null,
+                                "prompt_management_important": true/false/null,
+                                "prompt_experimentation_important": true/false/null,
+                                "monitoring_important": true/false/null,
+                                "compliance_important": true/false/null,
+                                "must_have_vs_nice_to_have_distinguished": true/false,
+                                "deal_breakers_identified": true/false,
+                                "notes": "RC summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }},
+                            "competitive_landscape": {{
+                                "current_tools_evaluated": true/false,
+                                "tools_mentioned": ["list", "of", "tools"],
+                                "why_looking_vs_staying": true/false,
+                                "key_differentiators_identified": true/false,
+                                "notes": "competitive summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }}
+                        }},
+                        "poc_scoping_criteria": {{
+                            "use_case_scoped": {{
+                                "llm_applications_selected": true/false,
+                                "applications_list": ["list", "of", "apps"],
+                                "environment_decided": true/false,
+                                "environment_type": "production" | "staging" | "both" | null,
+                                "trace_volume_estimated": true/false,
+                                "estimated_volume": "e.g., 10K traces/day" | null,
+                                "llm_provider_identified": true/false,
+                                "llm_provider": "e.g., OpenAI, Anthropic, Azure OpenAI" | null,
+                                "integration_complexity_assessed": true/false,
+                                "notes": "use case summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }},
+                            "implementation_requirements": {{
+                                "data_residency_confirmed": true/false,
+                                "deployment_model": "cloud" | "vpc" | "on-prem" | null,
+                                "blockers_identified": true/false,
+                                "blockers_list": ["list", "of", "blockers"],
+                                "notes": "implementation summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }},
+                            "metrics_success_criteria": {{
+                                "specific_metrics_defined": true/false,
+                                "example_metrics": ["list", "of", "metrics"],
+                                "baseline_captured": true/false,
+                                "success_measurement_agreed": true/false,
+                                "competitive_favorable_criteria": true/false,
+                                "notes": "metrics summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }},
+                            "timeline_milestones": {{
+                                "poc_duration_defined": true/false,
+                                "duration_weeks": 2-4 | null,
+                                "key_milestones_with_dates": true/false,
+                                "milestones": ["list", "of", "milestones"],
+                                "decision_date_committed": true/false,
+                                "decision_date": "date string" | null,
+                                "next_steps_discussed": true/false,
+                                "notes": "timeline summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }},
+                            "resources_committed": {{
+                                "engineering_resources_allocated": true/false,
+                                "resource_names": ["names"],
+                                "checkin_cadence_established": true/false,
+                                "cadence": "weekly" | "bi-weekly" | null,
+                                "communication_channel_created": true/false,
+                                "notes": "resources summary",
+                                "evidence": [],
+                                "missed_opportunities": []
+                            }}
+                        }},
+                        "missing_elements": {{
+                            "discovery": ["REQUIRED: 3-5 bullet points summarizing the KEY discovery gaps, e.g. 'Did not quantify business impact', 'Missing stakeholder map'"],
+                            "poc_scoping": ["REQUIRED: 3-5 bullet points summarizing the KEY PoC scoping gaps, e.g. 'No success metrics defined', 'Timeline not discussed'"]
+                        }},
+                        "recommendations": ["Specific actions with example questions for next call"]
+                        
+                        IMPORTANT: The "missing_elements" field is REQUIRED and must contain a summary of the most important gaps.
+                        - For discovery calls: Focus on pain/impact, stakeholders, competitive landscape gaps
+                        - For poc_scoping calls: Focus on use case, metrics, timeline, resources gaps
+                        - Always include at least 3 items in the relevant category based on call_type
+                    }}
+                    

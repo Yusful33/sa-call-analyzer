@@ -2,7 +2,6 @@
 name = "sa-call-analyzer"
 version = "0.1.0"
 description = "AI agent that analyzes Solution Architect performance on sales calls using Command of the Message framework"
-readme = "../../README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.109.0",
@@ -24,14 +23,13 @@ dependencies = [
     "openinference-instrumentation-openai>=0.1.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
     "opentelemetry-instrumentation-threading>=0.45b0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
 ]
 
 [project.optional-dependencies]
-# CrewAI + Chroma stack (very large). Required for call analysis routes; use on id-pain-api-crew / Docker full image.
-crew = [
-    "crewai>=0.11.0",
-    "openinference-instrumentation-crewai>=0.1.0",
-]
+# Legacy optional group name kept empty; call analysis uses LangGraph in core deps.
+crew = []
 # LiteLLM proxy + LangChain community stack (large). Omitted on Vercel; use for Railway/Docker when USE_LITELLM=true.
 litellm = [
     "litellm>=1.0.0",
@@ -52,7 +50,6 @@ hypothesis = [
     "httpx>=0.27.0",
     "aiosqlite>=0.20.0",
     "pydantic-settings>=2.0.0",
-    "langgraph>=0.2.0",
     "sqlalchemy>=2.0.0",
 ]
 full = [
@@ -86,6 +83,7 @@ packages = ["."]
 only-include = [
     "*.py",
     "frontend/*",
+    "prompts/*",
 ]
 
 [tool.pytest.ini_options]
@@ -102,3 +100,6 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[tool.vercel]
+entrypoint = "main.py"

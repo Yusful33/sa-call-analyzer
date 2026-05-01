@@ -1,0 +1,27 @@
+Analyze the technical performance of the sales rep in this call.
+{prior_context}
+                    Transcript:
+                    {transcript}
+
+                    Evaluate:
+                    - Technical depth and accuracy
+                    - Architecture/integration discussions
+                    - Demo quality
+
+                    CRITICAL REQUIREMENT: EXACT TIMESTAMPS
+                    For EVERY finding, extract the EXACT timestamp from the transcript where this occurred.
+                    Format: "[MM:SS]" or "[HH:MM:SS]" (e.g., "[05:23]", "[24:49]")
+
+                    Return your analysis as JSON with an array of findings:
+                    {{
+                        "findings": [
+                            {{
+                                "timestamp": "[24:49]",
+                                "issue": "Brief description of the technical issue or observation",
+                                "recommendation": "Specific actionable recommendation"
+                            }}
+                        ]
+                    }}
+
+                    NOTE: Do NOT include conversation_snippet - we will extract actual quotes programmatically.
+                    

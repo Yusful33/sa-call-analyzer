@@ -5,7 +5,6 @@ import base64
 import asyncio
 import contextvars
 from pathlib import Path
-from contextlib import nullcontext
 
 # Get the directory where this file is located (apps/api/)
 BASE_DIR = Path(__file__).resolve().parent
@@ -98,8 +97,7 @@ if env_path.exists() and arize_space_id_env:
     except Exception as e:
         print(f"   ⚠️  Could not verify .env file: {e}")
 
-# Initialize observability BEFORE importing CrewAI
-# This ensures our Arize TracerProvider is set up before CrewAI tries to set up its own
+# Initialize observability before importing analysis modules
 from observability import (
     setup_observability,
     get_tracer,
@@ -115,11 +113,11 @@ from observability import (
 )
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
-# Now import everything else (including CrewAI)
+# Now import everything else
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from models import (
     ProspectOverviewRequest,
     ProspectOverview,
@@ -128,7 +126,6 @@ from models import (
     AccountSuggestionsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
-from transcript_parser import TranscriptParser
 from gong_mcp_client import GongMCPClient
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -137,7 +134,7 @@ from typing import Optional
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Call Analyzer - CrewAI Multi-Agent System",
+    title="Call Analyzer - LangGraph Multi-Stage Analysis",
     description="Analyze sales call performance using Command of the Message framework with specialized AI agents"
 )
 
@@ -225,13 +222,13 @@ if _API_SERVICE_MODE in ("full", "crew"):
     from routes_crew import register_crew_routes
 
     register_crew_routes(app, gong_client=gong_client, tracer=tracer)
-    print("🤖 CrewAI routes registered (analyze, recap, prospect timeline)")
+    print("🤖 Call analysis routes registered (analyze, recap, prospect timeline)")
     print("   1. 🔍 Call Classifier")
     print("   2. 🛠️ Technical Evaluator")
     print("   3. 💡 Sales Methodology & Discovery Expert")
     print("   4. 📝 Report Compiler")
 else:
-    print(f"ℹ️  API_SERVICE_MODE={_API_SERVICE_MODE!r} — CrewAI routes not loaded on this worker")
+    print(f"ℹ️  API_SERVICE_MODE={_API_SERVICE_MODE!r} — call analysis routes not loaded on this worker")
 
 
 @app.get("/")
@@ -263,6 +260,7 @@ async def health_check():
         "api_key_configured": bool(api_key),
         "service_mode": _API_SERVICE_MODE,
     }
+
 
 @app.get("/api/example")
 async def get_example_transcript():
@@ -412,6 +410,7 @@ async def get_calls_by_account(request: CallsByAccountRequest):
                 status_code=500,
                 detail=f"Failed to fetch calls for account: {str(e)}"
             )
+
 
 @app.post("/api/account-suggestions", response_model=AccountSuggestionsResponse)
 async def account_suggestions(request: AccountSuggestionsRequest):

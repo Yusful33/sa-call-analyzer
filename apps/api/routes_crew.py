@@ -1,4 +1,4 @@
-"""Register CrewAI-heavy routes on the shared FastAPI `app`."""
+"""Register LangGraph-backed call-analysis routes on the shared FastAPI `app`."""
 
 from __future__ import annotations
 

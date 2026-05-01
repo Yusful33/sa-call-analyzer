@@ -1,6 +1,6 @@
 # Deploying everything on Vercel (single repo, four projects)
 
-This monorepo deploys as **four separate Vercel projects** that all point to the same Git repository but use different **Root Directory** settings. The primary Python API (**`id-pain-api`**) ships a **light** dependency set (no CrewAI / Chroma) so it stays under Vercel’s serverless bundle limits; **CrewAI-heavy** routes run on a second Python project (**`id-pain-api-crew`**). The Python API does **not** ship LiteLLM in its default `requirements.txt`; use **provider SDKs** or optional **`OPENAI_BASE_URL`** toward **[Vercel AI Gateway](https://vercel.com/docs/ai-gateway)** for OpenAI-compatible routing. There is no separate LiteLLM service on Vercel.
+This monorepo deploys as **four or five Vercel projects** (same Git repo, different **Root Directory**). The primary Python API (**`id-pain-api`**) ships a **light** dependency set (no CrewAI / Chroma) so it stays under Vercel’s serverless bundle limits; **CrewAI-heavy** routes run on a second Python project (**`id-pain-api-crew`**) **or**, if that bundle still exceeds the **250 MiB** cap, on a container (Railway / Fly / Cloud Run) with **`id-pain-api-crew-proxy`** on Vercel as a thin forwarder. The Python API does **not** ship LiteLLM in its default `requirements.txt`; use **provider SDKs** or optional **`OPENAI_BASE_URL`** toward **[Vercel AI Gateway](https://vercel.com/docs/ai-gateway)** for OpenAI-compatible routing. There is no separate LiteLLM service on Vercel.
 
 | # | Vercel project | Root Directory | What it is |
 |---|----------------|----------------|------------|
@@ -8,9 +8,10 @@ This monorepo deploys as **four separate Vercel projects** that all point to the
 | 2 | `id-pain-api` | `apps/api` | FastAPI **light** worker (BigQuery, prospect overview, PoC doc, hypothesis when deps present, etc.) |
 | 3 | `id-pain-api-crew` | `apps/api-crew` | FastAPI **Crew** worker — same `main:app` code copied from `../api` at install; `API_SERVICE_MODE=crew` |
 | 4 | `id-pain-gong-mcp` | `apps/gong-mcp` | Node Vercel Functions for Gong API |
+| 5 (optional) | `id-pain-api-crew-proxy` | `apps/api-crew-proxy` | **Tiny** Starlette + httpx reverse proxy → set **`CREW_BACKEND_URL`** to the full Crew worker (container URL); point **`NEXT_PUBLIC_CREW_API_URL`** at this project when the monolithic crew function is too large |
 | — | (no project) | — | LLM routing → **[Vercel AI Gateway](https://vercel.com/docs/ai-gateway)** instead of LiteLLM |
 
-You end up with **four** production URLs (one per project). The web app calls **`id-pain-api`** for most routes and **`id-pain-api-crew`** for analyze / recap / prospect timeline when **`NEXT_PUBLIC_CREW_API_URL`** is set. The API projects call **`id-pain-gong-mcp`** via **`GONG_MCP_URL`**; LLM traffic uses Anthropic / OpenAI SDKs or AI Gateway.
+You end up with **four or five** production URLs depending on whether you use the crew proxy. The web app calls **`id-pain-api`** for most routes and **`id-pain-api-crew`** (or **`id-pain-api-crew-proxy`**) for analyze / recap / prospect timeline when **`NEXT_PUBLIC_CREW_API_URL`** is set. The API projects call **`id-pain-gong-mcp`** via **`GONG_MCP_URL`**; LLM traffic uses Anthropic / OpenAI SDKs or AI Gateway.
 
 ---
 
@@ -127,7 +128,7 @@ Same **`main:app`** as **`apps/api`**, but:
 - **`vercel.json` `installCommand`** runs **`bash vercel_install.sh`** (under the 256-character limit): copy **`../api` → `_api_src/`** (drops **`hypothesis_tool`**, **`tests`**, **`frontend`**, caches), **`pip install -r requirements.txt`**, uninstall **BigQuery** wheels, then **`vercel_prune_site_packages.py`** with **`PRUNE_VERCEL_CREW_WORKER=1`** (sympy/kubernetes/uv CLI, ONNX training trees, every **`tests/`** and **`__pycache__/`** under `site-packages`, etc.).
 - Runtime sets **`API_SERVICE_MODE=crew`** via `apps/api-crew/api/index.py` (`os.environ.setdefault`), so **BigQuery is skipped** and only Gong + Crew routes matter for that worker.
 
-**250 MiB cap:** CrewAI + Chroma + ONNX Runtime + gRPC OTLP (via **`arize-otel`**) can still exceed Vercel’s uncompressed function limit on Linux even after pruning. If production deploys keep failing, host **`id-pain-api-crew`** on **Railway / Fly / Cloud Run** using the repo **`Dockerfile`**, or keep only **`id-pain-api`** (light) + **`apps/web`** on Vercel and point **`NEXT_PUBLIC_CREW_API_URL`** at the container URL.
+**250 MiB cap:** CrewAI + Chroma + ONNX Runtime + gRPC OTLP (via **`arize-otel`**) can still exceed Vercel’s uncompressed function limit on Linux even after pruning (the install script runs **`pip uninstall`** for **`uv`**, **`ty`**, **`kubernetes`**, **`uvloop`** and **`vercel_prune_site_packages.py`** removes **`sys.prefix/bin/uv`** and **`ty`**, which Vercel’s size report previously counted as tens of megabytes each). If production deploys keep failing, use **`apps/api-crew-proxy`** on Vercel (**`CREW_BACKEND_URL`** → full worker) or host **`id-pain-api-crew`** entirely on **Railway / Fly / Cloud Run** using the repo **`Dockerfile`**, and set **`NEXT_PUBLIC_CREW_API_URL`** to the proxy or container URL.
 
 ### Create
 
@@ -143,6 +144,18 @@ From **`apps/api`**:
 ```bash
 uv export --no-hashes --no-dev --format requirements-txt --no-emit-project --no-annotate --extra crew -o ../api-crew/requirements.txt
 ```
+
+---
+
+## 3b. Project: **id-pain-api-crew-proxy** (optional thin edge)
+
+When **`id-pain-api-crew`** cannot fit under **250 MiB**, deploy the real Crew stack from the **`Dockerfile`** (or another image) on a container host, then:
+
+1. **Add** Vercel project **`id-pain-api-crew-proxy`** with **Root Directory** `apps/api-crew-proxy` (preset **Other**; `vercel.json` rewrites `/(.*)` → `api/index.py`).
+2. Set **`CREW_BACKEND_URL`** (production) to the container’s **HTTPS origin** with **no** trailing slash, e.g. `https://id-pain-api-crew-xxxx.up.railway.app`.
+3. Set **`NEXT_PUBLIC_CREW_API_URL`** on **`id-pain-web`** to the **proxy** production URL (not the container URL), so the browser still talks to Vercel while the proxy streams to the worker.
+
+The proxy forwards method, path, query, headers (minus hop-by-hop), and request body; responses stream back (SSE and large downloads supported).
 
 ---
 
@@ -181,6 +194,7 @@ vercel deploy --prod
      ▼
 [ id-pain-api (Vercel) ]   ← apps/api   (API_SERVICE_MODE=light)
 [ id-pain-api-crew ]       ← apps/api-crew (API_SERVICE_MODE=crew, _api_src copy)
+     │  (optional) id-pain-api-crew-proxy → CREW_BACKEND_URL (container crew worker)
      │  GONG_MCP_URL                     OPENAI_API_BASE = ai-gateway.vercel.sh/v1
      ▼                                   │
 [ id-pain-gong-mcp ]               [ Vercel AI Gateway ]
