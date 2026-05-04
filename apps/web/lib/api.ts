@@ -17,7 +17,9 @@ const CREW_API_PREFIXES = [
 
 function baseUrlForPath(path: string): string {
   const crewBase = process.env.NEXT_PUBLIC_CREW_API_URL?.replace(/\/$/, "");
-  if (!crewBase) return BASE;
+  const legacyBase = BASE.replace(/\/$/, "");
+  // If CREW URL is unset or identical to the main API, always use LEGACY (avoids stale CREW env breaking Single Call Analysis).
+  if (!crewBase || crewBase === legacyBase) return BASE;
   for (const prefix of CREW_API_PREFIXES) {
     if (
       path === prefix ||
