@@ -173,7 +173,7 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 2. **Root Directory:** `apps/web`.
 3. **Framework Preset:** Next.js (auto-detected).
 4. **Environment variables:**
-   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production origin of the FastAPI worker (no trailing slash), e.g. **`https://arize-gtm-stillness-api-six.vercel.app`**. It is read at **build time** by `apps/web/next.config.ts`: **fallback rewrites** proxy same-origin **`/api/:path*`** to that host (so the browser stays on the Next domain and avoids CORS). Routes implemented in this Next app under **`app/api/`** (e.g. **`/api/health`**) are served locally and are not rewritten.
+   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production origin of the FastAPI worker (no trailing slash), e.g. **`https://arize-gtm-stillness-api-six.vercel.app`**. It is read at **build time** by **`apps/web/middleware.ts`** (primary) and **`next.config.ts` fallback rewrites** (backup): same-origin **`/api/:path*`** is proxied to that host so the browser avoids CORS. **`app/api/`** routes (e.g. **`/api/health`**) stay on Next and are not proxied.
    - **`NEXT_PUBLIC_CREW_API_URL`** — optional second origin for analyze / recap / prospect routes (no trailing slash). When unset, those routes use the same rewrite target as the main API (same-origin `/api/...` → FastAPI unless you set a distinct crew URL).
 
 ### CLI alternative
