@@ -1,7 +1,4 @@
-/** Production FastAPI origin when `NEXT_PUBLIC_LEGACY_API_URL` is unset (Vercel / prod builds). */
-const DEFAULT_PRODUCTION_API = "https://arize-gtm-stillness-api-six.vercel.app";
-
-/** Trim; treat blank as unset. `""` would otherwise win over `??` and become a same-origin `/api/*` call on the Next host → 404 + CORS. */
+/** Trim; treat blank as unset. `""` would otherwise win over `??` and break URL resolution. */
 function normalizeApiOrigin(raw: string | undefined): string | undefined {
   const u = raw?.trim();
   if (!u) return undefined;
@@ -11,11 +8,16 @@ function normalizeApiOrigin(raw: string | undefined): string | undefined {
   return u.replace(/\/$/, "");
 }
 
-const BASE =
-  normalizeApiOrigin(process.env.NEXT_PUBLIC_LEGACY_API_URL) ??
-  (process.env.NODE_ENV === "development"
-    ? "http://localhost:8080"
-    : DEFAULT_PRODUCTION_API);
+const isDev = process.env.NODE_ENV === "development";
+
+/**
+ * In production on Vercel, use same-origin `/api/...` so `next.config.ts` **fallback rewrites**
+ * proxy to FastAPI (avoids CORS and survives a blank `NEXT_PUBLIC_LEGACY_API_URL` in the client).
+ * In development, call the local FastAPI origin directly.
+ */
+const BASE = isDev
+  ? normalizeApiOrigin(process.env.NEXT_PUBLIC_LEGACY_API_URL) ?? "http://localhost:8080"
+  : "";
 
 /** CrewAI-heavy routes (second Vercel project when `NEXT_PUBLIC_CREW_API_URL` is set). */
 const CREW_API_PREFIXES = [
@@ -28,7 +30,6 @@ const CREW_API_PREFIXES = [
 function baseUrlForPath(path: string): string {
   const crewBase = normalizeApiOrigin(process.env.NEXT_PUBLIC_CREW_API_URL);
   const legacyBase = BASE.replace(/\/$/, "");
-  // If CREW URL is unset or identical to the main API, always use LEGACY (avoids stale CREW env breaking Single Call Analysis).
   if (!crewBase || crewBase === legacyBase) return BASE;
   for (const prefix of CREW_API_PREFIXES) {
     if (
@@ -84,7 +85,9 @@ export async function apiPost<T = unknown>(
     try {
       const j = await res.json();
       if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new Error(detail);
   }
   return res.json() as Promise<T>;
@@ -106,7 +109,9 @@ export async function apiPostBlob(
     try {
       const j = await res.json();
       if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new Error(detail);
   }
   const blob = await res.blob();
