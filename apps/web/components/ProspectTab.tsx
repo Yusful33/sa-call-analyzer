@@ -426,30 +426,39 @@ export default function ProspectTab({
   const [accountName, setAccountName] = useState("");
   const [accountDomain, setAccountDomain] = useState("");
   const [sfdcAccountId, setSfdcAccountId] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   async function submit() {
     if (!accountName.trim() && !accountDomain.trim() && !sfdcAccountId.trim()) {
       alert("Please enter at least one search criteria");
       return;
     }
+    if (isLoading) return;
+    setIsLoading(true);
+    onLoading("Resolving account...");
+
     let nm = accountName.trim();
     let dom = accountDomain.trim();
     let sid = sfdcAccountId.trim();
-    if (nm && !sid) {
-      const resolved = await resolveAccount({
-        accountName: nm,
-        accountDomain: dom,
-        sfdcAccountId: sid,
-      });
-      if (!resolved.proceed) return;
-      nm = (resolved.accountName || nm).trim();
-      dom = (resolved.accountDomain ?? dom).trim();
-      sid = (resolved.sfdcAccountId ?? sid).trim();
-      if (nm !== accountName.trim()) setAccountName(nm);
-      if (sid !== sfdcAccountId.trim()) setSfdcAccountId(sid);
-    }
-    onLoading("Fetching prospect data from BigQuery...");
     try {
+      if (nm && !sid) {
+        const resolved = await resolveAccount({
+          accountName: nm,
+          accountDomain: dom,
+          sfdcAccountId: sid,
+        });
+        if (!resolved.proceed) {
+          setIsLoading(false);
+          onResult("");
+          return;
+        }
+        nm = (resolved.accountName || nm).trim();
+        dom = (resolved.accountDomain ?? dom).trim();
+        sid = (resolved.sfdcAccountId ?? sid).trim();
+        if (nm !== accountName.trim()) setAccountName(nm);
+        if (sid !== sfdcAccountId.trim()) setSfdcAccountId(sid);
+      }
+      onLoading("Fetching prospect data from BigQuery...\nThis may take 30-60 seconds");
       const body: Record<string, string> = {};
       if (nm) body.account_name = nm;
       if (dom) body.domain = dom;
@@ -459,6 +468,8 @@ export default function ProspectTab({
     } catch (err: any) {
       alert("Error: " + (err.message ?? String(err)));
       onResult("");
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -483,7 +494,9 @@ export default function ProspectTab({
         {"📊 "}<strong>Prospect Overview</strong> pulls data from BigQuery including Salesforce, Gong, Pendo, FullStory.
       </p>
       <div className="button-group">
-        <button className="btn-primary" onClick={submit}>Get Prospect Overview</button>
+        <button className="btn-primary" onClick={submit} disabled={isLoading}>
+          {isLoading ? "Loading..." : "Get Prospect Overview"}
+        </button>
       </div>
     </>
   );
