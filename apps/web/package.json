@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@vercel/speed-insights": "^1",
+    "@vercel/analytics": "^1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.214.0",
     "@opentelemetry/resources": "^2.6.1",
