@@ -5,7 +5,7 @@ import "./globals.css";
 
 const metadataBaseUrl =
   process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://arize-stillness.vercel.app");
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://arize-gtm-stillness.vercel.app");
 
 export const metadata: Metadata = {
   metadataBase: new URL(metadataBaseUrl),

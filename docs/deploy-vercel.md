@@ -92,7 +92,7 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 | `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
 | `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
 | `GOOGLE_CLOUD_PROJECT` | BigQuery project id for `BigQueryClient` | e.g. `mkt-analytics-268801` (falls back to this if unset); optional alias **`BQ_PROJECT_ID`** |
-| `STILLNESS_WEB_URL` | Canonical Next.js origin | e.g. `https://stillness.vercel.app` — **`GET /`** on the Python project **302-redirects** here so users are not stuck on `id-pain-api.*.vercel.app`. Also set in **`apps/api/vercel.json`** for this repo’s default. |
+| `STILLNESS_WEB_URL` | Canonical Next.js origin | e.g. `https://arize-gtm-stillness.vercel.app` — **`GET /`** on the Python project **302-redirects** here so users are not stuck on `id-pain-api.*.vercel.app`. Also set in **`apps/api/vercel.json`** for this repo’s default. |
 | `NEXT_PUBLIC_LEGACY_API_URL` | (**`apps/web`**) FastAPI origin the browser calls | Use **`https://stillness-api.vercel.app`** (or your renamed API deployment). If this still points at **`id-pain-api.vercel.app`**, update it in the **stillness** project’s Vercel env and redeploy the web app. |
 
 ### Use Vercel AI Gateway (OpenAI-compatible traffic)
@@ -173,7 +173,7 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 2. **Root Directory:** `apps/web`.
 3. **Framework Preset:** Next.js (auto-detected).
 4. **Environment variables:**
-   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production URL of the FastAPI worker (no trailing slash), e.g. **`https://stillness.vercel.app`** when the API is deployed there.
+   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production URL of the FastAPI worker (no trailing slash), e.g. **`https://stillness-api.vercel.app`** (separate API project on Vercel).
    - **`NEXT_PUBLIC_CREW_API_URL`** — optional second origin for analyze / recap / prospect routes (no trailing slash). When unset, those routes use **`NEXT_PUBLIC_LEGACY_API_URL`** (same host as the main API; typical with LangGraph on one worker).
 
 ### CLI alternative
@@ -181,7 +181,7 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 ```bash
 cd apps/web
 vercel link
-vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # e.g. https://stillness.vercel.app (same host as web if unified)
+vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # e.g. https://stillness-api.vercel.app
 vercel env add NEXT_PUBLIC_CREW_API_URL production      # optional second worker; omit if analyze runs on LEGACY host
 vercel deploy --prod
 ```
