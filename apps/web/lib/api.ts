@@ -1,8 +1,18 @@
 /** Production FastAPI origin when `NEXT_PUBLIC_LEGACY_API_URL` is unset (Vercel / prod builds). */
-const DEFAULT_PRODUCTION_API = "https://arize-gtm-stillness-api.vercel.app";
+const DEFAULT_PRODUCTION_API = "https://arize-gtm-stillness-api-six.vercel.app";
+
+/** Trim; treat blank as unset. `""` would otherwise win over `??` and become a same-origin `/api/*` call on the Next host → 404 + CORS. */
+function normalizeApiOrigin(raw: string | undefined): string | undefined {
+  const u = raw?.trim();
+  if (!u) return undefined;
+  if (!u.startsWith("http://") && !u.startsWith("https://")) {
+    return `https://${u}`.replace(/\/$/, "");
+  }
+  return u.replace(/\/$/, "");
+}
 
 const BASE =
-  process.env.NEXT_PUBLIC_LEGACY_API_URL ??
+  normalizeApiOrigin(process.env.NEXT_PUBLIC_LEGACY_API_URL) ??
   (process.env.NODE_ENV === "development"
     ? "http://localhost:8080"
     : DEFAULT_PRODUCTION_API);
@@ -16,7 +26,7 @@ const CREW_API_PREFIXES = [
 ] as const;
 
 function baseUrlForPath(path: string): string {
-  const crewBase = process.env.NEXT_PUBLIC_CREW_API_URL?.replace(/\/$/, "");
+  const crewBase = normalizeApiOrigin(process.env.NEXT_PUBLIC_CREW_API_URL);
   const legacyBase = BASE.replace(/\/$/, "");
   // If CREW URL is unset or identical to the main API, always use LEGACY (avoids stale CREW env breaking Single Call Analysis).
   if (!crewBase || crewBase === legacyBase) return BASE;
