@@ -182,13 +182,20 @@ class GongMCPClient:
         except Exception as e:
             raise ValueError(f"Invalid Gong URL format: {e}")
 
-    def list_calls(self, from_date: Optional[str] = None, to_date: Optional[str] = None) -> List[Dict]:
+    def list_calls(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        max_calls: Optional[int] = None,
+    ) -> List[Dict]:
         """
         List Gong calls with optional date filtering.
 
         Args:
             from_date: ISO format start date (e.g., "2024-03-01T00:00:00Z")
             to_date: ISO format end date (e.g., "2024-03-31T23:59:59Z")
+            max_calls: When set, Gong MCP stops after this many call IDs (newest-first pages),
+                avoiding huge /calls/extensive batches that exceed HTTP timeouts.
 
         Returns:
             List of call dictionaries
@@ -201,6 +208,8 @@ class GongMCPClient:
             payload["from_date"] = from_date
         if to_date:
             payload["to_date"] = to_date
+        if max_calls is not None and max_calls > 0:
+            payload["max_calls"] = int(max_calls)
 
         print(f"📞 Calling list_calls with payload: {payload}")
         response = self._make_request("/calls", payload)
@@ -1066,8 +1075,14 @@ class GongMCPClient:
                 }, "H4")
                 # #endregion
                 
-                # Fetch all calls (or calls in date range)
-                all_calls = self.list_calls(from_date=from_date, to_date=to_date)
+                # Cap list fetch at the Gong MCP layer so we do not pull every ID in the window
+                # (that can exceed the HTTP client's read timeout on busy workspaces).
+                list_cap = max_calls_to_scan
+                if list_cap is None:
+                    list_cap = int(os.getenv("GONG_MCP_DEFAULT_LIST_CAP", "400"))
+                all_calls = self.list_calls(
+                    from_date=from_date, to_date=to_date, max_calls=list_cap
+                )
                 if max_calls_to_scan is not None and len(all_calls) > max_calls_to_scan:
                     all_calls = all_calls[:max_calls_to_scan]
                 span.set_attribute("calls.total", len(all_calls))
@@ -1289,8 +1304,12 @@ class GongMCPClient:
                     "message": "Querying Gong API for calls..."
                 }
 
-                # Fetch all calls (or calls in date range)
-                all_calls = self.list_calls(from_date=from_date, to_date=to_date)
+                list_cap = max_calls_to_scan
+                if list_cap is None:
+                    list_cap = int(os.getenv("GONG_MCP_DEFAULT_LIST_CAP", "400"))
+                all_calls = self.list_calls(
+                    from_date=from_date, to_date=to_date, max_calls=list_cap
+                )
                 if max_calls_to_scan is not None and len(all_calls) > max_calls_to_scan:
                     all_calls = all_calls[:max_calls_to_scan]
                 span.set_attribute("calls.total", len(all_calls))

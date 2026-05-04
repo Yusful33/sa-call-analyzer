@@ -162,8 +162,9 @@ def maybe_enrich_overview_with_gong_mcp(
     if not search_name:
         return overview
 
-    lookback = int(os.environ.get("POC_GONG_MCP_LOOKBACK_DAYS", "75"))
-    max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "800"))
+    lookback = int(os.environ.get("POC_GONG_MCP_LOOKBACK_DAYS", "45"))
+    # Caps Gong MCP /calls work; higher values risk read timeouts on the API→MCP HTTP hop.
+    max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "400"))
     max_tx = int(os.environ.get("POC_GONG_MCP_MAX_TRANSCRIPTS", "8"))
     snippet_limit = int(os.environ.get("POC_GONG_MCP_TRANSCRIPT_SNIPPET_CHARS", "8000"))
 

@@ -51,7 +51,8 @@ export async function gongRequest<T = unknown>(
 
 export async function listCallIds(
   fromDateTime: string,
-  toDateTime: string
+  toDateTime: string,
+  maxIds?: number
 ): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
@@ -66,10 +67,13 @@ export async function listCallIds(
     if (Array.isArray(page.calls)) {
       ids.push(...page.calls.map((c) => c.id).filter((x): x is string => Boolean(x)));
     }
+    if (maxIds !== undefined && maxIds > 0 && ids.length >= maxIds) {
+      return ids.slice(0, maxIds);
+    }
     cursor = page.records?.cursor;
   } while (cursor);
 
-  return ids;
+  return maxIds !== undefined && maxIds > 0 ? ids.slice(0, maxIds) : ids;
 }
 
 interface ExtensiveCall {
@@ -114,9 +118,10 @@ function formatCall(call: ExtensiveCall): FormattedCall {
 
 export async function listCallsExtensive(
   fromDateTime: string,
-  toDateTime: string
+  toDateTime: string,
+  maxCalls?: number
 ): Promise<{ calls: FormattedCall[]; total: number }> {
-  const ids = await listCallIds(fromDateTime, toDateTime);
+  const ids = await listCallIds(fromDateTime, toDateTime, maxCalls);
   if (ids.length === 0) return { calls: [], total: 0 };
 
   const batchSize = 50;
