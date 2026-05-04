@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "env": {
-    "API_SERVICE_MODE": "full"
+    "API_SERVICE_MODE": "full",
+    "STILLNESS_WEB_URL": "https://stillness.vercel.app"
   },
   "installCommand": "python -m pip install -r requirements.txt && python scripts/vercel_prune_site_packages.py",
   "functions": {

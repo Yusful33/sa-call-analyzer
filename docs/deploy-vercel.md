@@ -91,6 +91,8 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 | `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
 | `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
 | `GOOGLE_CLOUD_PROJECT` | BigQuery project id for `BigQueryClient` | e.g. `mkt-analytics-268801` (falls back to this if unset); optional alias **`BQ_PROJECT_ID`** |
+| `STILLNESS_WEB_URL` | Canonical Next.js origin | e.g. `https://stillness.vercel.app` — **`GET /`** on the Python project **302-redirects** here so users are not stuck on `id-pain-api.*.vercel.app`. Also set in **`apps/api/vercel.json`** for this repo’s default. |
+| `NEXT_PUBLIC_LEGACY_API_URL` | (**`apps/web`**) FastAPI origin the browser calls | Use **`https://stillness-api.vercel.app`** (or your renamed API deployment). If this still points at **`id-pain-api.vercel.app`**, update it in the **stillness** project’s Vercel env and redeploy the web app. |
 
 ### Use Vercel AI Gateway (OpenAI-compatible traffic)
 
@@ -120,6 +122,7 @@ vercel deploy --prod
 
 - **`/api/hypothesis-research`** uses **LangGraph** (core), **httpx**, and **`pydantic-settings`** (both in the default **`requirements.txt`** export). Optional **`hypothesis`** / **`full`** extras add **SQLAlchemy**, **BeautifulSoup**, and **aiosqlite** for feedback DB / HTML tooling if you extend the stack; they are not required for the research route. **Bundle tradeoff:** the light worker stays smaller without CrewAI/Chroma, but we keep hypothesis-capable deps in the default export so the route works in production.
 - BigQuery: use `GCP_CREDENTIALS_BASE64`; the app writes it to `/tmp` on startup when `VERCEL` is set.
+- **PoC / PoT Word (`/api/generate-poc-document`):** needs **BigQuery**, **`ANTHROPIC_API_KEY`** (or OpenAI) for LLM fill-in, and the three template files **`apps/api/templates/poc_pot/{poc_saas,poc_vpc,pot}.docx`** present in the deployment bundle. Check **`GET /health`** → **`poc_pot_workflow`** on the API for `ready` and `word_templates_present`. Commit the `.docx` masters if they are missing from git.
 
 ---
 
