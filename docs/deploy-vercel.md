@@ -26,7 +26,7 @@ vercel login
 
 ## 1. Project: **id-pain-gong-mcp** (Vercel Functions, Node)
 
-Endpoints provided: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`, `POST /api/call-info` — same shape as the legacy MCP HTTP server.
+Endpoints: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`, `POST /api/call-info`. **`vercel.json`** also rewrites **`/transcript`**, **`/calls`**, **`/call-info`**, and **`/health`** to those `/api/*` routes so the FastAPI **`GongMCPClient`** (which posts to the non-`/api` paths) works without code changes.
 
 ### Create
 

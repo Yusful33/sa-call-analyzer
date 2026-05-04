@@ -1,5 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm install",
-  "buildCommand": "npm run build"
+  "buildCommand": "npm run build",
+  "rewrites": [
+    {
+      "source": "/transcript",
+      "destination": "/api/transcript"
+    },
+    {
+      "source": "/calls",
+      "destination": "/api/calls"
+    },
+    {
+      "source": "/call-info",
+      "destination": "/api/call-info"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
+  ]
 }
