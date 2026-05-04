@@ -1,5 +1,5 @@
 /** Production FastAPI origin when `NEXT_PUBLIC_LEGACY_API_URL` is unset (Vercel / prod builds). */
-const DEFAULT_PRODUCTION_API = "https://stillness-api.vercel.app";
+const DEFAULT_PRODUCTION_API = "https://arize-gtm-stillness-api.vercel.app";
 
 const BASE =
   process.env.NEXT_PUBLIC_LEGACY_API_URL ??

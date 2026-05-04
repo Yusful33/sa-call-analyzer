@@ -45,3 +45,6 @@ test_transcripts/
 
 # Vercel CLI (local project link; do not commit)
 .vercel/
+
+# Local Vercel env exports / migration backups (may contain secrets)
+.vercel-env-backup/
