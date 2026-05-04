@@ -35,6 +35,18 @@ def _debug_log(location, message, data, hypothesis_id=None):
 # #endregion
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    """Parse a positive int from env; ignore blank or invalid values."""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        n = int(raw)
+    except ValueError:
+        return default
+    return n if n > 0 else default
+
+
 def _normalize_gong_mcp_base_url(url: str) -> str:
     """
     Ensure GONG_MCP_URL is usable with HTTP clients: strip whitespace, add
@@ -1079,7 +1091,7 @@ class GongMCPClient:
                 # (that can exceed the HTTP client's read timeout on busy workspaces).
                 list_cap = max_calls_to_scan
                 if list_cap is None:
-                    list_cap = int(os.getenv("GONG_MCP_DEFAULT_LIST_CAP", "400"))
+                    list_cap = _positive_int_env("GONG_MCP_DEFAULT_LIST_CAP", 400)
                 all_calls = self.list_calls(
                     from_date=from_date, to_date=to_date, max_calls=list_cap
                 )
@@ -1306,7 +1318,7 @@ class GongMCPClient:
 
                 list_cap = max_calls_to_scan
                 if list_cap is None:
-                    list_cap = int(os.getenv("GONG_MCP_DEFAULT_LIST_CAP", "400"))
+                    list_cap = _positive_int_env("GONG_MCP_DEFAULT_LIST_CAP", 400)
                 all_calls = self.list_calls(
                     from_date=from_date, to_date=to_date, max_calls=list_cap
                 )

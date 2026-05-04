@@ -4,8 +4,22 @@ import { NextResponse } from "next/server";
 /** Must stay aligned with `next.config.ts` / ops default FastAPI host. */
 const DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
 
+/**
+ * FastAPI origin for `/api/*` rewrites.
+ *
+ * Prefer **FASTAPI_ORIGIN** (or **LEGACY_API_ORIGIN**) — read at **request time** on Vercel.
+ * **`NEXT_PUBLIC_LEGACY_API_URL` is often inlined at `next build` time**; changing it in the
+ * Vercel UI without a **redeploy** can leave middleware pointing at an old or broken API host
+ * (symptom: 500/404 on every `/api/*` call). Set `FASTAPI_ORIGIN` to override without rebuild,
+ * or trigger a new production deployment after changing `NEXT_PUBLIC_LEGACY_API_URL`.
+ */
 function backendOrigin(): string {
-  const raw = process.env.NEXT_PUBLIC_LEGACY_API_URL?.trim();
+  const runtime =
+    (process.env.FASTAPI_ORIGIN ?? "").trim() ||
+    (process.env.LEGACY_API_ORIGIN ?? "").trim();
+  const pub = (process.env.NEXT_PUBLIC_LEGACY_API_URL ?? "").trim();
+  const raw = runtime || pub;
+
   if (process.env.NODE_ENV === "development") {
     if (!raw) return "http://localhost:8080";
     if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
@@ -32,8 +46,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
   if (pathname.startsWith("/api/")) {
-    const base = backendOrigin();
-    const dest = new URL(`${pathname}${search}`, `${base}/`);
+    const base = backendOrigin().replace(/\/$/, "");
+    let dest: URL;
+    try {
+      dest = new URL(`${pathname}${search}`, `${base}/`);
+    } catch {
+      dest = new URL(`${pathname}${search}`, `${DEFAULT_LEGACY_API}/`);
+    }
     return NextResponse.rewrite(dest);
   }
   return NextResponse.next();
