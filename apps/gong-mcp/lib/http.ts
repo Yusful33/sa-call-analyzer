@@ -8,30 +8,38 @@ export type JsonHandler = (body: unknown) => Promise<{ status: number; body: unk
  *   - return JSON content-type
  *   - translate Gong/auth errors to clean HTTP statuses
  */
+/**
+ * Vercel Node Functions expect the Web Handler shape `{ fetch(Request) }`
+ * (see https://vercel.com/docs/functions/functions-api-reference). A bare
+ * `async (req) => Response` default export can be invoked with a non-Request
+ * object and crash before our try/catch → FUNCTION_INVOCATION_FAILED.
+ */
 export function jsonHandler(handler: JsonHandler) {
-  return async function (req: Request): Promise<Response> {
-    let body: unknown = undefined;
-    if (req.method !== "GET" && req.method !== "HEAD") {
+  return {
+    async fetch(req: Request): Promise<Response> {
+      let body: unknown = undefined;
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        try {
+          body = req.headers.get("content-type")?.includes("application/json")
+            ? await req.json()
+            : undefined;
+        } catch {
+          return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+        }
+      }
       try {
-        body = req.headers.get("content-type")?.includes("application/json")
-          ? await req.json()
-          : undefined;
-      } catch {
-        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+        const out = await handler(body);
+        return Response.json(out.body, { status: out.status });
+      } catch (err) {
+        if (err instanceof GongConfigError) {
+          return Response.json({ error: err.message }, { status: 500 });
+        }
+        if (err instanceof GongApiError) {
+          return Response.json({ error: err.message }, { status: err.status });
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return Response.json({ error: message }, { status: 500 });
       }
-    }
-    try {
-      const out = await handler(body);
-      return Response.json(out.body, { status: out.status });
-    } catch (err) {
-      if (err instanceof GongConfigError) {
-        return Response.json({ error: err.message }, { status: 500 });
-      }
-      if (err instanceof GongApiError) {
-        return Response.json({ error: err.message }, { status: err.status });
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      return Response.json({ error: message }, { status: 500 });
-    }
+    },
   };
 }
