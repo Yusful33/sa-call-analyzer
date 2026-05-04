@@ -1,5 +1,5 @@
 import type { VercelApiHandler, VercelRequest, VercelResponse } from "@vercel/node";
-import { GongApiError, GongConfigError } from "./gong";
+import { GongApiError, GongConfigError } from "./gong.js";
 
 export type JsonHandler = (body: unknown) => Promise<{ status: number; body: unknown }>;
 

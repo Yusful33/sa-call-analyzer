@@ -1,5 +1,5 @@
-import { retrieveTranscripts } from "../lib/gong";
-import { jsonHandler } from "../lib/http";
+import { retrieveTranscripts } from "../lib/gong.js";
+import { jsonHandler } from "../lib/http.js";
 
 export const config = { runtime: "nodejs", maxDuration: 300 } as const;
 
