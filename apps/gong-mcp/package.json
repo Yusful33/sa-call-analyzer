@@ -2,13 +2,13 @@
   "name": "id-pain-gong-mcp",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Vercel Functions wrapper for Gong API (replaces the legacy MCP HTTP server)",
   "scripts": {
     "dev": "vercel dev",
     "build": "node scripts/ensure-public.mjs"
   },
   "dependencies": {
-    "@vercel/node": "^5.7.15",
     "zod": "^3.23.8"
   },
   "devDependencies": {

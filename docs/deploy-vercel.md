@@ -26,7 +26,7 @@ vercel login
 
 ## 1. Project: **id-pain-gong-mcp** (Vercel Functions, Node)
 
-Endpoints: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`, `POST /api/call-info`. Implementations use **`@vercel/node`** `VercelApiHandler` (`(req, res) => …`), which is the reliable pattern for **`api/*.ts`** on the **Other** preset. **`vercel.json`** rewrites **`/transcript`**, **`/calls`**, **`/call-info`**, and **`/health`** to those `/api/*` routes so the FastAPI **`GongMCPClient`** (which posts to the non-`/api` paths) works without code changes.
+Endpoints: `GET /api/health`, `POST /api/calls`, `POST /api/transcript`, `POST /api/call-info`. Implementations use **`@vercel/node`** `VercelApiHandler` (`(req, res) => …`), which is the reliable pattern for **`api/*.ts`** on the **Other** preset. **`package.json`** sets **`"type": "module"`** so Vercel’s emitted **`export`** syntax in function bundles loads correctly on Node. **`vercel.json`** rewrites **`/transcript`**, **`/calls`**, **`/call-info`**, and **`/health`** to those `/api/*` routes so the FastAPI **`GongMCPClient`** (which posts to the non-`/api` paths) works without code changes.
 
 ### Create
 
