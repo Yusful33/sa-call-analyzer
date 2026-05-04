@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 /** Must stay aligned with `next.config.ts` / ops default FastAPI host. */
-const DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api-six.vercel.app";
+const DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
 
 function backendOrigin(): string {
   const raw = process.env.NEXT_PUBLIC_LEGACY_API_URL?.trim();
