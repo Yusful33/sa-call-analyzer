@@ -52,6 +52,8 @@ If you need to compare or re-link to the old projects, JSON backups of the previ
 
 In Vercel, **disconnect** the Git integration from the old projects or archive them, then **connect** **`arize-gtm-stillness`** and **`arize-gtm-stillness-api`** to the same GitHub repo with root directories **`apps/web`** and **`apps/api`**, so pushes deploy the new projects.
 
+For each project, open **Settings → General → Root Directory** and set **`apps/web`** or **`apps/api`** (not the monorepo root). Set the **Framework Preset** to **Next.js** for the web app and **Other** for the API if the dashboard does not auto-detect correctly.
+
 ## Linking this repo locally
 
 ```bash
