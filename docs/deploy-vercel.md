@@ -169,16 +169,16 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 2. **Root Directory:** `apps/web`.
 3. **Framework Preset:** Next.js (auto-detected).
 4. **Environment variables:**
-   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production URL of **`id-pain-api`** (no trailing slash).
-   - **`NEXT_PUBLIC_CREW_API_URL`** — production URL of **`id-pain-api-crew`** (no trailing slash). When unset, the browser sends Crew routes to the same host as **`NEXT_PUBLIC_LEGACY_API_URL`** (fine for local single-server dev).
+   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production URL of the FastAPI worker (no trailing slash), e.g. **`https://stillness.vercel.app`** when the API is deployed there.
+   - **`NEXT_PUBLIC_CREW_API_URL`** — optional second origin for analyze / recap / prospect routes (no trailing slash). When unset, those routes use **`NEXT_PUBLIC_LEGACY_API_URL`** (same host as the main API; typical with LangGraph on one worker).
 
 ### CLI alternative
 
 ```bash
 cd apps/web
 vercel link
-vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # https://id-pain-api.vercel.app
-vercel env add NEXT_PUBLIC_CREW_API_URL production      # https://id-pain-api-crew.vercel.app
+vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # e.g. https://stillness.vercel.app (same host as web if unified)
+vercel env add NEXT_PUBLIC_CREW_API_URL production      # optional second worker; omit if analyze runs on LEGACY host
 vercel deploy --prod
 ```
 

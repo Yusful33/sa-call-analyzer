@@ -10,7 +10,7 @@ From **repository root**:
 cd apps/web && npm install && npm run dev
 ```
 
-Open http://localhost:3000. Set `NEXT_PUBLIC_LEGACY_API_URL` if the API is not on `http://localhost:8080`.
+Open http://localhost:3000. In development the UI calls `http://localhost:8080` unless `NEXT_PUBLIC_LEGACY_API_URL` is set. Production builds default to `https://stillness.vercel.app`; override with `NEXT_PUBLIC_LEGACY_API_URL` if your API lives elsewhere.
 
 ## Docker Compose
 

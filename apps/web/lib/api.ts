@@ -1,5 +1,11 @@
+/** Production FastAPI origin when `NEXT_PUBLIC_LEGACY_API_URL` is unset (Vercel / prod builds). */
+const DEFAULT_PRODUCTION_API = "https://stillness.vercel.app";
+
 const BASE =
-  process.env.NEXT_PUBLIC_LEGACY_API_URL ?? "http://localhost:8080";
+  process.env.NEXT_PUBLIC_LEGACY_API_URL ??
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:8080"
+    : DEFAULT_PRODUCTION_API);
 
 /** CrewAI-heavy routes (second Vercel project when `NEXT_PUBLIC_CREW_API_URL` is set). */
 const CREW_API_PREFIXES = [
