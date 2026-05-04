@@ -5,7 +5,7 @@ This monorepo deploys as **four or five Vercel projects** (same Git repo, differ
 | # | Vercel project | Root Directory | What it is |
 |---|----------------|----------------|------------|
 | 1 | `id-pain-web` | `apps/web` | Next.js 15 UI |
-| 2 | `id-pain-api` | `apps/api` | FastAPI **light** worker (BigQuery, prospect overview, PoC doc, hypothesis when deps present, etc.) |
+| 2 | `id-pain-api` | `apps/api` | FastAPI **light** worker (BigQuery, prospect overview, PoC doc, hypothesis research, etc.) |
 | 3 | `id-pain-api-crew` | `apps/api-crew` | FastAPI **Crew** worker — same `main:app` code copied from `../api` at install; `API_SERVICE_MODE=crew` |
 | 4 | `id-pain-gong-mcp` | `apps/gong-mcp` | Node Vercel Functions for Gong API |
 | 5 (optional) | `id-pain-api-crew-proxy` | `apps/api-crew-proxy` | **Tiny** Starlette + httpx reverse proxy → set **`CREW_BACKEND_URL`** to the full Crew worker (container URL); point **`NEXT_PUBLIC_CREW_API_URL`** at this project when the monolithic crew function is too large |
@@ -118,7 +118,7 @@ vercel deploy --prod
 
 ### Notes
 
-- **`/api/hypothesis-research`** uses LangGraph from core deps; **`pydantic-settings`** is included in the default export for **`hypothesis_tool.config`**. Optional **`hypothesis`** / **`full`** extras still add SQLAlchemy / SQLite / BeautifulSoup for feedback DB and other tooling if you extend the stack.
+- **`/api/hypothesis-research`** uses **LangGraph** (core), **httpx**, and **`pydantic-settings`** (both in the default **`requirements.txt`** export). Optional **`hypothesis`** / **`full`** extras add **SQLAlchemy**, **BeautifulSoup**, and **aiosqlite** for feedback DB / HTML tooling if you extend the stack; they are not required for the research route. **Bundle tradeoff:** the light worker stays smaller without CrewAI/Chroma, but we keep hypothesis-capable deps in the default export so the route works in production.
 - BigQuery: use `GCP_CREDENTIALS_BASE64`; the app writes it to `/tmp` on startup when `VERCEL` is set.
 
 ---

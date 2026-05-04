@@ -920,19 +920,38 @@ async def custom_demo_skill_info():
 # Lazy-initialized hypothesis tool components
 _hypothesis_agent = None
 _hypothesis_init_done = False
+# When agent init fails, surfaced on 503 so operators see import vs setup (not a generic langgraph message).
+_hypothesis_init_failure: str | None = None
 
 
 def _get_hypothesis_agent():
-    """Lazy-init the LangGraph research agent (core deps include LangGraph; optional ``hypothesis`` extra adds DB stack)."""
-    global _hypothesis_agent, _hypothesis_init_done
+    """Lazy-init the LangGraph research agent (see apps/api/pyproject.toml core + ``hypothesis`` extra)."""
+    global _hypothesis_agent, _hypothesis_init_done, _hypothesis_init_failure
     if _hypothesis_init_done:
         return _hypothesis_agent
     _hypothesis_init_done = True
+    _hypothesis_init_failure = None
+
     try:
         from hypothesis_tool.agents.research_agent import ResearchAgent
         from hypothesis_tool.clients.bigquery_client import BigQueryClient as HypBQClient
         from hypothesis_tool.config import get_settings as get_hyp_settings
+    except ModuleNotFoundError as e:
+        missing = getattr(e, "name", None) or str(e)
+        _hypothesis_init_failure = (
+            f"Missing Python module {missing!r} required for hypothesis research. "
+            "Add it to apps/api pyproject dependencies and regenerate requirements.txt."
+        )
+        print(f"❌ Hypothesis research import failed (missing module): {e}")
+        _hypothesis_agent = None
+        return None
+    except ImportError as e:
+        _hypothesis_init_failure = f"Hypothesis research import failed: {e}"
+        print(f"❌ Hypothesis research import failed: {e}")
+        _hypothesis_agent = None
+        return None
 
+    try:
         settings = get_hyp_settings()
         bq = None
         try:
@@ -942,7 +961,8 @@ def _get_hypothesis_agent():
         _hypothesis_agent = ResearchAgent(bq_client=bq)
         print("✅ Hypothesis Research Agent initialized")
     except Exception as e:
-        print(f"❌ Hypothesis agent unavailable: {e}")
+        _hypothesis_init_failure = f"Hypothesis agent setup failed after imports: {e}"
+        print(f"❌ Hypothesis agent setup failed: {e}")
         _hypothesis_agent = None
     return _hypothesis_agent
 
@@ -968,9 +988,8 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Hypothesis research failed to initialize on this worker. "
-                    "Check server logs for the import error (e.g. missing package). "
-                    "Ensure BigQuery credentials are set if CRM-backed research is required."
+                    _hypothesis_init_failure
+                    or "Hypothesis research failed to initialize on this worker; see server logs."
                 ),
             )
     except HTTPException:
@@ -1029,16 +1048,31 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             raise
         except Exception as e:
             import traceback
+
+            from hypothesis_tool.errors import (
+                AmbiguousCompanyError,
+                CompanyNotFoundError,
+                LLMError,
+                SearchAPIError,
+            )
+
             print(f"Hypothesis research error: {traceback.format_exc()}")
+            if isinstance(e, SearchAPIError):
+                raise HTTPException(status_code=503, detail="Web search service unavailable.") from e
+            if isinstance(e, LLMError):
+                raise HTTPException(status_code=503, detail="AI service temporarily unavailable.") from e
+            if isinstance(e, (CompanyNotFoundError, AmbiguousCompanyError)):
+                raise HTTPException(status_code=400, detail=str(e)) from e
+
             error_detail = str(e)
-            if "anthropic" in error_detail.lower() or "claude" in error_detail.lower():
-                raise HTTPException(status_code=503, detail="AI service temporarily unavailable.")
-            elif "brave" in error_detail.lower() or "search" in error_detail.lower():
-                raise HTTPException(status_code=503, detail="Web search service unavailable.")
-            elif "timeout" in error_detail.lower():
-                raise HTTPException(status_code=504, detail="Request timed out. Try again.")
-            else:
-                raise HTTPException(status_code=500, detail=f"Research failed: {error_detail[:200]}")
+            el = error_detail.lower()
+            if "timeout" in el:
+                raise HTTPException(status_code=504, detail="Request timed out. Try again.") from e
+            if "anthropic" in el or "claude" in el:
+                raise HTTPException(status_code=503, detail="AI service temporarily unavailable.") from e
+            if "brave" in el:
+                raise HTTPException(status_code=503, detail="Web search service unavailable.") from e
+            raise HTTPException(status_code=500, detail=f"Research failed: {error_detail[:200]}") from e
 
 
 # ============================================================
