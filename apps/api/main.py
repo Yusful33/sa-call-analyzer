@@ -218,7 +218,7 @@ def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOv
     return maybe_enrich_overview_with_gong_mcp(overview, gong_client, bq_client)
 
 
-if _API_SERVICE_MODE in ("full", "crew"):
+if _API_SERVICE_MODE in ("full", "light", "crew"):
     from routes_crew import register_crew_routes
 
     register_crew_routes(app, gong_client=gong_client, tracer=tracer)
