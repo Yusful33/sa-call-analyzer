@@ -68,6 +68,18 @@ class GongMCPClient:
         self._call_info_cache: Dict[str, Dict] = {}
         self._call_info_cache_times: Dict[str, float] = {}
         self._cache_ttl_seconds = 300  # 5 minutes
+        # When Gong MCP is hosted on Vercel with Deployment Protection, server-side calls need
+        # Protection Bypass for Automation (project Settings → Deployment Protection).
+        self._vercel_mcp_bypass = (
+            os.getenv("GONG_MCP_VERCEL_BYPASS_SECRET")
+            or os.getenv("VERCEL_PROTECTION_BYPASS_SECRET")
+            or ""
+        ).strip()
+
+    def _mcp_request_headers(self) -> Optional[Dict[str, str]]:
+        if not self._vercel_mcp_bypass:
+            return None
+        return {"x-vercel-protection-bypass": self._vercel_mcp_bypass}
 
     def _is_cache_valid(self, cache_times: Dict[str, float], key: str) -> bool:
         """Check if a cached entry is still valid."""
@@ -102,12 +114,23 @@ class GongMCPClient:
             }
         ) as span:
             try:
-                response = requests.post(url, json=payload, timeout=90)
-                
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=90,
+                    headers=self._mcp_request_headers(),
+                )
+
                 span.set_attribute("http.status_code", response.status_code)
-                
+
                 if response.status_code != 200:
-                    error_msg = f"Gong MCP error {response.status_code}: {response.text}"
+                    error_msg = f"Gong MCP error {response.status_code}: {response.text[:2000]}"
+                    if response.status_code == 401 and "Vercel" in response.text:
+                        error_msg += (
+                            " — If Gong MCP runs on Vercel with Deployment Protection enabled, "
+                            "create a **Protection Bypass for Automation** secret on the **gong-mcp** project "
+                            "and set **GONG_MCP_VERCEL_BYPASS_SECRET** on this API to that same value."
+                        )
                     span.set_status(Status(StatusCode.ERROR, error_msg))
                     raise RuntimeError(error_msg)
                 

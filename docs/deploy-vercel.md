@@ -88,6 +88,7 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 | `LLM_MODEL` | Hypothesis tool default | e.g. `claude-sonnet-4-20250514` |
 | `BRAVE_API_KEY` | Brave web search (Hypothesis) | optional |
 | `GONG_MCP_URL` | URL of **id-pain-gong-mcp** | Prefer full URL with scheme, e.g. `https://id-pain-gong-mcp.vercel.app`. If the scheme is omitted (host only), the API prepends `https://` and strips trailing slashes. |
+| `GONG_MCP_VERCEL_BYPASS_SECRET` | **Only if Gong MCP is on Vercel with Deployment Protection** | Same value as **Protection Bypass for Automation** on the **gong-mcp** project ([docs](https://vercel.com/docs/security/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)). The API sends it as header **`x-vercel-protection-bypass`**. Without it, transcript calls return **401** with an HTML “Authentication Required” page. Alternative: turn off Vercel Authentication / protection on **production** for that project. |
 | `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
 | `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
 | `GOOGLE_CLOUD_PROJECT` | BigQuery project id for `BigQueryClient` | e.g. `mkt-analytics-268801` (falls back to this if unset); optional alias **`BQ_PROJECT_ID`** |
