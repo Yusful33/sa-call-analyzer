@@ -118,7 +118,7 @@ vercel deploy --prod
 
 ### Notes
 
-- **`/api/hypothesis-research`** needs the **`hypothesis`** optional dependency group. The Vercel **`requirements.txt`** omits that stack to save space; that route returns **503** with a clear message if those packages are missing.
+- **`/api/hypothesis-research`** uses LangGraph from core deps; **`pydantic-settings`** is included in the default export for **`hypothesis_tool.config`**. Optional **`hypothesis`** / **`full`** extras still add SQLAlchemy / SQLite / BeautifulSoup for feedback DB and other tooling if you extend the stack.
 - BigQuery: use `GCP_CREDENTIALS_BASE64`; the app writes it to `/tmp` on startup when `VERCEL` is set.
 
 ---

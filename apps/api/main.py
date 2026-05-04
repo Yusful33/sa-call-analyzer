@@ -923,7 +923,7 @@ _hypothesis_init_done = False
 
 
 def _get_hypothesis_agent():
-    """Lazy-init the LangGraph research agent (optional deps: ``hypothesis`` extra)."""
+    """Lazy-init the LangGraph research agent (core deps include LangGraph; optional ``hypothesis`` extra adds DB stack)."""
     global _hypothesis_agent, _hypothesis_init_done
     if _hypothesis_init_done:
         return _hypothesis_agent
@@ -942,7 +942,7 @@ def _get_hypothesis_agent():
         _hypothesis_agent = ResearchAgent(bq_client=bq)
         print("✅ Hypothesis Research Agent initialized")
     except Exception as e:
-        print(f"❌ Hypothesis agent unavailable (install `hypothesis` optional deps): {e}")
+        print(f"❌ Hypothesis agent unavailable: {e}")
         _hypothesis_agent = None
     return _hypothesis_agent
 
@@ -967,7 +967,11 @@ async def hypothesis_research(request: HypothesisResearchRequest):
         if agent is None:
             raise HTTPException(
                 status_code=503,
-                detail="Hypothesis research is not enabled in this deployment (missing optional dependencies such as langgraph).",
+                detail=(
+                    "Hypothesis research failed to initialize on this worker. "
+                    "Check server logs for the import error (e.g. missing package). "
+                    "Ensure BigQuery credentials are set if CRM-backed research is required."
+                ),
             )
     except HTTPException:
         raise

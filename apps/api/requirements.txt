@@ -253,15 +253,20 @@ pydantic==2.12.3
     #   langgraph
     #   langsmith
     #   openai
+    #   pydantic-settings
     #   sa-call-analyzer
 pydantic-core==2.41.4
     # via pydantic
+pydantic-settings==2.11.0
+    # via sa-call-analyzer
 python-dateutil==2.9.0.post0
     # via google-cloud-bigquery
 python-docx==1.2.0
     # via sa-call-analyzer
 python-dotenv==1.2.1
-    # via sa-call-analyzer
+    # via
+    #   pydantic-settings
+    #   sa-call-analyzer
 python-pptx==1.0.2
     # via sa-call-analyzer
 pyyaml==6.0.3
@@ -324,7 +329,9 @@ typing-extensions==4.15.0
     #   typing-inspection
     #   uvicorn
 typing-inspection==0.4.2
-    # via pydantic
+    # via
+    #   pydantic
+    #   pydantic-settings
 urllib3==2.3.0
     # via requests
 uuid-utils==0.14.1
