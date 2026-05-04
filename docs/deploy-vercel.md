@@ -87,7 +87,7 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 | `MODEL_NAME` | Default model | e.g. `claude-haiku-4-5` |
 | `LLM_MODEL` | Hypothesis tool default | e.g. `claude-sonnet-4-20250514` |
 | `BRAVE_API_KEY` | Brave web search (Hypothesis) | optional |
-| `GONG_MCP_URL` | URL of **id-pain-gong-mcp** | e.g. `https://id-pain-gong-mcp.vercel.app` |
+| `GONG_MCP_URL` | URL of **id-pain-gong-mcp** | Prefer full URL with scheme, e.g. `https://id-pain-gong-mcp.vercel.app`. If the scheme is omitted (host only), the API prepends `https://` and strips trailing slashes. |
 | `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
 | `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
 | `GOOGLE_CLOUD_PROJECT` | BigQuery project id for `BigQueryClient` | e.g. `mkt-analytics-268801` (falls back to this if unset); optional alias **`BQ_PROJECT_ID`** |

@@ -10,7 +10,7 @@ import time
 import requests
 import contextvars
 from typing import List, Dict, Optional, Generator
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from opentelemetry import trace
@@ -35,6 +35,19 @@ def _debug_log(location, message, data, hypothesis_id=None):
 # #endregion
 
 
+def _normalize_gong_mcp_base_url(url: str) -> str:
+    """
+    Ensure GONG_MCP_URL is usable with HTTP clients: strip whitespace, add
+    https:// when no scheme is present, and strip trailing slashes.
+    """
+    u = (url or "").strip()
+    if not u:
+        return u
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    return u.rstrip("/")
+
+
 class GongMCPClient:
     """Client for the Gong MCP HTTP server."""
 
@@ -46,7 +59,8 @@ class GongMCPClient:
             base_url: Base URL of the Gong MCP HTTP server.
                      Defaults to GONG_MCP_URL env var, or "http://gong-mcp:8080" if not set.
         """
-        self.base_url = base_url or os.getenv("GONG_MCP_URL", "http://gong-mcp:8080")
+        raw = base_url or os.getenv("GONG_MCP_URL", "http://gong-mcp:8080")
+        self.base_url = _normalize_gong_mcp_base_url(raw)
         self.tracer = trace.get_tracer("gong-mcp-client")
         # TTL cache for transcripts and call info (5 minutes default)
         self._transcript_cache: Dict[str, Dict] = {}
@@ -75,7 +89,7 @@ class GongMCPClient:
         Raises:
             RuntimeError: If request fails
         """
-        url = f"{self.base_url}{endpoint}"
+        url = urljoin(self.base_url + "/", endpoint.lstrip("/"))
         
         with self.tracer.start_as_current_span(
             f"gong_mcp_{endpoint.strip('/')}",
