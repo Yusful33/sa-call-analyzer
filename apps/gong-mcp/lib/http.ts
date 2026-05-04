@@ -1,45 +1,55 @@
+import type { VercelApiHandler, VercelRequest, VercelResponse } from "@vercel/node";
 import { GongApiError, GongConfigError } from "./gong";
 
 export type JsonHandler = (body: unknown) => Promise<{ status: number; body: unknown }>;
 
+function parseJsonBody(req: VercelRequest): unknown {
+  const b = req.body;
+  if (b === undefined || b === null) {
+    return undefined;
+  }
+  if (typeof b === "string") {
+    try {
+      return JSON.parse(b);
+    } catch {
+      return undefined;
+    }
+  }
+  return b;
+}
+
 /**
- * Wrap a Vercel Function so we always:
- *   - parse JSON body when present
- *   - return JSON content-type
- *   - translate Gong/auth errors to clean HTTP statuses
+ * Classic Vercel Node handler (`VercelApiHandler`). The Web `{ fetch }` export
+ * is not reliably invoked for `api/*.ts` on the **Other** framework preset.
  */
-/**
- * Vercel Node Functions expect the Web Handler shape `{ fetch(Request) }`
- * (see https://vercel.com/docs/functions/functions-api-reference). A bare
- * `async (req) => Response` default export can be invoked with a non-Request
- * object and crash before our try/catch → FUNCTION_INVOCATION_FAILED.
- */
-export function jsonHandler(handler: JsonHandler) {
-  return {
-    async fetch(req: Request): Promise<Response> {
-      let body: unknown = undefined;
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        try {
-          body = req.headers.get("content-type")?.includes("application/json")
-            ? await req.json()
-            : undefined;
-        } catch {
-          return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-        }
-      }
+export function jsonHandler(handler: JsonHandler): VercelApiHandler {
+  return async (req: VercelRequest, res: VercelResponse): Promise<void> => {
+    let body: unknown = undefined;
+    if (req.method !== "GET" && req.method !== "HEAD") {
       try {
-        const out = await handler(body);
-        return Response.json(out.body, { status: out.status });
-      } catch (err) {
-        if (err instanceof GongConfigError) {
-          return Response.json({ error: err.message }, { status: 500 });
+        const ct = String(req.headers["content-type"] ?? "");
+        if (ct.includes("application/json")) {
+          body = parseJsonBody(req);
         }
-        if (err instanceof GongApiError) {
-          return Response.json({ error: err.message }, { status: err.status });
-        }
-        const message = err instanceof Error ? err.message : String(err);
-        return Response.json({ error: message }, { status: 500 });
+      } catch {
+        res.status(400).json({ error: "Invalid JSON body" });
+        return;
       }
-    },
+    }
+    try {
+      const out = await handler(body);
+      res.status(out.status).json(out.body);
+    } catch (err) {
+      if (err instanceof GongConfigError) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (err instanceof GongApiError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: message });
+    }
   };
 }

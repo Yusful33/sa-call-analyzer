@@ -8,6 +8,7 @@
     "build": "node scripts/ensure-public.mjs"
   },
   "dependencies": {
+    "@vercel/node": "^5.7.15",
     "zod": "^3.23.8"
   },
   "devDependencies": {
