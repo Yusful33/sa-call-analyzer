@@ -19,6 +19,44 @@ SYNTHETIC_DEMO_SKILL = {
     "skill_document": ".claude/skills/arize-synthetic-demo/SKILL.md",
 }
 
+# Enumerations documented in SKILL.md ("Inputs you must gather" + optional scenarios).
+SKILL_FRAMEWORK_VALUES: frozenset[str] = frozenset(
+    {
+        "openai",
+        "anthropic",
+        "bedrock",
+        "vertex",
+        "adk",
+        "langchain",
+        "langgraph",
+        "crewai",
+        "generic",
+    }
+)
+
+SKILL_AGENT_ARCHITECTURE_VALUES: frozenset[str] = frozenset(
+    {
+        "single_agent",
+        "multi_agent_coordinator",
+        "retrieval_pipeline",
+        "rag_rerank",
+        "guarded_rag",
+    }
+)
+
+SKILL_SCENARIO_VALUES: frozenset[str] = frozenset(
+    {
+        "happy_path",
+        "tool_failure",
+        "guardrail_denial",
+        "ambiguity",
+        "execution_failure",
+        "retry",
+        "poisoned_tokens",
+        "no_llm_needed",
+    }
+)
+
 
 def slugify(text: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "_", (text or "").strip().lower()).strip("_")
@@ -76,6 +114,12 @@ def build_synthetic_demo_skill_hints(
     framework: str,
     reasoning: Optional[str],
     additional_context: Optional[str],
+    skill_framework: Optional[str] = None,
+    agent_architecture: Optional[str] = None,
+    num_traces: Optional[int] = None,
+    with_evals: Optional[bool] = None,
+    with_dataset_and_experiments: Optional[bool] = None,
+    scenarios: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     JSON-ready dict aligned with SKILL.md inputs (subset).
@@ -87,37 +131,64 @@ def build_synthetic_demo_skill_hints(
     suggested_dir = f"~/arize-repos/{slug_company}_{slug_uc}"
     proj = f"{slug_company}_{slug_uc}_synthetic"
 
-    skill_fw = _internal_framework_to_skill_framework(framework)
-    arch = _use_case_to_agent_architecture(use_case)
+    skill_fw = (
+        (skill_framework or "").strip().lower()
+        if (skill_framework or "").strip().lower() in SKILL_FRAMEWORK_VALUES
+        else _internal_framework_to_skill_framework(framework)
+    )
+    arch_raw = (agent_architecture or "").strip()
+    arch = (
+        arch_raw
+        if arch_raw in SKILL_AGENT_ARCHITECTURE_VALUES
+        else _use_case_to_agent_architecture(use_case)
+    )
+    if isinstance(num_traces, int) and num_traces > 0:
+        n_traces = min(max(num_traces, 50), 10_000)
+    else:
+        n_traces = 500
+    we = True if with_evals is None else bool(with_evals)
+    wde = True if with_dataset_and_experiments is None else bool(with_dataset_and_experiments)
+    scen_list: list[str] = []
+    if scenarios:
+        scen_list = [s for s in scenarios if s in SKILL_SCENARIO_VALUES]
 
     suggested_prompt_for_claude = (
         "Create a synthetic Arize demo using the **arize-synthetic-demo** skill. "
         f"Use company `{company}`, industry/context `{build_industry_or_use_case(industry=industry, use_case_internal=use_case, additional_context=additional_context)}`, "
-        f"skill framework `{skill_fw}`, agent_architecture `{arch}`, default ~500 traces, output under `{suggested_dir}`. "
-        f"Our app classifier suggested use_case=`{use_case}`, framework=`{framework}`. Reasoning: {reasoning or 'n/a'}."
+        f"skill framework `{skill_fw}`, agent_architecture `{arch}`, ~{n_traces} traces, output under `{suggested_dir}`. "
+        f"Set with_evals={we}, with_dataset_and_experiments={wde}"
+        + (f", scenarios={scen_list}" if scen_list else "")
+        + ". "
+        f"Our app classifier suggested use_case=`{use_case}`, internal orchestration framework=`{framework}`. Reasoning: {reasoning or 'n/a'}."
     )
+
+    rec: dict[str, Any] = {
+        "company_name": company,
+        "industry_or_use_case": build_industry_or_use_case(
+            industry=industry,
+            use_case_internal=use_case,
+            additional_context=additional_context,
+        ),
+        "framework": skill_fw,
+        "agent_architecture": arch,
+        "num_traces": n_traces,
+        "output_dir_example": suggested_dir,
+        "project_name_example": proj,
+        "with_evals": we,
+        "with_dataset_and_experiments": wde,
+        "classification_from_sa_call_analyzer": {
+            "use_case": use_case,
+            "framework": framework,
+            "reasoning": reasoning,
+        },
+    }
+    if scen_list:
+        rec["scenarios"] = scen_list
 
     return {
         "skill": SYNTHETIC_DEMO_SKILL,
         "suggested_prompt_for_claude": suggested_prompt_for_claude.strip(),
-        "recommended_inputs": {
-            "company_name": company,
-            "industry_or_use_case": build_industry_or_use_case(
-                industry=industry,
-                use_case_internal=use_case,
-                additional_context=additional_context,
-            ),
-            "framework": skill_fw,
-            "agent_architecture": arch,
-            "num_traces_default": 500,
-            "output_dir_example": suggested_dir,
-            "project_name_example": proj,
-            "classification_from_sa_call_analyzer": {
-                "use_case": use_case,
-                "framework": framework,
-                "reasoning": reasoning,
-            },
-        },
+        "recommended_inputs": rec,
         "next_steps": [
             "Ensure the Claude **arize-synthetic-demo** skill is available (Solutions resources repo symlink or Cursor skills path).",
             "Paste ``suggested_prompt_for_claude`` into Claude Code / Cursor, or invoke the skill and fill **recommended_inputs**.",

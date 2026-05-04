@@ -564,6 +564,13 @@ class ClassifyDemoRequest(BaseModel):
     additional_context: Optional[str] = None  # User scenario (e.g. HR chatbot 1:1 prep); used to pick use case
     use_case_override: Optional[str] = None
     framework_override: Optional[str] = None
+    # Optional skill-aligned overrides (SKILL.md discrete inputs); omitted values are inferred or defaulted server-side.
+    skill_framework: Optional[str] = None
+    agent_architecture: Optional[str] = None
+    num_traces: Optional[int] = None
+    with_evals: Optional[bool] = None
+    with_dataset_and_experiments: Optional[bool] = None
+    scenarios: Optional[list[str]] = None
 
 
 class SyntheticDemoSkillHints(BaseModel):
@@ -857,6 +864,26 @@ async def classify_demo(request: ClassifyDemoRequest):
 
 
 async def _classify_demo_impl(request: ClassifyDemoRequest):
+    from synthetic_demo_skill import (
+        SKILL_AGENT_ARCHITECTURE_VALUES,
+        SKILL_FRAMEWORK_VALUES,
+        SKILL_SCENARIO_VALUES,
+        build_synthetic_demo_skill_hints,
+    )
+
+    sf = (request.skill_framework or "").strip().lower()
+    if sf and sf not in SKILL_FRAMEWORK_VALUES:
+        raise HTTPException(status_code=400, detail=f"Invalid skill_framework: {request.skill_framework!r}")
+    aa = (request.agent_architecture or "").strip()
+    if aa and aa not in SKILL_AGENT_ARCHITECTURE_VALUES:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid agent_architecture: {request.agent_architecture!r}"
+        )
+    if request.scenarios:
+        bad = [s for s in request.scenarios if s not in SKILL_SCENARIO_VALUES]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"Invalid scenario value(s): {bad}")
+
     overview = None
     industry = None
     try:
@@ -898,16 +925,22 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
     if (ow_fw or "").strip():
         framework = ow_fw.strip()
 
-    from synthetic_demo_skill import build_synthetic_demo_skill_hints
-
-    skill_hints = SyntheticDemoSkillHints(**build_synthetic_demo_skill_hints(
-        company_name=request.account_name,
-        industry=industry,
-        use_case=use_case,
-        framework=framework,
-        reasoning=reasoning,
-        additional_context=getattr(request, "additional_context", None),
-    ))
+    skill_hints = SyntheticDemoSkillHints(
+        **build_synthetic_demo_skill_hints(
+            company_name=request.account_name,
+            industry=industry,
+            use_case=use_case,
+            framework=framework,
+            reasoning=reasoning,
+            additional_context=getattr(request, "additional_context", None),
+            skill_framework=request.skill_framework,
+            agent_architecture=request.agent_architecture,
+            num_traces=request.num_traces,
+            with_evals=request.with_evals,
+            with_dataset_and_experiments=request.with_dataset_and_experiments,
+            scenarios=request.scenarios,
+        )
+    )
 
     return ClassifyDemoResponse(
         use_case=use_case,

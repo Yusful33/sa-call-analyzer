@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-/** Fallback when `NEXT_PUBLIC_LEGACY_API_URL` is unset at build (must match ops default). */
+/** Duplicated in `middleware.ts` (Edge) for API proxy default. */
 const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api-six.vercel.app";
 
 function legacyApiOriginForRewrites(): string {
@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {
     "@opentelemetry/semantic-conventions",
     "@opentelemetry/api",
   ],
+  /**
+   * Fallback rewrites (kept as a safety net). Primary proxy is `middleware.ts`
+   * so `/api/*` reliably reaches FastAPI on Vercel.
+   */
   async rewrites() {
     const origin = legacyApiOriginForRewrites();
     if (!origin || process.env.NODE_ENV === "development") {
