@@ -1,6 +1,6 @@
 # Vercel projects: `arize-gtm-stillness` (web) + `arize-gtm-stillness-api` (API)
 
-This repo was re-linked from **`stillness`** / **`stillness-api`** to new projects under team **`ycattaneo-5285s-projects`**.
+This repo was re-linked from **`stillness`** / **`stillness-api`** to new projects. An earlier pass used the personal team **`ycattaneo-5285s-projects`**. **Production for Arize should live under the `arize-ai` team** (see below); the CLI cannot complete **SAML** login for that team in a non-interactive environment, so you must run the commands locally after `vercel login`.
 
 ## Production URLs
 
@@ -54,11 +54,43 @@ In Vercel, **disconnect** the Git integration from the old projects or archive t
 
 For each project, open **Settings → General → Root Directory** and set **`apps/web`** or **`apps/api`** (not the monorepo root). Set the **Framework Preset** to **Next.js** for the web app and **Other** for the API if the dashboard does not auto-detect correctly.
 
-## Linking this repo locally
+## Deploy under **Arize AI** (`arize-ai` scope)
+
+Run these in your **own terminal** (browser / device flow so SAML can finish):
+
+```bash
+# 1) Authenticate (complete SAML in the browser when prompted)
+vercel login
+
+# 2) Create projects on the Arize team (skip if projects already exist)
+vercel project add arize-gtm-stillness --scope arize-ai
+vercel project add arize-gtm-stillness-api --scope arize-ai
+
+# 3) Link this monorepo
+cd /path/to/sa-call-analyzer/apps/web
+vercel link --yes --scope arize-ai --project arize-gtm-stillness
+
+cd /path/to/sa-call-analyzer/apps/api
+vercel link --yes --scope arize-ai --project arize-gtm-stillness-api
+
+# 4) Production deploy
+cd /path/to/sa-call-analyzer/apps/web && vercel deploy --prod --yes
+cd /path/to/sa-call-analyzer/apps/api  && vercel deploy --prod --yes
+```
+
+Then in the **Arize AI** Vercel dashboard: set **Root Directory** to `apps/web` / `apps/api`, connect **Git**, copy **environment variables**, and adjust **Deployment Protection** if the site should be public.
+
+**CI / automation:** create a token at [vercel.com/account/tokens](https://vercel.com/account/tokens) with access to the **Arize AI** team and run commands with `vercel ... --token "$VERCEL_TOKEN" --scope arize-ai`.
+
+---
+
+## Linking this repo locally (personal team `ycattaneo-5285s-projects`)
+
+Only if you intentionally keep hobby-team deployments:
 
 ```bash
 cd apps/web && vercel link --yes --scope team_IAApnRALp1SX6qOMpAGrXFz4 --project arize-gtm-stillness
 cd apps/api  && vercel link --yes --scope team_IAApnRALp1SX6qOMpAGrXFz4 --project arize-gtm-stillness-api
 ```
 
-(Use `vercel teams ls` / dashboard if your scope slug differs.)
+Use `vercel teams ls` if your scope slug differs.
