@@ -90,17 +90,23 @@ def _normalize_spotlight_next_steps(raw: Any) -> Optional[str]:
 
 class BigQueryClient:
     """Client for fetching prospect data from BigQuery."""
-    
-    PROJECT_ID = "mkt-analytics-268801"
-    
+
+    # Prefer GOOGLE_CLOUD_PROJECT (GCP / Vercel convention), then BQ_PROJECT_ID, then default warehouse.
+    PROJECT_ID = (
+        os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("BQ_PROJECT_ID")
+        or "mkt-analytics-268801"
+    )
+
     def __init__(self):
         """
         Initialize the BigQuery client using Application Default Credentials.
-        
+
         For local development, run:
             gcloud auth application-default login
-            
-        For production/Docker, set GOOGLE_APPLICATION_CREDENTIALS to a service account JSON file.
+
+        For production/Docker/Vercel, set ``GCP_CREDENTIALS_BASE64`` (see ``main.setup_gcp_credentials``)
+        or ``GOOGLE_APPLICATION_CREDENTIALS`` to a service account JSON path.
         """
         try:
             self.client = bigquery.Client(project=self.PROJECT_ID)

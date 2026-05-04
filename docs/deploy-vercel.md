@@ -55,7 +55,7 @@ vercel deploy --prod
 
 > **Honest constraints:**
 > - Vercel Python Functions cap at **300s** by default and a **250 MiB unzipped** bundle per function.
-> - **`id-pain-api`** uses **`API_SERVICE_MODE=light`** (set in `apps/api/vercel.json`) so **CrewAI / Chroma are not imported** and **`requirements.txt`** stays smaller.
+> - **`id-pain-api`** may use **`API_SERVICE_MODE=light`** (smaller import surface) or **`full`** (call analysis + BigQuery on one worker). Check `apps/api/vercel.json` for the value in your deployment.
 > - First-request **cold start** depends on imports (lighter without CrewAI).
 > - **`USE_LITELLM` must be `false` on Vercel`** (no LiteLLM proxy is running). LLM calls use the Anthropic / OpenAI SDKs (or AI Gateway via `OPENAI_BASE_URL` for OpenAI-compatible routes).
 
@@ -80,7 +80,7 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 
 | Name | Why | Notes |
 |------|-----|-------|
-| `API_SERVICE_MODE` | **`light`** is set in `vercel.json` for this project | Override in dashboard only if you know what you are doing |
+| `API_SERVICE_MODE` | Set in `apps/api/vercel.json` (often **`full`** or **`light`**) | Use **`crew`** only on the separate crew worker; **`full`** and **`light`** both initialize BigQuery when credentials exist |
 | `USE_LITELLM` | **Set to `false`** | Required on Vercel — no proxy is running |
 | `ANTHROPIC_API_KEY` | LLM provider | Or use AI Gateway (below) |
 | `OPENAI_API_KEY` | LLM provider | Or use AI Gateway (below) |
@@ -90,7 +90,7 @@ If **`id-pain-api`** still hits the 250 MiB limit (e.g. after adding more deps):
 | `GONG_MCP_URL` | URL of **id-pain-gong-mcp** | e.g. `https://id-pain-gong-mcp.vercel.app` |
 | `ARIZE_API_KEY`, `ARIZE_SPACE_ID` | Trace export | optional |
 | `GCP_CREDENTIALS_BASE64` | base64 of service-account JSON | for BigQuery; written to `/tmp/gcp-credentials.json` at startup |
-| `GOOGLE_CLOUD_PROJECT` | BigQuery project | e.g. `mkt-analytics-268801` |
+| `GOOGLE_CLOUD_PROJECT` | BigQuery project id for `BigQueryClient` | e.g. `mkt-analytics-268801` (falls back to this if unset); optional alias **`BQ_PROJECT_ID`** |
 
 ### Use Vercel AI Gateway (OpenAI-compatible traffic)
 
@@ -111,6 +111,8 @@ vercel link
 vercel env add USE_LITELLM production       # value: false
 vercel env add ANTHROPIC_API_KEY production
 vercel env add GONG_MCP_URL production       # production URL of id-pain-gong-mcp
+vercel env add GCP_CREDENTIALS_BASE64 production   # base64(minified service account JSON)
+vercel env add GOOGLE_CLOUD_PROJECT production     # e.g. mkt-analytics-268801
 vercel deploy --prod
 ```
 
