@@ -46,6 +46,18 @@ const SCENARIO_OPTIONS: { value: string; label: string }[] = [
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+type DemoInsightsResponse = {
+  account_name: string;
+  industry_or_use_case?: string;
+  suggested_framework?: string;
+  suggested_agent_architecture?: string;
+  suggested_tools?: string;
+  additional_context?: string;
+  gong_calls_analyzed: number;
+  data_sources_note?: string;
+  insights_summary?: string;
+};
+
 type SkillFormState = {
   industryOrUseCase: string;
   outputDir: string;
@@ -61,6 +73,14 @@ type SkillFormState = {
   sessionSizeMax: number;
   promptVersionsJson: string;
   experimentGridModels: string;
+};
+
+type AutoFilledFields = {
+  industryOrUseCase?: boolean;
+  skillFramework?: boolean;
+  agentArchitecture?: boolean;
+  toolsText?: boolean;
+  additionalContext?: boolean;
 };
 
 const defaultSkillForm = (): SkillFormState => ({
@@ -125,8 +145,78 @@ export default function DemoTab({
   const [additionalContext, setAdditionalContext] = useState("");
   const [skillForm, setSkillForm] = useState<SkillFormState>(defaultSkillForm);
 
-  const [phase, setPhase] = useState<"input" | "result">("input");
+  const [phase, setPhase] = useState<"lookup" | "input" | "result">("lookup");
   const [classified, setClassified] = useState<any>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [autoFilledFields, setAutoFilledFields] = useState<AutoFilledFields>({});
+  const [insightsSummary, setInsightsSummary] = useState<string | null>(null);
+  const [dataSourcesNote, setDataSourcesNote] = useState<string | null>(null);
+  const [gongCallsAnalyzed, setGongCallsAnalyzed] = useState<number>(0);
+
+  async function fetchInsights() {
+    if (!accountName.trim()) {
+      alert("Please enter a prospect/account name to fetch insights.");
+      return;
+    }
+
+    setInsightsLoading(true);
+    onLoading("Fetching Gong call insights for " + accountName.trim() + "...");
+
+    try {
+      const data = await apiPost<DemoInsightsResponse>("/api/demo-insights", {
+        account_name: accountName.trim(),
+      });
+
+      const newAutoFilled: AutoFilledFields = {};
+      const newForm = { ...skillForm };
+
+      if (data.industry_or_use_case) {
+        newForm.industryOrUseCase = data.industry_or_use_case;
+        newAutoFilled.industryOrUseCase = true;
+      }
+
+      if (data.suggested_framework) {
+        newForm.skillFramework = data.suggested_framework;
+        newAutoFilled.skillFramework = true;
+      }
+
+      if (data.suggested_agent_architecture) {
+        newForm.agentArchitecture = data.suggested_agent_architecture;
+        newAutoFilled.agentArchitecture = true;
+      }
+
+      if (data.suggested_tools) {
+        newForm.toolsText = data.suggested_tools;
+        newAutoFilled.toolsText = true;
+      }
+
+      if (data.additional_context) {
+        setAdditionalContext(data.additional_context);
+        newAutoFilled.additionalContext = true;
+      }
+
+      setSkillForm(newForm);
+      setAutoFilledFields(newAutoFilled);
+      setInsightsSummary(data.insights_summary || null);
+      setDataSourcesNote(data.data_sources_note || null);
+      setGongCallsAnalyzed(data.gong_calls_analyzed);
+      setPhase("input");
+      onLoading("");
+    } catch (err: any) {
+      alert("Error fetching insights: " + (err.message ?? String(err)));
+      onLoading("");
+    } finally {
+      setInsightsLoading(false);
+    }
+  }
+
+  function skipInsights() {
+    setPhase("input");
+    setAutoFilledFields({});
+    setInsightsSummary(null);
+    setDataSourcesNote(null);
+    setGongCallsAnalyzed(0);
+  }
 
   async function runClassify(body: Record<string, unknown>) {
     onLoading("Building skill prompt (CRM/Gong hints + SKILL.md inputs)...");
@@ -228,11 +318,15 @@ export default function DemoTab({
               type="button"
               className="btn-secondary"
               onClick={() => {
-                setPhase("input");
+                setPhase("lookup");
                 setClassified(null);
+                setAutoFilledFields({});
+                setInsightsSummary(null);
+                setDataSourcesNote(null);
+                setGongCallsAnalyzed(0);
               }}
             >
-              Back
+              Start over
             </button>
           </div>
         </div>
@@ -250,10 +344,132 @@ export default function DemoTab({
     );
   }
 
+  if (phase === "lookup") {
+    return (
+      <>
+        <div
+          style={{
+            padding: 16,
+            background: "#e8f4fd",
+            borderRadius: 8,
+            marginBottom: 16,
+            border: "1px solid #b3d9f2",
+          }}
+        >
+          <h3 style={{ margin: "0 0 8px 0", fontSize: "1.1em" }}>Step 1: Fetch Insights from Gong Calls</h3>
+          <p style={{ color: "#555", fontSize: "0.92em", margin: "0 0 12px 0" }}>
+            Enter a prospect/account name to automatically populate the demo builder fields based on insights from
+            Gong calls (use cases mentioned, pain points, industry context, features discussed).
+          </p>
+
+          <div className="input-section" style={{ marginBottom: 12 }}>
+            <label htmlFor="lookupAccountName">Prospect/Account Name</label>
+            <input
+              type="text"
+              id="lookupAccountName"
+              placeholder="e.g., Acme Corp, Tesla, etc."
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !insightsLoading) {
+                  e.preventDefault();
+                  void fetchInsights();
+                }
+              }}
+              disabled={insightsLoading}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void fetchInsights()}
+              disabled={insightsLoading || !accountName.trim()}
+            >
+              {insightsLoading ? "Fetching..." : "Fetch Insights"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={skipInsights}
+              disabled={insightsLoading}
+            >
+              Skip (fill manually)
+            </button>
+          </div>
+        </div>
+
+        <p className="help-text" style={{ fontSize: "0.9em", color: "#666" }}>
+          After fetching, you can review and edit the auto-populated fields before generating the skill prompt.
+        </p>
+      </>
+    );
+  }
+
+  const autoFilledStyle = (isAutoFilled: boolean | undefined) =>
+    isAutoFilled
+      ? {
+          borderColor: "#4caf50",
+          backgroundColor: "#f1f8e9",
+        }
+      : {};
+
+  const autoFilledLabel = (isAutoFilled: boolean | undefined) =>
+    isAutoFilled ? (
+      <span style={{ color: "#4caf50", fontSize: "0.8em", marginLeft: 6 }}>
+        (auto-filled from Gong)
+      </span>
+    ) : null;
+
   return (
     <>
+      {(insightsSummary || dataSourcesNote) && (
+        <div
+          style={{
+            padding: 12,
+            background: "#e8f4fd",
+            borderRadius: 8,
+            marginBottom: 16,
+            border: "1px solid #b3d9f2",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <strong style={{ fontSize: "0.95em" }}>
+                Insights from {gongCallsAnalyzed} Gong call{gongCallsAnalyzed !== 1 ? "s" : ""}
+              </strong>
+              {insightsSummary && (
+                <p style={{ margin: "6px 0 0 0", fontSize: "0.9em", color: "#333" }}>{insightsSummary}</p>
+              )}
+              {dataSourcesNote && (
+                <p style={{ margin: "4px 0 0 0", fontSize: "0.82em", color: "#666", fontStyle: "italic" }}>
+                  {dataSourcesNote}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                color: "#1976d2",
+                cursor: "pointer",
+                fontSize: "0.85em",
+                padding: "4px 8px",
+              }}
+              onClick={() => setPhase("lookup")}
+            >
+              Change account
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="input-section">
-        <label htmlFor="demoAccountName">company_name (SKILL.md)</label>
+        <label htmlFor="demoAccountName">
+          company_name (SKILL.md)
+        </label>
         <input
           type="text"
           id="demoAccountName"
@@ -268,26 +484,43 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoIndustryUseCase">industry_or_use_case (SKILL.md — required)</label>
+        <label htmlFor="demoIndustryUseCase">
+          industry_or_use_case (SKILL.md — required)
+          {autoFilledLabel(autoFilledFields.industryOrUseCase)}
+        </label>
         <textarea
           id="demoIndustryUseCase"
           rows={3}
           placeholder='e.g., retail banking fraud triage agent, insurance claims adjudication'
           value={skillForm.industryOrUseCase}
-          onChange={(e) => setSkillForm((s) => ({ ...s, industryOrUseCase: e.target.value }))}
+          onChange={(e) => {
+            setSkillForm((s) => ({ ...s, industryOrUseCase: e.target.value }));
+            if (autoFilledFields.industryOrUseCase) {
+              setAutoFilledFields((f) => ({ ...f, industryOrUseCase: false }));
+            }
+          }}
+          style={autoFilledStyle(autoFilledFields.industryOrUseCase)}
         />
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoSkillFramework">framework (SKILL.md — required)</label>
+        <label htmlFor="demoSkillFramework">
+          framework (SKILL.md — required)
+          {autoFilledLabel(autoFilledFields.skillFramework)}
+        </label>
         <p className="help-text" style={{ marginTop: 4, marginBottom: 6 }}>
           One of: openai | anthropic | bedrock | vertex | adk | langchain | langgraph | crewai | generic
         </p>
         <select
           id="demoSkillFramework"
-          style={{ width: "100%", marginTop: 4 }}
+          style={{ width: "100%", marginTop: 4, ...autoFilledStyle(autoFilledFields.skillFramework) }}
           value={skillForm.skillFramework}
-          onChange={(e) => setSkillForm((s) => ({ ...s, skillFramework: e.target.value }))}
+          onChange={(e) => {
+            setSkillForm((s) => ({ ...s, skillFramework: e.target.value }));
+            if (autoFilledFields.skillFramework) {
+              setAutoFilledFields((f) => ({ ...f, skillFramework: false }));
+            }
+          }}
         >
           {SKILL_FRAMEWORK_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -298,12 +531,20 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoAgentArch">agent_architecture (SKILL.md — required)</label>
+        <label htmlFor="demoAgentArch">
+          agent_architecture (SKILL.md — required)
+          {autoFilledLabel(autoFilledFields.agentArchitecture)}
+        </label>
         <select
           id="demoAgentArch"
-          style={{ width: "100%", marginTop: 6 }}
+          style={{ width: "100%", marginTop: 6, ...autoFilledStyle(autoFilledFields.agentArchitecture) }}
           value={skillForm.agentArchitecture}
-          onChange={(e) => setSkillForm((s) => ({ ...s, agentArchitecture: e.target.value }))}
+          onChange={(e) => {
+            setSkillForm((s) => ({ ...s, agentArchitecture: e.target.value }));
+            if (autoFilledFields.agentArchitecture) {
+              setAutoFilledFields((f) => ({ ...f, agentArchitecture: false }));
+            }
+          }}
         >
           {AGENT_ARCHITECTURE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -341,7 +582,10 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoToolsText">tools (SKILL.md — optional)</label>
+        <label htmlFor="demoToolsText">
+          tools (SKILL.md — optional)
+          {autoFilledLabel(autoFilledFields.toolsText)}
+        </label>
         <p className="help-text" style={{ marginTop: 4, marginBottom: 6 }}>
           One tool per line: <code>tool_name — one-line description</code> (also accepts <code> - </code> or{" "}
           <code>: </code>).
@@ -350,7 +594,13 @@ export default function DemoTab({
           id="demoToolsText"
           rows={4}
           value={skillForm.toolsText}
-          onChange={(e) => setSkillForm((s) => ({ ...s, toolsText: e.target.value }))}
+          onChange={(e) => {
+            setSkillForm((s) => ({ ...s, toolsText: e.target.value }));
+            if (autoFilledFields.toolsText) {
+              setAutoFilledFields((f) => ({ ...f, toolsText: false }));
+            }
+          }}
+          style={autoFilledStyle(autoFilledFields.toolsText)}
         />
       </div>
 
@@ -476,13 +726,22 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoAdditionalContext">additional_context (app-only — not in SKILL.md)</label>
+        <label htmlFor="demoAdditionalContext">
+          additional_context (app-only — not in SKILL.md)
+          {autoFilledLabel(autoFilledFields.additionalContext)}
+        </label>
         <textarea
           id="demoAdditionalContext"
           rows={3}
           placeholder="Extra notes for the pasted Claude prompt and recommended_inputs JSON (deal context, stakeholder names, etc.)."
           value={additionalContext}
-          onChange={(e) => setAdditionalContext(e.target.value)}
+          onChange={(e) => {
+            setAdditionalContext(e.target.value);
+            if (autoFilledFields.additionalContext) {
+              setAutoFilledFields((f) => ({ ...f, additionalContext: false }));
+            }
+          }}
+          style={autoFilledStyle(autoFilledFields.additionalContext)}
         />
       </div>
 

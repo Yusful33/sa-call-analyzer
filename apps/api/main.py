@@ -1051,6 +1051,241 @@ async def custom_demo_skill_info():
     return static_skill_info()
 
 
+# ============================================================
+# Demo Insights (auto-populate demo builder from Gong calls)
+# ============================================================
+
+
+class DemoInsightsRequest(BaseModel):
+    """Request to fetch demo builder insights from Gong calls."""
+
+    account_name: str
+
+
+class DemoInsightsResponse(BaseModel):
+    """Response with suggested demo builder field values from Gong analysis."""
+
+    account_name: str
+    industry_or_use_case: Optional[str] = None
+    suggested_framework: Optional[str] = None
+    suggested_agent_architecture: Optional[str] = None
+    suggested_tools: Optional[str] = None
+    additional_context: Optional[str] = None
+    gong_calls_analyzed: int = 0
+    data_sources_note: Optional[str] = None
+    insights_summary: Optional[str] = None
+
+
+def _extract_demo_insights_with_llm(
+    signals: list[str], account_name: str
+) -> dict[str, Optional[str]]:
+    """Use LLM to extract demo builder suggestions from Gong call signals."""
+    from openai_compat_completion import completion as llm_completion
+
+    combined_text = "\n".join(signals[:40])
+
+    prompt = f"""You are analyzing sales call transcripts and summaries for {account_name} to suggest demo configuration for an AI observability platform demo.
+
+Based on the following conversation signals from sales calls, extract:
+
+1. **industry_or_use_case**: A specific description of their AI/ML use case and industry. Be specific and detailed. Examples:
+   - "Healthcare claims processing with RAG-based document analysis"
+   - "Financial services fraud detection using multi-agent orchestration"
+   - "E-commerce product recommendations with real-time embedding search"
+   - "Legal document review using retrieval-augmented generation"
+
+2. **suggested_framework**: One of: openai, anthropic, bedrock, vertex, adk, langchain, langgraph, crewai, generic
+   - Look for mentions of specific LLM providers or agent frameworks
+   - Default to "langgraph" if no framework is mentioned
+
+3. **suggested_agent_architecture**: One of: single_agent, multi_agent_coordinator, retrieval_pipeline, rag_rerank, guarded_rag
+   - Infer from their described system architecture
+   - Default to "single_agent" if unclear
+
+4. **suggested_tools**: A list of tools/capabilities their system uses, one per line with description. Examples:
+   - "search_documents — Retrieves relevant documents from knowledge base"
+   - "execute_sql — Runs SQL queries against data warehouse"
+   - "send_notification — Sends alerts to stakeholders"
+   Leave empty if no specific tools are mentioned.
+
+5. **additional_context**: Key pain points, requirements, or context that would help customize the demo:
+   - Compliance requirements (SOC2, HIPAA, etc.)
+   - Scale/volume expectations
+   - Integration requirements
+   - Specific features they're interested in
+
+6. **insights_summary**: A 2-3 sentence summary of what you learned about their AI/ML initiatives and what they're looking for.
+
+## Conversation Signals:
+{combined_text}
+
+## Instructions:
+Return ONLY a JSON object with these exact fields:
+- "industry_or_use_case": string (required, be specific)
+- "suggested_framework": string (one of the allowed values)
+- "suggested_agent_architecture": string (one of the allowed values)
+- "suggested_tools": string (newline-separated tools, or empty string)
+- "additional_context": string (key context and requirements)
+- "insights_summary": string (brief summary)
+
+Return only valid JSON, no markdown formatting or code blocks."""
+
+    try:
+        model = os.environ.get("DEMO_INSIGHTS_MODEL", "claude-haiku-4-5")
+
+        response = llm_completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
+            temperature=0,
+        )
+
+        response_text = response.choices[0].message.content.strip()
+
+        if response_text.startswith("```"):
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+            response_text = response_text.strip()
+
+        result = json.loads(response_text)
+
+        valid_frameworks = {"openai", "anthropic", "bedrock", "vertex", "adk", "langchain", "langgraph", "crewai", "generic"}
+        valid_architectures = {"single_agent", "multi_agent_coordinator", "retrieval_pipeline", "rag_rerank", "guarded_rag"}
+
+        fw = result.get("suggested_framework", "").strip().lower()
+        if fw not in valid_frameworks:
+            fw = "langgraph"
+
+        arch = result.get("suggested_agent_architecture", "").strip()
+        if arch not in valid_architectures:
+            arch = "single_agent"
+
+        return {
+            "industry_or_use_case": result.get("industry_or_use_case", "").strip() or None,
+            "suggested_framework": fw,
+            "suggested_agent_architecture": arch,
+            "suggested_tools": result.get("suggested_tools", "").strip() or None,
+            "additional_context": result.get("additional_context", "").strip() or None,
+            "insights_summary": result.get("insights_summary", "").strip() or None,
+        }
+
+    except Exception as e:
+        print(f"⚠️ LLM demo insights extraction failed: {e}")
+        return {
+            "industry_or_use_case": None,
+            "suggested_framework": "langgraph",
+            "suggested_agent_architecture": "single_agent",
+            "suggested_tools": None,
+            "additional_context": None,
+            "insights_summary": None,
+        }
+
+
+@app.post("/api/demo-insights", response_model=DemoInsightsResponse)
+async def get_demo_insights(request: DemoInsightsRequest):
+    """
+    Fetch Gong call insights for a prospect to auto-populate demo builder fields.
+
+    Analyzes recent Gong calls for the account and extracts:
+    - Industry/use case description
+    - Suggested framework and architecture
+    - Tools mentioned
+    - Key context and pain points
+    """
+    with api_span("get_demo_insights", account_name=request.account_name):
+        if not request.account_name.strip():
+            raise HTTPException(status_code=400, detail="account_name is required.")
+
+        overview = None
+        signals: list[str] = []
+        gong_calls_analyzed = 0
+        data_sources_note = None
+
+        try:
+            def _bq_lookup():
+                from bigquery_client import BigQueryClient
+                bq = BigQueryClient()
+                return bq.get_prospect_overview(account_name=request.account_name.strip())
+
+            overview = await asyncio.wait_for(asyncio.to_thread(_bq_lookup), timeout=30.0)
+            overview = _with_optional_gong_mcp_enrichment(overview)
+        except (asyncio.TimeoutError, Exception) as e:
+            print(f"⚠️ Demo insights BQ lookup failed: {e}")
+            overview = None
+
+        if overview:
+            if overview.gong_summary and overview.gong_summary.recent_calls:
+                gong_calls_analyzed = len(overview.gong_summary.recent_calls)
+                for call in overview.gong_summary.recent_calls:
+                    if getattr(call, "call_title", None):
+                        signals.append(f"Call title: {call.call_title}")
+                    if call.spotlight_brief:
+                        signals.append(f"Call summary: {call.spotlight_brief}")
+                    if call.spotlight_key_points:
+                        for kp in call.spotlight_key_points:
+                            if isinstance(kp, str):
+                                signals.append(f"Key point: {kp}")
+                            elif isinstance(kp, list):
+                                signals.extend([f"Key point: {str(item)}" for item in kp if item])
+                    if getattr(call, "spotlight_next_steps", None):
+                        signals.append(f"Next steps: {call.spotlight_next_steps}")
+                    if getattr(call, "spotlight_outcome", None):
+                        signals.append(f"Outcome: {call.spotlight_outcome}")
+                    if getattr(call, "transcript_snippet", None):
+                        signals.append(f"Transcript excerpt: {call.transcript_snippet}")
+
+            if overview.gong_summary and overview.gong_summary.key_themes:
+                signals.extend([f"Theme: {t}" for t in overview.gong_summary.key_themes])
+
+            if overview.sales_engagement and overview.sales_engagement.deal_summary:
+                ds = overview.sales_engagement.deal_summary
+                if ds.key_topics_discussed:
+                    signals.extend([f"Deal topic: {t}" for t in ds.key_topics_discussed])
+                if ds.current_state:
+                    signals.append(f"Deal state: {ds.current_state}")
+
+            if overview.salesforce:
+                sf = overview.salesforce
+                if sf.industry:
+                    signals.append(f"Industry: {sf.industry}")
+                if sf.description:
+                    signals.append(f"Company description: {sf.description}")
+                if sf.is_using_llms:
+                    signals.append(f"Using LLMs: {sf.is_using_llms}")
+                if sf.customer_notes:
+                    signals.append(f"Customer notes: {sf.customer_notes}")
+
+            if gong_calls_analyzed > 0:
+                data_sources_note = f"Analyzed {gong_calls_analyzed} Gong call(s) and CRM data."
+            elif overview.data_sources_available:
+                data_sources_note = "No Gong calls found; used CRM data only."
+            else:
+                data_sources_note = "No data found for this account."
+        else:
+            data_sources_note = "Could not load prospect data (BigQuery timeout or no match)."
+
+        if not signals:
+            return DemoInsightsResponse(
+                account_name=request.account_name.strip(),
+                gong_calls_analyzed=0,
+                data_sources_note=data_sources_note or "No data available for this account.",
+                insights_summary="No Gong calls or CRM data found for this account. Please fill in the fields manually.",
+            )
+
+        insights = _extract_demo_insights_with_llm(signals, request.account_name.strip())
+
+        return DemoInsightsResponse(
+            account_name=request.account_name.strip(),
+            industry_or_use_case=insights.get("industry_or_use_case"),
+            suggested_framework=insights.get("suggested_framework"),
+            suggested_agent_architecture=insights.get("suggested_agent_architecture"),
+            suggested_tools=insights.get("suggested_tools"),
+            additional_context=insights.get("additional_context"),
+            gong_calls_analyzed=gong_calls_analyzed,
+            data_sources_note=data_sources_note,
+            insights_summary=insights.get("insights_summary"),
+        )
 
 
 # ============================================================
