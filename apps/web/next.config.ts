@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 /** Duplicated in `middleware.ts` (Edge) for API proxy default. */
-const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api-six.vercel.app";
+const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
 
 function legacyApiOriginForRewrites(): string {
   const raw = process.env.NEXT_PUBLIC_LEGACY_API_URL?.trim();
