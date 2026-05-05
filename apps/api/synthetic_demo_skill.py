@@ -106,6 +106,13 @@ def build_industry_or_use_case(
     return " ".join(parts)
 
 
+def _slug_for_output_dir(company: str, industry_or_use_case: str, use_case_fallback: str) -> str:
+    iou = (industry_or_use_case or "").strip()
+    if iou:
+        return slugify(iou)
+    return slugify(use_case_fallback)
+
+
 def build_synthetic_demo_skill_hints(
     *,
     company_name: str,
@@ -114,12 +121,19 @@ def build_synthetic_demo_skill_hints(
     framework: str,
     reasoning: Optional[str],
     additional_context: Optional[str],
+    industry_or_use_case_user: Optional[str] = None,
+    output_dir_user: Optional[str] = None,
     skill_framework: Optional[str] = None,
     agent_architecture: Optional[str] = None,
     num_traces: Optional[int] = None,
     with_evals: Optional[bool] = None,
     with_dataset_and_experiments: Optional[bool] = None,
     scenarios: Optional[list[str]] = None,
+    tools: Optional[list[dict[str, str]]] = None,
+    prompt_template_names: Optional[list[str]] = None,
+    session_size_range: Optional[tuple[int, int]] = None,
+    prompt_versions: Optional[dict[str, float]] = None,
+    experiment_grid_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     JSON-ready dict aligned with SKILL.md inputs (subset).
@@ -128,8 +142,13 @@ def build_synthetic_demo_skill_hints(
     company = (company_name or "").strip() or "AcmeCorp"
     slug_company = slugify(company)
     slug_uc = slugify(use_case)
-    suggested_dir = f"~/arize-repos/{slug_company}_{slug_uc}"
-    proj = f"{slug_company}_{slug_uc}_synthetic"
+    slug_out = _slug_for_output_dir(company, industry_or_use_case_user or "", use_case)
+    suggested_dir = (
+        (output_dir_user or "").strip()
+        if (output_dir_user or "").strip()
+        else f"~/arize-repos/{slug_company}_{slug_out}"
+    )
+    proj = f"{slug_company}_{slug_out}_synthetic"
 
     skill_fw = (
         (skill_framework or "").strip().lower()
@@ -152,27 +171,45 @@ def build_synthetic_demo_skill_hints(
     if scenarios:
         scen_list = [s for s in scenarios if s in SKILL_SCENARIO_VALUES]
 
+    iou_primary = (industry_or_use_case_user or "").strip() or build_industry_or_use_case(
+        industry=industry,
+        use_case_internal=use_case,
+        additional_context=None,
+    )
+
+    extras: list[str] = []
+    if (additional_context or "").strip():
+        extras.append(f"Additional context (app field): {additional_context.strip()}")
+    if tools:
+        extras.append(f"tools={tools!r}")
+    if prompt_template_names:
+        extras.append(f"prompt_template_names={prompt_template_names!r}")
+    if session_size_range:
+        extras.append(f"session_size_range={session_size_range!r}")
+    if prompt_versions:
+        extras.append(f"prompt_versions={prompt_versions!r}")
+    if experiment_grid_models:
+        extras.append(f"experiment_grid_models={experiment_grid_models!r}")
+    extras_s = (" " + " ".join(extras)) if extras else ""
+
     suggested_prompt_for_claude = (
         "Create a synthetic Arize demo using the **arize-synthetic-demo** skill. "
-        f"Use company `{company}`, industry/context `{build_industry_or_use_case(industry=industry, use_case_internal=use_case, additional_context=additional_context)}`, "
-        f"skill framework `{skill_fw}`, agent_architecture `{arch}`, ~{n_traces} traces, output under `{suggested_dir}`. "
+        f"Use company `{company}`, industry_or_use_case `{iou_primary}`, "
+        f"framework `{skill_fw}`, agent_architecture `{arch}`, num_traces ~{n_traces}, output_dir `{suggested_dir}`. "
         f"Set with_evals={we}, with_dataset_and_experiments={wde}"
         + (f", scenarios={scen_list}" if scen_list else "")
+        + extras_s
         + ". "
-        f"Our app classifier suggested use_case=`{use_case}`, internal orchestration framework=`{framework}`. Reasoning: {reasoning or 'n/a'}."
+        f"(Background classification from CRM/Gong, if any: use_case=`{use_case}`, orchestration=`{framework}` — {reasoning or 'n/a'}.)"
     )
 
     rec: dict[str, Any] = {
         "company_name": company,
-        "industry_or_use_case": build_industry_or_use_case(
-            industry=industry,
-            use_case_internal=use_case,
-            additional_context=additional_context,
-        ),
+        "industry_or_use_case": iou_primary,
         "framework": skill_fw,
         "agent_architecture": arch,
         "num_traces": n_traces,
-        "output_dir_example": suggested_dir,
+        "output_dir": suggested_dir,
         "project_name_example": proj,
         "with_evals": we,
         "with_dataset_and_experiments": wde,
@@ -182,8 +219,20 @@ def build_synthetic_demo_skill_hints(
             "reasoning": reasoning,
         },
     }
+    if (additional_context or "").strip():
+        rec["additional_context"] = additional_context.strip()
     if scen_list:
         rec["scenarios"] = scen_list
+    if tools:
+        rec["tools"] = tools
+    if prompt_template_names:
+        rec["prompt_template_names"] = prompt_template_names
+    if session_size_range:
+        rec["session_size_range"] = [session_size_range[0], session_size_range[1]]
+    if prompt_versions:
+        rec["prompt_versions"] = prompt_versions
+    if experiment_grid_models:
+        rec["experiment_grid_models"] = experiment_grid_models
 
     return {
         "skill": SYNTHETIC_DEMO_SKILL,

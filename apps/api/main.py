@@ -557,20 +557,75 @@ AVAILABLE_FRAMEWORKS = [
 ]
 
 
+def _parse_demo_tools_text(text: str | None) -> list[dict[str, str]]:
+    """SKILL.md optional ``tools`` — one entry per non-empty line: ``name — description`` (or ``-``, ``:``)."""
+    if not (text or "").strip():
+        return []
+    out: list[dict[str, str]] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        for sep in (" — ", " – ", " - ", ": ", "\t"):
+            if sep in line:
+                a, b = line.split(sep, 1)
+                out.append({"name": a.strip(), "description": b.strip()})
+                break
+        else:
+            out.append({"name": line, "description": ""})
+        if len(out) >= 16:
+            break
+    return out
+
+
+def _parse_demo_csv(text: str | None) -> list[str]:
+    if not (text or "").strip():
+        return []
+    return [p.strip() for p in (text or "").split(",") if p.strip()]
+
+
+def _parse_demo_prompt_versions(text: str | None) -> dict[str, float] | None:
+    if not (text or "").strip():
+        return None
+    try:
+        d = json.loads(text)
+        if not isinstance(d, dict):
+            return None
+        return {str(k): float(v) for k, v in d.items()}
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+
 class ClassifyDemoRequest(BaseModel):
-    """Request to classify a prospect's use case for the external **arize-synthetic-demo** skill."""
+    """Request to classify a prospect for the external **arize-synthetic-demo** skill (SKILL.md inputs + CRM hints)."""
 
     account_name: str
-    additional_context: Optional[str] = None  # User scenario (e.g. HR chatbot 1:1 prep); used to pick use case
-    use_case_override: Optional[str] = None
-    framework_override: Optional[str] = None
-    # Optional skill-aligned overrides (SKILL.md discrete inputs); omitted values are inferred or defaulted server-side.
-    skill_framework: Optional[str] = None
-    agent_architecture: Optional[str] = None
+    # SKILL.md required #2 — primary free-text use case / vertical (not the internal demo-pattern taxonomy).
+    industry_or_use_case: str
+    # App-only extension: merged into prompts and returned as ``additional_context`` in recommended_inputs.
+    additional_context: Optional[str] = None
+    # SKILL.md required #6 — explicit output directory for generated files.
+    output_dir: Optional[str] = None
+    # SKILL.md required #3–#4 — LLM stack and span-tree shape (must match skill enums).
+    skill_framework: str
+    agent_architecture: str
     num_traces: Optional[int] = None
     with_evals: Optional[bool] = None
     with_dataset_and_experiments: Optional[bool] = None
     scenarios: Optional[list[str]] = None
+    # SKILL.md optional — newline-separated "name — description" (or "name: desc") per line; max 16 lines parsed.
+    tools_text: Optional[str] = None
+    # Comma-separated template names.
+    prompt_template_names: Optional[str] = None
+    session_size_min: Optional[int] = None
+    session_size_max: Optional[int] = None
+    # JSON object, e.g. {"v1.0": 0.7, "v2.0": 0.3}
+    prompt_versions_json: Optional[str] = None
+    # Comma-separated model slugs for the 2-model experiment grid override.
+    experiment_grid_models: Optional[str] = None
+    # Deprecated: kept for backward compatibility; ignored when industry_or_use_case + skill fields are sent.
+    use_case_override: Optional[str] = None
+    framework_override: Optional[str] = None
 
 
 class SyntheticDemoSkillHints(BaseModel):
@@ -871,11 +926,17 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
         build_synthetic_demo_skill_hints,
     )
 
-    sf = (request.skill_framework or "").strip().lower()
-    if sf and sf not in SKILL_FRAMEWORK_VALUES:
+    if not (request.industry_or_use_case or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="industry_or_use_case is required (SKILL.md: free-text industry or use case).",
+        )
+
+    sf = request.skill_framework.strip().lower()
+    if sf not in SKILL_FRAMEWORK_VALUES:
         raise HTTPException(status_code=400, detail=f"Invalid skill_framework: {request.skill_framework!r}")
-    aa = (request.agent_architecture or "").strip()
-    if aa and aa not in SKILL_AGENT_ARCHITECTURE_VALUES:
+    aa = request.agent_architecture.strip()
+    if aa not in SKILL_AGENT_ARCHITECTURE_VALUES:
         raise HTTPException(
             status_code=400, detail=f"Invalid agent_architecture: {request.agent_architecture!r}"
         )
@@ -883,6 +944,26 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
         bad = [s for s in request.scenarios if s not in SKILL_SCENARIO_VALUES]
         if bad:
             raise HTTPException(status_code=400, detail=f"Invalid scenario value(s): {bad}")
+
+    tools_parsed = _parse_demo_tools_text(request.tools_text)
+    prompt_names = _parse_demo_csv(request.prompt_template_names)
+    exp_models = _parse_demo_csv(request.experiment_grid_models)
+    pv = _parse_demo_prompt_versions(request.prompt_versions_json)
+    if (request.prompt_versions_json or "").strip() and pv is None:
+        raise HTTPException(
+            status_code=400,
+            detail="prompt_versions_json must be valid JSON object mapping version strings to floats, "
+            'e.g. {"v1.0": 0.7, "v2.0": 0.3}',
+        )
+
+    smin, smax = request.session_size_min, request.session_size_max
+    session_range: tuple[int, int] | None = None
+    if smin is not None or smax is not None:
+        lo = 3 if smin is None else max(1, min(50, int(smin)))
+        hi = 6 if smax is None else max(1, min(50, int(smax)))
+        if lo > hi:
+            lo, hi = hi, lo
+        session_range = (lo, hi)
 
     overview = None
     industry = None
@@ -933,12 +1014,19 @@ async def _classify_demo_impl(request: ClassifyDemoRequest):
             framework=framework,
             reasoning=reasoning,
             additional_context=getattr(request, "additional_context", None),
+            industry_or_use_case_user=request.industry_or_use_case.strip(),
+            output_dir_user=request.output_dir,
             skill_framework=request.skill_framework,
             agent_architecture=request.agent_architecture,
             num_traces=request.num_traces,
             with_evals=request.with_evals,
             with_dataset_and_experiments=request.with_dataset_and_experiments,
             scenarios=request.scenarios,
+            tools=tools_parsed or None,
+            prompt_template_names=prompt_names or None,
+            session_size_range=session_range,
+            prompt_versions=pv,
+            experiment_grid_models=exp_models or None,
         )
     )
 
