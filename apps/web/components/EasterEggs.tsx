@@ -19,9 +19,9 @@ export default function EasterEggs({
     serenityActive: false,
   });
   
-  const konamiSequence = useRef<string[]>([]);
+  const sKeyCount = useRef(0);
+  const sKeyTimer = useRef<NodeJS.Timeout>();
   const typedKeys = useRef<string>("");
-  const konamiCode = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
   
   const triggerKonami = useCallback(() => {
     setState(s => ({ ...s, konamiActive: true }));
@@ -45,21 +45,28 @@ export default function EasterEggs({
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       
-      konamiSequence.current.push(key);
-      if (konamiSequence.current.length > 10) {
-        konamiSequence.current.shift();
-      }
-      if (konamiSequence.current.join(",") === konamiCode.join(",")) {
-        triggerKonami();
-        konamiSequence.current = [];
+      // "S" key 3 times triggers sparkle celebration
+      if (key === "s") {
+        sKeyCount.current++;
+        if (sKeyTimer.current) clearTimeout(sKeyTimer.current);
+        
+        if (sKeyCount.current >= 3) {
+          triggerKonami();
+          sKeyCount.current = 0;
+        } else {
+          sKeyTimer.current = setTimeout(() => {
+            sKeyCount.current = 0;
+          }, 1500);
+        }
       }
       
+      // "zen" triggers lotus animation
       if (key.length === 1 && /[a-z]/.test(key)) {
         typedKeys.current += key;
-        if (typedKeys.current.length > 20) {
-          typedKeys.current = typedKeys.current.slice(-20);
+        if (typedKeys.current.length > 10) {
+          typedKeys.current = typedKeys.current.slice(-10);
         }
-        if (typedKeys.current.includes("serenity")) {
+        if (typedKeys.current.includes("zen")) {
           triggerSerenity();
           typedKeys.current = "";
         }

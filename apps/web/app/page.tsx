@@ -41,7 +41,7 @@ export default function Home() {
   const [resultOwner, setResultOwner] = useState<TabId | null>(null);
   const [suggestUi, setSuggestUi] = useState<SuggestUi | null>(null);
   const [innerPeaceMode, setInnerPeaceMode] = useState(false);
-  const { handleClick: handleEmojiClick, triggered: emojiTriggered } = useEmojiClick(7);
+  const { handleClick: handleEmojiClick, triggered: emojiTriggered } = useEmojiClick(3);
 
   useEffect(() => {
     if (emojiTriggered) {

@@ -366,14 +366,48 @@ body.inner-peace-mode .header {
 .header h1 .clickable-emoji {
   cursor: pointer;
   display: inline-block;
-  transition: transform 0.2s;
+  transition: transform 0.2s, text-shadow 0.3s;
   user-select: none;
+  position: relative;
 }
 
 .header h1 .clickable-emoji:hover {
-  transform: scale(1.1);
+  transform: scale(1.15);
+  animation: emoji-shimmer 1.5s ease-in-out infinite;
+  text-shadow: 0 0 15px rgba(255, 215, 0, 0.6), 0 0 25px rgba(255, 182, 193, 0.4);
 }
 
 .header h1 .clickable-emoji:active {
   transform: scale(0.95);
+}
+
+@keyframes emoji-shimmer {
+  0%, 100% { 
+    filter: brightness(1) drop-shadow(0 0 5px rgba(255, 215, 0, 0.3));
+  }
+  50% { 
+    filter: brightness(1.2) drop-shadow(0 0 12px rgba(255, 215, 0, 0.6));
+  }
+}
+
+/* Subtle hint tooltip on emoji hover */
+.header h1 .clickable-emoji::after {
+  content: "✨";
+  position: absolute;
+  top: -8px;
+  right: -12px;
+  font-size: 0.4em;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.header h1 .clickable-emoji:hover::after {
+  opacity: 1;
+  animation: sparkle-hint 0.8s ease-in-out infinite;
+}
+
+@keyframes sparkle-hint {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.2) rotate(15deg); }
 }
