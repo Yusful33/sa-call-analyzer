@@ -5,9 +5,12 @@
 #   1. Copy .env.example to .env and add your API keys
 #   2. Run: docker compose up
 #
+# Custom ports (if defaults conflict):
+#   API_PORT=8090 WEB_PORT=3001 docker compose up
+#
 # Services:
-#   - Web UI: http://localhost:3000
-#   - API: http://localhost:8080
+#   - Web UI: http://localhost:3000 (or $WEB_PORT)
+#   - API: http://localhost:8080 (or $API_PORT)
 #   - API Docs: http://localhost:8080/docs
 
 services:
@@ -16,7 +19,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     env_file:
       - .env
     environment:
@@ -31,15 +34,18 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
 
   web:
     image: node:20-bookworm-slim
     working_dir: /app
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     environment:
-      - NEXT_PUBLIC_LEGACY_API_URL=http://localhost:8080
+      - NEXT_PUBLIC_LEGACY_API_URL=http://host.docker.internal:${API_PORT:-8080}
       - WATCHPACK_POLLING=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./apps/web:/app
       - web_node_modules:/app/node_modules
