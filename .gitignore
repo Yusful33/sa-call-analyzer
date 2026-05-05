@@ -48,3 +48,4 @@ test_transcripts/
 
 # Local Vercel env exports / migration backups (may contain secrets)
 .vercel-env-backup/
+.vercel

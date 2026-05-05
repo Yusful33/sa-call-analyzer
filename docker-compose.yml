@@ -42,10 +42,11 @@ services:
     ports:
       - "${WEB_PORT:-3000}:3000"
     environment:
-      - NEXT_PUBLIC_LEGACY_API_URL=http://host.docker.internal:${API_PORT:-8080}
+      # FASTAPI_ORIGIN is read at runtime by middleware.ts for API proxying
+      - FASTAPI_ORIGIN=http://api:8080
+      - NEXT_PUBLIC_LEGACY_API_URL=http://api:8080
       - WATCHPACK_POLLING=true
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - NODE_ENV=development
     volumes:
       - ./apps/web:/app
       - web_node_modules:/app/node_modules

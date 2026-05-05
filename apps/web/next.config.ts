@@ -24,16 +24,38 @@ const nextConfig: NextConfig = {
     "@opentelemetry/semantic-conventions",
     "@opentelemetry/api",
   ],
+  // Increase proxy timeout for long-running API calls (demo-insights, prospect-overview)
+  experimental: {
+    proxyTimeout: 300000, // 5 minutes
+  },
   /**
-   * Fallback rewrites (kept as a safety net). Primary proxy is `middleware.ts`
-   * so `/api/*` reliably reaches FastAPI on Vercel.
+   * Rewrites for API proxy. In development, uses FASTAPI_ORIGIN env var.
+   * In production, middleware.ts handles the proxy for Vercel Edge.
    */
   async rewrites() {
-    const origin = legacyApiOriginForRewrites();
-    if (!origin || process.env.NODE_ENV === "development") {
+    const devOrigin = process.env.FASTAPI_ORIGIN || process.env.NEXT_PUBLIC_LEGACY_API_URL;
+    const origin = process.env.NODE_ENV === "development" 
+      ? (devOrigin || "http://localhost:8080")
+      : legacyApiOriginForRewrites();
+    
+    if (!origin) {
       return [];
     }
     return {
+      beforeFiles: [
+        {
+          source: "/api/:path*",
+          destination: `${origin}/api/:path*`,
+          // Skip the health endpoint (handled by Next.js)
+          has: [
+            {
+              type: "header",
+              key: "x-skip-middleware",
+              value: undefined,
+            },
+          ],
+        },
+      ],
       fallback: [
         {
           source: "/api/:path*",

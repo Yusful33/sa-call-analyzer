@@ -39,12 +39,23 @@ function backendOrigin(): string {
 /**
  * Proxy browser `/api/*` to FastAPI (same-origin from the UI → no CORS).
  * `app/api/health` stays on Next; everything else under `/api/` goes to the backend.
+ * 
+ * In development with Docker (FASTAPI_ORIGIN set), we skip middleware and let
+ * next.config.ts rewrites handle the proxy (better timeout support).
  */
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  
+  // Skip health endpoint
   if (pathname === "/api/health" || pathname.startsWith("/api/health/")) {
     return NextResponse.next();
   }
+  
+  // In development with Docker, let rewrites handle the proxy for better timeout support
+  if (process.env.NODE_ENV === "development" && process.env.FASTAPI_ORIGIN) {
+    return NextResponse.next();
+  }
+  
   if (pathname.startsWith("/api/")) {
     const base = backendOrigin().replace(/\/$/, "");
     let dest: URL;
