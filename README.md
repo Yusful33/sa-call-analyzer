@@ -2,6 +2,77 @@
 
 AI-powered tooling for **Solution Architect sales calls** and related demos: a **CrewAI multi-agent** pipeline scores calls against **Command of the Message**, plus **Gong** and **BigQuery**-backed prospect views, **classification + prompts for the Claude arize-synthetic-demo skill**, and **hypothesis research** for accounts.
 
+---
+
+## Local Development (Quick Start)
+
+### 1. Set up environment variables
+
+```bash
+# Copy the example env file
+cp .env.example .env
+
+# Edit .env and add your API keys (minimum required: ANTHROPIC_API_KEY)
+```
+
+**Required:**
+| Variable | Description | Get it from |
+|----------|-------------|-------------|
+| `ANTHROPIC_API_KEY` | Claude API key | [console.anthropic.com](https://console.anthropic.com/) |
+
+**Optional (for specific features):**
+| Variable | Required for |
+|----------|--------------|
+| `GONG_ACCESS_KEY` + `GONG_SECRET_KEY` | Single Call Analysis (Gong URL input) |
+| `BRAVE_API_KEY` | Hypothesis Research |
+| Google Cloud credentials | Prospect Overview, Demo Builder (BigQuery) |
+| `ARIZE_API_KEY` + `ARIZE_SPACE_ID` | Tracing/observability |
+
+### 2. Run with Docker (recommended)
+
+```bash
+# Start all services
+make dev-docker
+
+# Or manually:
+docker compose -f infra/docker-compose.yml up
+```
+
+Services will be available at:
+- **Web UI**: http://localhost:3000
+- **API**: http://localhost:8080
+- **API Docs**: http://localhost:8080/docs
+
+### 3. Run without Docker
+
+```bash
+# First time setup
+make setup
+
+# Start API + Web
+make dev
+```
+
+Or manually in separate terminals:
+```bash
+# Terminal 1: API
+cd apps/api && uv sync --extra hypothesis && uv run python main.py
+
+# Terminal 2: Web  
+cd apps/web && npm install && npm run dev
+```
+
+### BigQuery Setup (for Prospect Overview)
+
+```bash
+# Authenticate with Google Cloud (one-time)
+gcloud auth application-default login
+```
+
+For detailed setup, troubleshooting, and Docker configuration, see **[LOCAL_DEV.md](LOCAL_DEV.md)**.
+
+---
+
 ## Monorepo layout
 
 | Path | Contents | Vercel project |
