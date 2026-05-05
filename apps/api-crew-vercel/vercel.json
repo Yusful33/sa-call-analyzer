@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "env": {
+    "API_SERVICE_MODE": "crew"
+  }
+}

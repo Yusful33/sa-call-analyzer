@@ -5,7 +5,6 @@ import ProspectTab from "@/components/ProspectTab";
 import HypothesisTab from "@/components/HypothesisTab";
 import GongTab from "@/components/GongTab";
 import DemoTab from "@/components/DemoTab";
-import PocPotTab from "@/components/PocPotTab";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
 import AccountSuggestModal from "@/components/AccountSuggestModal";
@@ -17,14 +16,13 @@ import type {
   AccountSuggestionMatch,
 } from "@/lib/accountResolve";
 
-type TabId = "hypothesis" | "prospect" | "demo" | "gong" | "pocpot";
+type TabId = "hypothesis" | "prospect" | "demo" | "gong";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "hypothesis", label: "\u{1F52C} Hypothesis Research" },
   { id: "prospect", label: "\u{1F4CA} Prospect Overview" },
   { id: "demo", label: "\u{1F3AF} Custom Demo Builder" },
   { id: "gong", label: "Single Call Analysis" },
-  { id: "pocpot", label: "\u{1F4C4} PoC / PoT Document" },
 ];
 
 type SuggestUi = {
@@ -191,13 +189,6 @@ export default function Home() {
               <DemoTab
                 onLoading={onLoading}
                 onResult={makeOnResult("demo")}
-                resolveAccount={resolveAccount}
-              />
-            </div>
-            <div className={`tab-content${activeTab === "pocpot" ? " active" : ""}`}>
-              <PocPotTab
-                onLoading={onLoading}
-                onResult={makeOnResult("pocpot")}
                 resolveAccount={resolveAccount}
               />
             </div>
