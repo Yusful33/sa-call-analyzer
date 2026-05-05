@@ -172,8 +172,22 @@ function HomeContent() {
   return (
     <div className="container">
       <div className="header">
+        <div className="brand-mark">
+          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M16 2L30 28H2L16 2Z" fill="url(#arize-grad)" />
+            <defs>
+              <linearGradient id="arize-grad" x1="2" y1="28" x2="30" y2="2" gradientUnits="userSpaceOnUse">
+                <stop stopColor="#E5117F" />
+                <stop offset="1" stopColor="#8E5BD3" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <span className="arize-wordmark">Arize</span>
+          <span className="brand-divider" />
+          <span>Solutions</span>
+        </div>
         <h1>
-          <span>{"\u{1F9D8}"}</span> Stillness
+          <span className="accent">Stillness</span>
           <AchievementBadges />
         </h1>
         <p className="app-summary">
