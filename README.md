@@ -31,10 +31,10 @@ cp .env.example .env
 ### 2. Run with Docker (recommended)
 
 ```bash
-# Start all services
-make dev-docker
+# Simple setup (uses Vercel's Gong MCP)
+docker compose up
 
-# Or manually:
+# Or full local stack with LiteLLM:
 docker compose -f infra/docker-compose.yml up
 ```
 
