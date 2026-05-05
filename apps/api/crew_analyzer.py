@@ -727,10 +727,33 @@ Return ONLY the JSON object, no additional text."""
         
         return validated_opportunities
 
+    def _create_fallback_classification(self, error_reason: str) -> CallClassification:
+        """Create a fallback classification when parsing fails."""
+        return CallClassification(
+            call_type=CallType.UNCLEAR,
+            confidence="low",
+            reasoning=f"Classification analysis completed but detailed parsing failed: {error_reason}. Please review the insights and recommendations below.",
+            discovery_criteria=DiscoveryCriteria(),
+            discovery_completion_score=0.0,
+            poc_scoping_criteria=PocScopingCriteria(),
+            poc_scoping_completion_score=0.0,
+            missing_elements=MissingElements(
+                discovery=["Unable to parse detailed discovery criteria - review call manually"],
+                poc_scoping=["Unable to parse detailed PoC scoping criteria - review call manually"]
+            ),
+            recommendations=["Review call recording/transcript manually for detailed assessment"]
+        )
+
     def _parse_classification(self, classification_text: str) -> Optional[CallClassification]:
         """Parse classification result from the Call Classifier agent"""
         import sys
         print(f"📊 Parsing classification result ({len(classification_text)} chars)...", flush=True)
+        
+        # Handle empty or very short responses
+        if not classification_text or len(classification_text.strip()) < 50:
+            print(f"⚠️  Classification text is empty or too short ({len(classification_text)} chars)", flush=True)
+            return self._create_fallback_classification("LLM returned empty or very short response")
+        
         print(f"📊 Classification text preview: {classification_text[:500]}...", flush=True)
 
         try:
@@ -746,7 +769,7 @@ Return ONLY the JSON object, no additional text."""
                 print(f"📊 Parsed JSON keys: {list(data.keys())}", flush=True)
             else:
                 print("⚠️  No JSON found in classification result", flush=True)
-                return None
+                return self._create_fallback_classification("No valid JSON structure found in LLM response")
 
             # Parse call type
             call_type_str = data.get("call_type", "unclear").lower()
@@ -967,12 +990,13 @@ Return ONLY the JSON object, no additional text."""
 
         except json.JSONDecodeError as e:
             print(f"⚠️  Failed to parse classification JSON: {e}")
-            return None
+            print(f"📄 Raw classification text (first 1000 chars):\n{classification_text[:1000]}")
+            return self._create_fallback_classification(f"JSON decode error: {str(e)[:100]}")
         except Exception as e:
             print(f"⚠️  Error parsing classification: {e}")
             import traceback
             traceback.print_exc()
-            return None
+            return self._create_fallback_classification(f"Parsing error: {str(e)[:100]}")
 
     def _parse_missing_elements(self, data) -> MissingElements:
         """Parse missing elements from classification data, handling both old and new formats."""
