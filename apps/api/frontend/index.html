@@ -4,7 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stillness</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            /* Arize brand palette (per 2025 brand guidelines) */
+            --arize-magenta: #E5117F;       /* primary brand pink */
+            --arize-magenta-strong: #B80E66;
+            --arize-magenta-soft: #FBC1DA;
+            --arize-magenta-tint: #FFF0F7;
+            --arize-purple: #8E5BD3;
+            --arize-purple-soft: #EDE3FB;
+            --arize-teal: #15B5AB;
+            --arize-teal-soft: #D5F2F0;
+            --arize-coral: #E8836F;
+            --arize-coral-soft: #FBE2DA;
+            --arize-ink: #0F1117;           /* near-black for dark sections */
+            --arize-ink-2: #1A1D29;
+            --arize-ink-3: #2A2E3D;
+            --arize-text: #1A1D29;
+            --arize-text-muted: #5A5F6E;
+            --arize-border: #E5E7EB;
+            --arize-surface: #FFFFFF;
+            --arize-surface-alt: #FAF8FB;
+            --arize-bg: #F5F2F8;
+
+            --font-sans: 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-serif: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+
+            --grad-brand: linear-gradient(135deg, var(--arize-magenta) 0%, var(--arize-purple) 100%);
+            --grad-brand-soft: linear-gradient(135deg, var(--arize-magenta-tint) 0%, var(--arize-purple-soft) 100%);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,10 +44,17 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: var(--font-sans);
+            font-weight: 400;
+            color: var(--arize-text);
+            background:
+                radial-gradient(1200px 600px at 10% -10%, rgba(229, 17, 127, 0.10), transparent 60%),
+                radial-gradient(900px 500px at 95% 0%, rgba(142, 91, 211, 0.10), transparent 65%),
+                linear-gradient(180deg, #FAF8FB 0%, #F2EEF6 100%);
             min-height: 100vh;
-            padding: 20px;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .container {
@@ -24,38 +63,98 @@
         }
 
         .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 30px;
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 40px 30px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            position: relative;
+            text-align: left;
+            color: #FFFFFF;
+            margin-bottom: 28px;
+            background: linear-gradient(135deg, var(--arize-ink) 0%, var(--arize-ink-2) 60%, #2A1733 100%);
+            border-radius: 20px;
+            padding: 44px 40px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 18px 50px rgba(15, 17, 23, 0.18);
+            overflow: hidden;
+        }
+
+        .header::after {
+            content: "";
+            position: absolute;
+            inset: auto -20% -60% auto;
+            width: 540px;
+            height: 540px;
+            background: radial-gradient(closest-side, rgba(229, 17, 127, 0.55), transparent 70%);
+            filter: blur(10px);
+            pointer-events: none;
+        }
+
+        .brand-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            font-size: 0.95em;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.78);
+        }
+
+        .brand-mark svg {
+            width: 28px;
+            height: 28px;
+        }
+
+        .brand-mark .arize-wordmark {
+            font-family: var(--font-sans);
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            font-size: 1.15em;
+            text-transform: none;
+            color: #FFFFFF;
+        }
+
+        .brand-mark .brand-divider {
+            width: 1px;
+            height: 18px;
+            background: rgba(255, 255, 255, 0.25);
         }
 
         .header h1 {
-            font-size: 3em;
-            margin-bottom: 12px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-            font-weight: 700;
+            font-family: var(--font-sans);
+            font-weight: 300;
+            font-size: 3.2em;
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+            margin-bottom: 14px;
+            color: #FFFFFF;
+        }
+
+        .header h1 .accent {
+            background: linear-gradient(90deg, var(--arize-magenta) 0%, var(--arize-coral) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 400;
         }
 
         .header p {
-            font-size: 1.15em;
-            opacity: 1;
+            font-family: var(--font-sans);
+            font-weight: 300;
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.82);
         }
 
         .header .app-summary {
-            margin-top: 20px;
-            font-size: 1.05em;
-            opacity: 0.95;
-            max-width: 700px;
-            margin-left: auto;
-            margin-right: auto;
-            line-height: 1.6;
+            margin-top: 14px;
+            font-size: 1.02em;
+            max-width: 760px;
+            color: rgba(255, 255, 255, 0.82);
+        }
+
+        .header .app-summary strong {
+            color: #FFFFFF;
+            font-weight: 500;
         }
 
         .card {
@@ -91,7 +190,7 @@
 
         textarea:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #E5117F;
         }
 
         input[type="text"] {
@@ -105,7 +204,7 @@
 
         input[type="text"]:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #E5117F;
         }
 
         .button-group {
@@ -126,7 +225,7 @@
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%);
             color: white;
         }
 
@@ -145,7 +244,7 @@
         }
 
         .btn-recap {
-            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            background: linear-gradient(135deg, #0EA47F 0%, #10B981 100%);
             color: white;
             margin-top: 20px;
             padding: 12px 24px;
@@ -187,12 +286,12 @@
         .loading {
             text-align: center;
             padding: 40px;
-            color: #667eea;
+            color: #E5117F;
         }
 
         .spinner {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border-top: 4px solid #E5117F;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -223,7 +322,7 @@
 
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(90deg, #E5117F 0%, #8E5BD3 100%);
             border-radius: 10px;
             transition: width 0.3s ease-out;
             width: 0%;
@@ -244,7 +343,7 @@
         .progress-percentage {
             font-size: 1.2em;
             font-weight: 600;
-            color: #667eea;
+            color: #E5117F;
             text-align: right;
         }
 
@@ -256,11 +355,11 @@
             padding: 10px;
             background: white;
             border-radius: 8px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #E5117F;
         }
 
         .progress-call-info .call-number {
-            background: #667eea;
+            background: #E5117F;
             color: white;
             padding: 4px 10px;
             border-radius: 12px;
@@ -294,7 +393,7 @@
         }
 
         .score-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%);
             color: white;
             padding: 20px;
             border-radius: 8px;
@@ -314,22 +413,22 @@
 
         .insight {
             background: #f8f9fa;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #E5117F;
             padding: 20px;
             margin: 15px 0;
             border-radius: 0 8px 8px 0;
         }
 
         .insight.critical {
-            border-left-color: #e74c3c;
+            border-left-color: #E8836F;
         }
 
         .insight.important {
-            border-left-color: #f39c12;
+            border-left-color: #F0A73C;
         }
 
         .insight.minor {
-            border-left-color: #3498db;
+            border-left-color: #15B5AB;
         }
 
         .insight-header {
@@ -345,7 +444,7 @@
         }
 
         .insight-timestamp {
-            background: #667eea;
+            background: #E5117F;
             color: white;
             padding: 4px 12px;
             border-radius: 12px;
@@ -377,11 +476,11 @@
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
-            border-left: 3px solid #667eea;
+            border-left: 3px solid #E5117F;
         }
 
         .conversation-snippet strong {
-            color: #667eea;
+            color: #E5117F;
             display: block;
             margin-bottom: 8px;
         }
@@ -415,19 +514,19 @@
 
         .list li:before {
             content: "✓ ";
-            color: #27ae60;
+            color: #0EA47F;
             font-weight: bold;
             margin-right: 8px;
         }
 
         .improvement-list li:before {
             content: "→ ";
-            color: #e74c3c;
+            color: #E8836F;
         }
 
         /* Call Classification Styles */
         .classification-section {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #0F1117 0%, #1A1D29 100%);
             padding: 25px;
             border-radius: 12px;
             margin-bottom: 25px;
@@ -451,15 +550,15 @@
         }
 
         .call-type-badge.discovery {
-            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            background: linear-gradient(135deg, #15B5AB 0%, #10B981 100%);
         }
 
         .call-type-badge.poc_scoping {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%);
         }
 
         .call-type-badge.mixed {
-            background: linear-gradient(135deg, #f39c12 0%, #e74c3c 100%);
+            background: linear-gradient(135deg, #F0A73C 0%, #E8836F 100%);
         }
 
         .call-type-badge.unclear {
@@ -517,9 +616,9 @@
             transition: width 0.5s ease;
         }
 
-        .progress-fill.low { background: #e74c3c; }
-        .progress-fill.medium { background: #f39c12; }
-        .progress-fill.high { background: #27ae60; }
+        .progress-fill.low { background: #E8836F; }
+        .progress-fill.medium { background: #F0A73C; }
+        .progress-fill.high { background: #0EA47F; }
 
         .criteria-checklist {
             list-style: none;
@@ -539,8 +638,8 @@
             border-bottom: none;
         }
 
-        .check-icon { color: #27ae60; }
-        .x-icon { color: #e74c3c; opacity: 0.7; }
+        .check-icon { color: #0EA47F; }
+        .x-icon { color: #E8836F; opacity: 0.7; }
 
         .missing-elements {
             background: rgba(231, 76, 60, 0.2);
@@ -550,7 +649,7 @@
         }
 
         .missing-elements h4 {
-            color: #e74c3c;
+            color: #E8836F;
             margin-bottom: 10px;
         }
 
@@ -579,7 +678,7 @@
         }
 
         .recommendations-section h4 {
-            color: #27ae60;
+            color: #0EA47F;
             margin-bottom: 10px;
         }
 
@@ -598,13 +697,13 @@
             content: "→";
             position: absolute;
             left: 0;
-            color: #27ae60;
+            color: #0EA47F;
         }
 
         /* Evidence and Missed Opportunity Styles */
         .evidence-item {
             background: rgba(39, 174, 96, 0.15);
-            border-left: 3px solid #27ae60;
+            border-left: 3px solid #0EA47F;
             padding: 12px;
             margin: 8px 0;
             border-radius: 0 6px 6px 0;
@@ -612,7 +711,7 @@
         }
 
         .evidence-item .timestamp-badge {
-            background: #27ae60;
+            background: #0EA47F;
             color: white;
             padding: 2px 8px;
             border-radius: 10px;
@@ -632,7 +731,7 @@
 
         .missed-opportunity-item {
             background: rgba(231, 76, 60, 0.15);
-            border-left: 3px solid #e74c3c;
+            border-left: 3px solid #E8836F;
             padding: 12px;
             margin: 8px 0;
             border-radius: 0 6px 6px 0;
@@ -640,7 +739,7 @@
         }
 
         .missed-opportunity-item .timestamp-badge {
-            background: #e74c3c;
+            background: #E8836F;
             color: white;
             padding: 2px 8px;
             border-radius: 10px;
@@ -654,7 +753,7 @@
             margin-top: 8px;
             border-radius: 4px;
             font-style: italic;
-            border-left: 2px solid #f39c12;
+            border-left: 2px solid #F0A73C;
         }
 
         .missed-opportunity-item .why-important {
@@ -680,7 +779,7 @@
         }
 
         .evidence-count {
-            background: #27ae60;
+            background: #0EA47F;
             color: white;
             padding: 2px 8px;
             border-radius: 10px;
@@ -689,7 +788,7 @@
         }
 
         .opportunity-count {
-            background: #e74c3c;
+            background: #E8836F;
             color: white;
             padding: 2px 8px;
             border-radius: 10px;
@@ -702,7 +801,7 @@
             color: #333;
             margin: 30px 0 15px 0;
             padding-bottom: 10px;
-            border-bottom: 2px solid #667eea;
+            border-bottom: 2px solid #E5117F;
         }
 
         .help-text {
@@ -747,13 +846,13 @@
         }
 
         .tab:hover {
-            color: #667eea;
+            color: #E5117F;
             background: #f5f5f5;
         }
 
         .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: #E5117F;
+            border-bottom-color: #E5117F;
             background: #f0f4ff;
         }
 
@@ -904,9 +1003,23 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧘 Stillness</h1>
+            <div class="brand-mark">
+                <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="arizeMark" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#FF3892"/>
+                            <stop offset="100%" stop-color="#C50C6E"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M32 6 L60 56 L46 56 L32 32 L18 56 L4 56 Z" fill="url(#arizeMark)"/>
+                </svg>
+                <span class="arize-wordmark">arize</span>
+                <span class="brand-divider" aria-hidden="true"></span>
+                <span>AI-Driven GTM Toolkit</span>
+            </div>
+            <h1>&#129496; Stillness</h1>
             <p class="app-summary">
-                <strong>360° prospect intelligence:</strong> CRM data, call insights, product usage, and user behavior—unified in one place to prepare for your next customer conversation.
+                <strong>360&deg; prospect intelligence:</strong> CRM data, call insights, product usage, and user behavior&mdash;unified in one place to prepare for your next customer conversation.
             </p>
         </div>
 
@@ -2106,7 +2219,7 @@
                            </div>`
                         : '';
                     return `
-                        <div style="margin-bottom:14px;padding:12px;background:rgba(0,0,0,0.22);border-radius:10px;border-left:3px solid #4facfe;">
+                        <div style="margin-bottom:14px;padding:12px;background:rgba(0,0,0,0.22);border-radius:10px;border-left:3px solid #15B5AB;">
                             <div style="font-weight:600;color:#fff;">${label}</div>
                             ${emailLine}
                             <div style="font-size:0.88em;color:#c8d0dc;margin-top:6px;line-height:1.45;">${sub}</div>
@@ -2134,28 +2247,28 @@
             if (sf) {
                 const adoptionStatus = pu?.adoption_status || 'unknown';
                 const adoptionColors = {
-                    'power_user': '#27ae60',
-                    'active': '#3498db',
-                    'exploring': '#f39c12',
-                    'churning': '#e74c3c',
+                    'power_user': '#0EA47F',
+                    'active': '#15B5AB',
+                    'exploring': '#F0A73C',
+                    'churning': '#E8836F',
                     'not_started': '#95a5a6',
                     'unknown': '#7f8c8d'
                 };
                 const adoptionColor = adoptionColors[adoptionStatus] || '#7f8c8d';
                 
                 summaryHtml = `
-                    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; padding: 25px; margin-bottom: 30px; color: white;">
+                    <div style="background: linear-gradient(135deg, #0F1117 0%, #1A1D29 100%); border-radius: 16px; padding: 25px; margin-bottom: 30px; color: white;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px;">
                             <div>
                                 <h2 style="margin: 0 0 8px 0; font-size: 1.8em;">${sf.name}</h2>
                                 <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-                                    ${sf.lifecycle_stage ? `<span style="background: #667eea; padding: 4px 12px; border-radius: 20px; font-size: 0.85em;">${sf.lifecycle_stage}</span>` : ''}
+                                    ${sf.lifecycle_stage ? `<span style="background: #E5117F; padding: 4px 12px; border-radius: 20px; font-size: 0.85em;">${sf.lifecycle_stage}</span>` : ''}
                                     ${sf.industry ? `<span style="color: #a0a0a0;">${sf.industry}</span>` : ''}
-                                    ${sf.website ? `<a href="https://${sf.website.replace(/^https?:\/\//, '')}" target="_blank" style="color: #4facfe; text-decoration: none;">${sf.website.replace(/^https?:\/\//, '')}</a>` : ''}
+                                    ${sf.website ? `<a href="https://${sf.website.replace(/^https?:\/\//, '')}" target="_blank" style="color: #15B5AB; text-decoration: none;">${sf.website.replace(/^https?:\/\//, '')}</a>` : ''}
                                 </div>
                             </div>
                             <div style="text-align: right;">
-                                <div style="font-size: 2em; font-weight: bold; color: #27ae60;">${formatCurrency(sf.total_active_arr)}</div>
+                                <div style="font-size: 2em; font-weight: bold; color: #0EA47F;">${formatCurrency(sf.total_active_arr)}</div>
                                 <div style="font-size: 0.85em; color: #a0a0a0;">Active ARR</div>
                             </div>
                         </div>
@@ -2185,10 +2298,10 @@
                                 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                                     <span style="color: #a0a0a0; font-size: 0.85em;">Team:</span>
                                     ${sf.owner_name ? `<span style="background: #0176d3; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">Owner: ${sf.owner_name}</span>` : ''}
-                                    ${sf.assigned_sa ? `<span style="background: #667eea; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">SA: ${sf.assigned_sa}</span>` : ''}
+                                    ${sf.assigned_sa ? `<span style="background: #E5117F; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">SA: ${sf.assigned_sa}</span>` : ''}
                                     ${sf.assigned_ai_se ? `<span style="background: #9b59b6; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">AI SE: ${sf.assigned_ai_se}</span>` : ''}
-                                    ${sf.assigned_cse ? `<span style="background: #11998e; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">CSE: ${sf.assigned_cse}</span>` : ''}
-                                    ${sf.assigned_csm ? `<span style="background: #4facfe; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">CSM: ${sf.assigned_csm}</span>` : ''}
+                                    ${sf.assigned_cse ? `<span style="background: #15B5AB; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">CSE: ${sf.assigned_cse}</span>` : ''}
+                                    ${sf.assigned_csm ? `<span style="background: #15B5AB; padding: 4px 10px; border-radius: 12px; font-size: 0.85em;">CSM: ${sf.assigned_csm}</span>` : ''}
                                 </div>
                             </div>
                         ` : ''}
@@ -2212,12 +2325,12 @@
                 let latestOppHtml = '';
                 const latestOpp = overview.latest_opportunity;
                 if (latestOpp) {
-                    const stageColor = '#667eea';
+                    const stageColor = '#E5117F';
                     latestOppHtml = `
-                        <div style="background: linear-gradient(135deg, #f8f9ff 0%, #e8f0fe 100%); border: 2px solid #667eea; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+                        <div style="background: linear-gradient(135deg, #f8f9ff 0%, #e8f0fe 100%); border: 2px solid #E5117F; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
                             <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
                                 <div>
-                                    <div style="font-size: 0.85em; color: #667eea; font-weight: 600; margin-bottom: 5px;">CURRENT OPPORTUNITY</div>
+                                    <div style="font-size: 0.85em; color: #E5117F; font-weight: 600; margin-bottom: 5px;">CURRENT OPPORTUNITY</div>
                                     <h4 style="margin: 0 0 8px 0; color: #333;">${latestOpp.name}</h4>
                                     <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
                                         <span style="background: ${stageColor}; color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.85em;">${latestOpp.stage_name}</span>
@@ -2226,7 +2339,7 @@
                                     </div>
                                 </div>
                                 <div style="text-align: right;">
-                                    <div style="font-size: 1.8em; font-weight: bold; color: #27ae60;">${formatCurrency(latestOpp.amount)}</div>
+                                    <div style="font-size: 1.8em; font-weight: bold; color: #0EA47F;">${formatCurrency(latestOpp.amount)}</div>
                                     <div style="font-size: 0.85em; color: #666;">${latestOpp.probability || 0}% probability</div>
                                 </div>
                             </div>
@@ -2243,7 +2356,7 @@
                 let allOppsHtml = '';
                 if (overview.all_opportunities && overview.all_opportunities.length > 0) {
                     const oppsRows = overview.all_opportunities.map(opp => {
-                        const stageColor = opp.is_won ? '#27ae60' : (opp.is_closed ? '#e74c3c' : '#667eea');
+                        const stageColor = opp.is_won ? '#0EA47F' : (opp.is_closed ? '#E8836F' : '#E5117F');
                         return `
                             <tr style="border-bottom: 1px solid #e9ecef;">
                                 <td style="padding: 10px 14px;">
@@ -2259,7 +2372,7 @@
                     
                     allOppsHtml = `
                         <details style="margin-bottom: 25px;">
-                            <summary style="cursor: pointer; color: #667eea; font-weight: 600; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                            <summary style="cursor: pointer; color: #E5117F; font-weight: 600; padding: 10px; background: #f8f9fa; border-radius: 8px;">
                                 View All Opportunities (${overview.all_opportunities.length})
                             </summary>
                             <div style="margin-top: 10px; overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
@@ -2284,13 +2397,13 @@
                 const ds = se?.deal_summary;
                 if (ds && ds.current_state) {
                     const sentimentColor = {
-                        'positive': '#27ae60',
-                        'neutral': '#f39c12',
-                        'concerned': '#e74c3c'
+                        'positive': '#0EA47F',
+                        'neutral': '#F0A73C',
+                        'concerned': '#E8836F'
                     }[ds.champion_sentiment] || '#7f8c8d';
                     
                     dealSummaryHtml = `
-                        <div style="background: #fafbfc; border-radius: 12px; padding: 20px; margin-bottom: 25px; border-left: 4px solid #667eea;">
+                        <div style="background: #fafbfc; border-radius: 12px; padding: 20px; margin-bottom: 25px; border-left: 4px solid #E5117F;">
                             <h4 style="margin: 0 0 15px 0; color: #333; display: flex; align-items: center; gap: 10px;">
                                 Deal Summary 
                                 ${ds.champion_sentiment ? `<span style="background: ${sentimentColor}; color: white; padding: 2px 10px; border-radius: 10px; font-size: 0.75em;">${ds.champion_sentiment}</span>` : ''}
@@ -2358,15 +2471,15 @@
                             
                             <div style="display: flex; gap: 20px; margin-bottom: 15px; flex-wrap: wrap;">
                                 <div>
-                                    <span style="font-size: 1.3em; font-weight: bold; color: #667eea;">${formatPercent(gs.avg_talk_ratio)}</span>
+                                    <span style="font-size: 1.3em; font-weight: bold; color: #E5117F;">${formatPercent(gs.avg_talk_ratio)}</span>
                                     <span style="font-size: 0.8em; color: #666; margin-left: 4px;">talk ratio</span>
                                 </div>
                                 <div>
-                                    <span style="font-size: 1.3em; font-weight: bold; color: #11998e;">${gs.avg_interactivity?.toFixed(1) || 'N/A'}</span>
+                                    <span style="font-size: 1.3em; font-weight: bold; color: #15B5AB;">${gs.avg_interactivity?.toFixed(1) || 'N/A'}</span>
                                     <span style="font-size: 0.8em; color: #666; margin-left: 4px;">interactivity</span>
                                 </div>
                                 <div>
-                                    <span style="font-size: 1.3em; font-weight: bold; color: #4facfe;">${gs.days_since_last_call ?? 'N/A'}</span>
+                                    <span style="font-size: 1.3em; font-weight: bold; color: #15B5AB;">${gs.days_since_last_call ?? 'N/A'}</span>
                                     <span style="font-size: 0.8em; color: #666; margin-left: 4px;">days since last call</span>
                                 </div>
                             </div>
@@ -2378,8 +2491,8 @@
                 
                 salesEngagementHtml = `
                     <div style="background: white; border-radius: 16px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);">
-                        <h3 style="margin: 0 0 20px 0; padding-bottom: 15px; border-bottom: 2px solid #667eea; color: #333;">
-                            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Sales Engagement Context</span>
+                        <h3 style="margin: 0 0 20px 0; padding-bottom: 15px; border-bottom: 2px solid #E5117F; color: #333;">
+                            <span style="background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Sales Engagement Context</span>
                         </h3>
                         ${latestOppHtml}
                         ${dealSummaryHtml}
@@ -2527,7 +2640,7 @@
                         const weekLabel = w.week_start ? new Date(w.week_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
                         return `
                             <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                <div style="width: 100%; max-width: 40px; height: ${height}px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 4px 4px 0 0;"></div>
+                                <div style="width: 100%; max-width: 40px; height: ${height}px; background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%); border-radius: 4px 4px 0 0;"></div>
                                 <div style="font-size: 0.7em; color: #666; white-space: nowrap;">${weekLabel}</div>
                             </div>
                         `;
@@ -2554,15 +2667,15 @@
                                 <div style="font-size: 2em; font-weight: bold;">${pendo.unique_visitors}</div>
                                 <div style="font-size: 0.85em; opacity: 0.9;">Total Users</div>
                             </div>
-                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
+                            <div style="background: linear-gradient(135deg, #E5117F 0%, #8E5BD3 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
                                 <div style="font-size: 2em; font-weight: bold;">${pendo.active_days_last_7 || 0}</div>
                                 <div style="font-size: 0.85em; opacity: 0.9;">Active Days (7d)</div>
                             </div>
-                            <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
+                            <div style="background: linear-gradient(135deg, #15B5AB 0%, #10B981 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
                                 <div style="font-size: 2em; font-weight: bold;">${formatMinutes(pendo.total_minutes)}</div>
                                 <div style="font-size: 0.85em; opacity: 0.9;">Time on Platform</div>
                             </div>
-                            <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
+                            <div style="background: linear-gradient(135deg, #15B5AB 0%, #00f2fe 100%); color: white; padding: 20px; border-radius: 12px; text-align: center;">
                                 <div style="font-size: 1.3em; font-weight: bold;">${pendo.days_since_last_activity ?? 'N/A'}</div>
                                 <div style="font-size: 0.85em; opacity: 0.9;">Days Since Last Use</div>
                             </div>
@@ -2608,9 +2721,9 @@
             const ub = overview.user_behavior;
             if (ub) {
                 const engagementColors = {
-                    'high': '#27ae60',
-                    'medium': '#f39c12',
-                    'low': '#e74c3c',
+                    'high': '#0EA47F',
+                    'medium': '#F0A73C',
+                    'low': '#E8836F',
                     'unknown': '#7f8c8d'
                 };
                 const engagementColor = engagementColors[ub.engagement_level] || '#7f8c8d';
@@ -2636,7 +2749,7 @@
                                 <div style="flex: 1; min-width: 0;">
                                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                                         <span style="font-weight: 600; color: #333;">${typeLabel}</span>
-                                        ${issue.recording_url ? `<a href="${issue.recording_url}" target="_blank" style="background: #6c5ce7; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.8em; text-decoration: none;">View Recording</a>` : ''}
+                                        ${issue.recording_url ? `<a href="${issue.recording_url}" target="_blank" style="background: #8E5BD3; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.8em; text-decoration: none;">View Recording</a>` : ''}
                                     </div>
                                     <div style="font-size: 0.9em; color: #666; margin-top: 4px;">
                                         ${issue.page_context ? `<strong>${issue.page_context}</strong> • ` : ''}
@@ -2651,7 +2764,7 @@
                     }).join('');
                     
                     issuesHtml = `
-                        <div style="background: #fff8e6; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #f39c12;">
+                        <div style="background: #fff8e6; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #F0A73C;">
                             <h4 style="margin: 0 0 12px 0; color: #8a6914; font-size: 1em;">User Experience Issues Detected</h4>
                             ${ub.issues_summary ? `<p style="margin: 0 0 15px 0; color: #6b5210; line-height: 1.5; font-size: 0.95em;">${ub.issues_summary}</p>` : ''}
                             ${issueItems ? `
@@ -2669,14 +2782,14 @@
                 if (ub.adoption_milestones && ub.adoption_milestones.length > 0) {
                     const milestoneItems = ub.adoption_milestones.map(m => {
                         const statusIcon = m.completed ? '✅' : '⬜';
-                        const statusColor = m.completed ? '#27ae60' : '#bdc3c7';
+                        const statusColor = m.completed ? '#0EA47F' : '#bdc3c7';
                         const countText = m.completed && m.count > 0 ? ` (${m.count}x)` : '';
                         const dateText = m.completed && m.last_date ? ` • Last: ${m.last_date}` : '';
                         return `
                             <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: ${m.completed ? '#e8f8f0' : '#f8f9fa'}; border-radius: 8px; border-left: 3px solid ${statusColor};">
                                 <span style="font-size: 1.1em;">${statusIcon}</span>
                                 <div style="flex: 1;">
-                                    <span style="font-weight: 500; color: ${m.completed ? '#27ae60' : '#7f8c8d'};">${m.name}</span>
+                                    <span style="font-weight: 500; color: ${m.completed ? '#0EA47F' : '#7f8c8d'};">${m.name}</span>
                                     ${m.completed ? `<span style="font-size: 0.85em; color: #888;">${countText}${dateText}</span>` : ''}
                                 </div>
                             </div>
@@ -2695,8 +2808,8 @@
                 
                 userBehaviorHtml = `
                     <div style="background: white; border-radius: 16px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);">
-                        <h3 style="margin: 0 0 20px 0; padding-bottom: 15px; border-bottom: 2px solid #6c5ce7; color: #333;">
-                            <span style="background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">User Behavior Analysis</span>
+                        <h3 style="margin: 0 0 20px 0; padding-bottom: 15px; border-bottom: 2px solid #8E5BD3; color: #333;">
+                            <span style="background: linear-gradient(135deg, #8E5BD3 0%, #a29bfe 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">User Behavior Analysis</span>
                             <span style="background: ${engagementColor}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 0.6em; margin-left: 10px; vertical-align: middle;">${ub.engagement_level.toUpperCase()} ENGAGEMENT</span>
                         </h3>
                         
@@ -2708,7 +2821,7 @@
                         </div>
                         
                         ${ub.hypothesis ? `
-                            <div style="background: #e8f4fd; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #3498db;">
+                            <div style="background: #e8f4fd; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #15B5AB;">
                                 <h4 style="margin: 0 0 10px 0; color: #2980b9; font-size: 1em;">Hypothesis: What They're Trying to Accomplish</h4>
                                 <p style="margin: 0; color: #34495e; line-height: 1.6;">${ub.hypothesis}</p>
                             </div>
@@ -2726,11 +2839,11 @@
                         ${issuesHtml}
                         
                         ${ub.critical_issues && ub.critical_issues.length > 0 ? `
-                            <div style="background: #ffeaea; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #e74c3c;">
+                            <div style="background: #ffeaea; border-radius: 12px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #E8836F;">
                                 <h4 style="margin: 0 0 12px 0; color: #c0392b; font-size: 1em;">Critical Issues</h4>
                                 ${ub.critical_issues.map(issue => `
                                     <div style="background: white; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
-                                        <strong style="color: #e74c3c;">${issue.type}:</strong>
+                                        <strong style="color: #E8836F;">${issue.type}:</strong>
                                         <span style="color: #555;">${issue.description}</span>
                                     </div>
                                 `).join('')}
@@ -2743,7 +2856,7 @@
                                 ${ub.recommendations.filter(r => r.category !== 'Next Steps').map(rec => {
                                     if (typeof rec === 'string') {
                                         // Legacy string format
-                                        return `<div style="background: #e8f5e9; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #27ae60;">
+                                        return `<div style="background: #e8f5e9; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #0EA47F;">
                                             <span style="color: #2e7d32;">${rec}</span>
                                         </div>`;
                                     }
@@ -2865,7 +2978,7 @@
 
             // Data sources and errors
             const sourcesHtml = overview.data_sources_available.map(src => 
-                `<span style="background: #27ae60; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8em; margin-right: 6px;">${src}</span>`
+                `<span style="background: #0EA47F; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8em; margin-right: 6px;">${src}</span>`
             ).join('');
 
             const errorsHtml = overview.errors && overview.errors.length > 0 ? `
@@ -2982,9 +3095,9 @@
             const results = document.getElementById('results');
 
             const severityColors = {
-                'critical': '#e74c3c',
-                'important': '#f39c12',
-                'minor': '#3498db'
+                'critical': '#E8836F',
+                'important': '#F0A73C',
+                'minor': '#15B5AB'
             };
 
             const insightsHtml = data.top_insights.map(insight => `
@@ -3118,14 +3231,14 @@
                 window.URL.revokeObjectURL(url);
                 
                 status.innerHTML = `✅ PowerPoint downloaded! Open it in PowerPoint, Google Slides, or Keynote.`;
-                status.style.color = '#27ae60';
+                status.style.color = '#0EA47F';
                 
                 btn.textContent = '📥 Download Recap Slide (.pptx)';
                 btn.disabled = false;
                 
             } catch (error) {
                 status.textContent = '❌ Error: ' + error.message;
-                status.style.color = '#e74c3c';
+                status.style.color = '#E8836F';
                 btn.textContent = '📥 Download Recap Slide (.pptx)';
                 btn.disabled = false;
             }
@@ -3207,13 +3320,13 @@
                     </ul>
                     ${evidenceItems > 0 ? `
                         <div style="margin-top: 12px;">
-                            <strong style="color: #27ae60;">📋 Evidence Captured:</strong>
+                            <strong style="color: #0EA47F;">📋 Evidence Captured:</strong>
                             ${buildEvidenceHtml(criteriaObj.evidence)}
                         </div>
                     ` : ''}
                     ${missedOpportunityItems > 0 ? `
                         <div style="margin-top: 12px;">
-                            <strong style="color: #e74c3c;">⚠️ Missed Opportunities:</strong>
+                            <strong style="color: #E8836F;">⚠️ Missed Opportunities:</strong>
                             ${buildMissedOpportunitiesHtml(criteriaObj.missed_opportunities)}
                         </div>
                     ` : ''}
