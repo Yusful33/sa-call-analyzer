@@ -42,9 +42,9 @@ services:
     ports:
       - "${WEB_PORT:-3000}:3000"
     environment:
-      # FASTAPI_ORIGIN is read at runtime by middleware.ts for API proxying
+      # FASTAPI_ORIGIN is read at runtime by middleware/rewrites for API proxying
+      # Do NOT set NEXT_PUBLIC_* here - those get embedded in client JS and break Docker networking
       - FASTAPI_ORIGIN=http://api:8080
-      - NEXT_PUBLIC_LEGACY_API_URL=http://api:8080
       - WATCHPACK_POLLING=true
       - NODE_ENV=development
     volumes:
