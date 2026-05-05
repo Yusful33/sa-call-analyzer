@@ -120,9 +120,19 @@ export async function apiPostBlob(
     filenameFallback?.trim() ??
     "";
   if (!filename || filename === "download") {
-    filename = path.includes("recap") ? "Recap_Slide.pptx" : "document.docx";
+    if (path.includes("recap")) {
+      filename = "Recap_Slide.pptx";
+    } else if (path.includes("generate-demo")) {
+      filename = "demo.zip";
+    } else {
+      filename = "document.docx";
+    }
   }
-  if (!/\.(docx|pptx)$/i.test(filename)) {
+  if (path.includes("generate-demo")) {
+    if (!/\.zip$/i.test(filename)) {
+      filename += ".zip";
+    }
+  } else if (!/\.(docx|pptx)$/i.test(filename)) {
     filename += path.includes("recap") ? ".pptx" : ".docx";
   }
   return { blob, filename };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { apiPost } from "@/lib/api";
+import { apiPost, apiPostBlob } from "@/lib/api";
 import { escapeHtml } from "@/lib/helpers";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
 
@@ -152,6 +152,8 @@ export default function DemoTab({
   const [insightsSummary, setInsightsSummary] = useState<string | null>(null);
   const [dataSourcesNote, setDataSourcesNote] = useState<string | null>(null);
   const [gongCallsAnalyzed, setGongCallsAnalyzed] = useState<number>(0);
+  const [generatingDemo, setGeneratingDemo] = useState(false);
+  const [demoGenerated, setDemoGenerated] = useState(false);
 
   async function fetchInsights() {
     if (!accountName.trim()) {
@@ -275,41 +277,119 @@ export default function DemoTab({
     void navigator.clipboard.writeText(t);
   }
 
+  async function executeSkill() {
+    if (generatingDemo) return;
+    
+    setGeneratingDemo(true);
+    onLoading("Generating demo files (this may take 30-60 seconds)...");
+
+    try {
+      const body = {
+        account_name: accountName.trim(),
+        industry_or_use_case: skillForm.industryOrUseCase.trim(),
+        skill_framework: skillForm.skillFramework,
+        agent_architecture: skillForm.agentArchitecture,
+        num_traces: skillForm.numTraces,
+        with_evals: skillForm.withEvals,
+        with_dataset_and_experiments: skillForm.withDatasetAndExperiments,
+        scenarios: skillForm.scenarios.length > 0 ? skillForm.scenarios : undefined,
+        tools_text: skillForm.toolsText.trim() || undefined,
+        additional_context: additionalContext.trim() || undefined,
+      };
+
+      const { blob, filename } = await apiPostBlob("/api/generate-demo", body, `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`);
+
+      // Download the file
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setDemoGenerated(true);
+      onLoading("");
+    } catch (err: any) {
+      alert("Error generating demo: " + (err.message ?? String(err)));
+      onLoading("");
+    } finally {
+      setGeneratingDemo(false);
+    }
+  }
+
   if (phase === "result" && classified) {
     const sk = classified.synthetic_demo_skill;
     return (
       <div style={{ marginTop: 10 }}>
-        <h3 style={{ marginBottom: 8 }}>Suggested for the Arize synthetic demo skill</h3>
-        <p style={{ color: "#666", fontSize: "0.92em", marginBottom: 12 }}>
-          This app does not synthesize traces. Use the <strong>arize-synthetic-demo</strong> Claude skill to scaffold{" "}
-          <code>generator.py</code>, datasets, and AX uploads.
-        </p>
-        <p>
-          <a href={SKILL_DOC} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
-            View SKILL.md (Solutions resources)
-          </a>
-        </p>
+        <h3 style={{ marginBottom: 8 }}>Arize Synthetic Demo Builder</h3>
+
+        {/* Execute Skill Section - Primary Action */}
+        <div
+          style={{
+            padding: 16,
+            background: demoGenerated ? "#e8f5e9" : "#e3f2fd",
+            borderRadius: 8,
+            marginBottom: 16,
+            border: demoGenerated ? "1px solid #a5d6a7" : "1px solid #90caf9",
+          }}
+        >
+          <h4 style={{ margin: "0 0 8px 0", fontSize: "1em" }}>
+            {demoGenerated ? "✓ Demo Generated Successfully" : "Generate Demo Files"}
+          </h4>
+          <p style={{ color: "#555", fontSize: "0.9em", margin: "0 0 12px 0" }}>
+            {demoGenerated
+              ? "Your demo has been downloaded. Extract the ZIP and follow the README to run the generator."
+              : "Click below to generate a complete demo package including generator.py, requirements.txt, and documentation."}
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void executeSkill()}
+              disabled={generatingDemo}
+              style={{
+                background: demoGenerated ? "#4caf50" : undefined,
+                minWidth: 180,
+              }}
+            >
+              {generatingDemo
+                ? "Generating..."
+                : demoGenerated
+                ? "Download Again"
+                : "Generate & Download Demo"}
+            </button>
+            {demoGenerated && (
+              <span style={{ color: "#388e3c", fontSize: "0.85em" }}>
+                Demo downloaded — check your downloads folder
+              </span>
+            )}
+          </div>
+        </div>
 
         {classified.data_sources_note && (
-          <p style={{ color: "#888", fontSize: "0.85em", fontStyle: "italic" }}>{classified.data_sources_note}</p>
+          <p style={{ color: "#888", fontSize: "0.85em", fontStyle: "italic", marginBottom: 12 }}>
+            {classified.data_sources_note}
+          </p>
         )}
 
-        <p style={{ marginTop: 12, fontSize: "0.9em", color: "#555" }}>
-          <strong>CRM/Gong classification (for context only):</strong> {classified.use_case} / {classified.framework}
+        <p style={{ fontSize: "0.9em", color: "#555", marginBottom: 12 }}>
+          <strong>Classification:</strong> {classified.use_case} / {classified.framework}
           {classified.reasoning ? ` — ${classified.reasoning}` : ""}
         </p>
 
         {sk?.recommended_inputs && (
-          <details style={{ marginTop: 14 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Skill input mapping (JSON)</summary>
+          <details style={{ marginBottom: 14 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9em" }}>Skill input mapping (JSON)</summary>
             <pre
               style={{
                 background: "#f5f5f5",
                 padding: 12,
                 borderRadius: 8,
                 overflow: "auto",
-                maxHeight: 320,
-                fontSize: "0.82em",
+                maxHeight: 280,
+                fontSize: "0.8em",
               }}
             >
               {escapeHtml(JSON.stringify(sk.recommended_inputs, null, 2))}
@@ -317,43 +397,64 @@ export default function DemoTab({
           </details>
         )}
 
-        <div style={{ marginTop: 16 }}>
-          <label style={{ fontSize: "0.88em", fontWeight: 600 }}>Prompt to paste into Claude (invoke arize-synthetic-demo)</label>
-          <textarea
-            readOnly
-            rows={8}
-            style={{ width: "100%", marginTop: 6, fontFamily: "monospace", fontSize: "0.85em" }}
-            value={sk?.suggested_prompt_for_claude ?? ""}
-          />
-          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" className="btn-primary" onClick={copyPrompt}>
-              Copy prompt
-            </button>
+        {/* Alternative: Manual Prompt Section */}
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9em", color: "#666" }}>
+            Alternative: Copy prompt for Claude
+          </summary>
+          <div style={{ marginTop: 10 }}>
+            <p style={{ color: "#666", fontSize: "0.85em", marginBottom: 8 }}>
+              Use this prompt with the <strong>arize-synthetic-demo</strong> Claude skill for more customization.{" "}
+              <a href={SKILL_DOC} target="_blank" rel="noreferrer" style={{ fontWeight: 500 }}>
+                View SKILL.md
+              </a>
+            </p>
+            <textarea
+              readOnly
+              rows={6}
+              style={{ width: "100%", fontFamily: "monospace", fontSize: "0.8em" }}
+              value={sk?.suggested_prompt_for_claude ?? ""}
+            />
             <button
               type="button"
               className="btn-secondary"
-              onClick={() => {
-                setPhase("lookup");
-                setClassified(null);
-                setAutoFilledFields({});
-                setInsightsSummary(null);
-                setDataSourcesNote(null);
-                setGongCallsAnalyzed(0);
-              }}
+              onClick={copyPrompt}
+              style={{ marginTop: 8, fontSize: "0.85em" }}
             >
-              Start over
+              Copy prompt
             </button>
           </div>
+        </details>
+
+        <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setPhase("lookup");
+              setClassified(null);
+              setAutoFilledFields({});
+              setInsightsSummary(null);
+              setDataSourcesNote(null);
+              setGongCallsAnalyzed(0);
+              setDemoGenerated(false);
+            }}
+          >
+            Start over
+          </button>
         </div>
 
-        {sk?.next_steps && (
-          <ul style={{ marginTop: 16, color: "#555", paddingLeft: 20 }}>
-            {(sk.next_steps as string[]).map((s: string) => (
-              <li key={s.slice(0, 48)} style={{ marginBottom: 6 }}>
-                {s}
-              </li>
-            ))}
-          </ul>
+        {sk?.next_steps && !demoGenerated && (
+          <div style={{ marginTop: 16 }}>
+            <strong style={{ fontSize: "0.9em" }}>After generating:</strong>
+            <ul style={{ color: "#555", paddingLeft: 20, marginTop: 6 }}>
+              {(sk.next_steps as string[]).slice(1).map((s: string) => (
+                <li key={s.slice(0, 48)} style={{ marginBottom: 4, fontSize: "0.85em" }}>
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     );

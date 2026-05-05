@@ -1,0 +1,695 @@
+# ─── Dataset + experiment grid (snippet from arize-synthetic-demo) ────────────
+# Drop-in block for generator.py. Reads from QUERY_BANK / AMBIGUOUS_QUERIES /
+# NO_LLM_QUERIES / PROMPT_TEMPLATES already defined above.
+#
+# What this provides:
+#   - build_dataset_rows()                 → list[dict] of 3-column rows
+#   - write_dataset_csv(path)              → writes CSV
+#   - upload_dataset_via_ax(...)           → runs `ax datasets create` + returns dataset_id
+#   - build_experiment_runs(...)           → list[dict] for one (model, prompt) cell
+#   - run_experiment_grid(dataset_id, ...) → loops through 4 cells, uploads via `ax`
+#
+# Customize MODEL_FAMILY_GRID and QUALITY_MATRIX below for your demo.
+
+import csv as _csv
+import shutil
+import subprocess
+
+# <<<FILL: pick the right two models for your framework — see references/datasets-experiments.md>>>
+MODEL_FAMILY_GRID = {
+    # short_label -> full model id
+    "strong": "<<<FILL: e.g. anthropic.claude-3-5-sonnet-20241022-v2:0>>>",
+    "weak":   "<<<FILL: e.g. anthropic.claude-3-haiku-20240307-v1:0>>>",
+}
+
+# Display labels used in experiment names (e.g. "claude-sonnet_v1.0")
+MODEL_LABELS = {
+    "strong": "<<<FILL: e.g. claude-sonnet>>>",
+    "weak":   "<<<FILL: e.g. claude-haiku>>>",
+}
+
+# 2x2 quality matrix — drives synthetic outputs and eval scores
+QUALITY_MATRIX = {
+    ("strong", "v1.0"): {"pass_rate": 0.86, "perturbation": "none"},
+    ("strong", "v2.0"): {"pass_rate": 0.84, "perturbation": "tighten_format"},
+    ("weak",   "v1.0"): {"pass_rate": 0.72, "perturbation": "shorten"},
+    ("weak",   "v2.0"): {"pass_rate": 0.62, "perturbation": "drop_detail"},
+}
+
+# Which prompt template name in PROMPT_TEMPLATES is the "primary" output template
+# the experiment grid will compare. Pick the synthesizer / answer template, not
+# the routing/supervisor one.
+EXPERIMENT_PROMPT_TEMPLATE_NAME = "<<<FILL: e.g. research_synthesis>>>"
+
+
+# ── Dataset building ─────────────────────────────────────────────────────────
+#
+# The dataset is fully FLAT so every `{variable}` in the primary prompt template
+# maps 1:1 to a dataset column. This is what the Arize Prompt Playground expects
+# when you click "Attach Dataset" — each prompt variable binds to a column by
+# name. `user_input` + `expected_output` are always present; any other variables
+# referenced in the prompt (e.g. {research_data}, {analyst_data}, {ticker}) get
+# added as flat columns, resolved per-row from QUERY_BANK data.
+
+_DATASET_RESERVED = {
+    "question", "answer", "tool_calls", "retrieved_docs", "complexity",
+    "clarification_question", "clarified_question", "ambiguity_reason",
+}
+
+import re as _re
+
+
+def _extract_template_vars(template_text):
+    """Return the set of {variable} names used in a prompt template."""
+    return set(_re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", template_text or ""))
+
+
+def _effective_primary_template_text():
+    """Return the primary template after the same {question}→{user_input} rewrite
+    that `build_prompt_messages` applies when uploading to the Prompt Hub.
+
+    This keeps the dataset columns and the published prompt variables in sync."""
+    primary = PROMPT_TEMPLATES[EXPERIMENT_PROMPT_TEMPLATE_NAME]
+    return _rewrite_template_for_prompt_hub(primary.get("template", ""))
+
+
+# <<<FILL: per-demo resolvers for prompt variables that aren't literal QUERY_BANK
+#          keys — e.g. {research_data} or {analyst_data} that are normally
+#          produced by upstream agents. Each entry is `var_name -> callable(row)`.
+#          The callable receives a dict (QUERY_BANK / AMBIGUOUS_QUERIES / NO_LLM_QUERIES
+#          entry) and returns a str. Leave empty if the prompt only references
+#          literal row keys like {ticker}, {sector}, etc.>>>
+PROMPT_VARIABLE_RESOLVERS = {
+    # Example (JPMC):
+    # "research_data": lambda row: json.dumps([
+    #     t for t in row.get("tool_calls", [])
+    #     if "compute_valuation" not in t.get("name", "")
+    # ])[:900],
+    # "analyst_data": lambda row: json.dumps(next(
+    #     (t.get("output") for t in row.get("tool_calls", [])
+    #      if "compute_valuation" in t.get("name", "")), {})),
+}
+
+
+def _default_resolver(var_name):
+    """Fallback resolver — reads the variable straight off the row."""
+    return lambda row: str(row.get(var_name, ""))
+
+
+def _build_flat_prompt_columns(row):
+    """Return {var_name: value} for every variable in the EFFECTIVE primary prompt."""
+    tpl_vars = _extract_template_vars(_effective_primary_template_text())
+    out = {}
+    for v in tpl_vars:
+        if v == "user_input":
+            continue
+        resolver = PROMPT_VARIABLE_RESOLVERS.get(v) or _default_resolver(v)
+        out[v] = resolver(row)
+    return out
+
+
+def build_dataset_rows():
+    rows = []
+    for q in QUERY_BANK:
+        row = {"user_input": q["question"], "expected_output": q.get("answer", "")}
+        row.update(_build_flat_prompt_columns(q))
+        rows.append(row)
+    for q in AMBIGUOUS_QUERIES:
+        ui = q.get("clarified_question") or q["question"]
+        row = {"user_input": ui, "expected_output": q.get("answer", "")}
+        row.update(_build_flat_prompt_columns(q))
+        rows.append(row)
+    for q in NO_LLM_QUERIES:
+        row = {"user_input": q["question"], "expected_output": q.get("answer", "")}
+        row.update(_build_flat_prompt_columns(q))
+        rows.append(row)
+    return rows
+
+
+def _dataset_fieldnames():
+    """Stable column order: user_input, <prompt vars>, expected_output."""
+    tpl_vars = sorted(v for v in _extract_template_vars(_effective_primary_template_text())
+                      if v != "user_input")
+    return ["user_input"] + tpl_vars + ["expected_output"]
+
+
+def write_dataset_csv(path="dataset.csv"):
+    rows = build_dataset_rows()
+    if not rows:
+        raise RuntimeError("No rows to write — QUERY_BANK / AMBIGUOUS_QUERIES / NO_LLM_QUERIES are empty.")
+    fieldnames = _dataset_fieldnames()
+    with open(path, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fieldnames})
+    print(f"  Wrote {len(rows)} dataset rows to {path} (columns: {', '.join(fieldnames)})")
+    return path, rows
+
+
+# ── ax CLI wrappers ──────────────────────────────────────────────────────────
+
+def _ax_available():
+    return shutil.which("ax") is not None
+
+
+def _ax_run(cmd_args, *, capture=True):
+    """Run `ax <cmd_args>` and return parsed JSON if capture=True."""
+    print(f"  $ ax {' '.join(cmd_args)}")
+    result = subprocess.run(["ax"] + cmd_args, capture_output=capture, text=True, check=False)
+    if result.returncode != 0:
+        print(f"  ax failed (exit {result.returncode}):")
+        print((result.stderr or result.stdout).strip())
+        raise RuntimeError(f"ax {cmd_args[0]} failed")
+    if capture and result.stdout.strip():
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return result.stdout
+    return None
+
+
+def upload_dataset_via_ax(csv_path, dataset_name, space_id):
+    if not _ax_available():
+        print("  `ax` CLI not installed — skipping upload. Install with:")
+        print("     uv tool install arize-ax-cli      (or: pip install arize-ax-cli)")
+        return None
+    resp = _ax_run([
+        "datasets", "create",
+        "--name", dataset_name,
+        "--space", space_id,
+        "--file", csv_path,
+        "-o", "json",
+    ])
+    if isinstance(resp, dict):
+        ds_id = resp.get("id") or resp.get("dataset_id")
+    else:
+        ds_id = None
+    if ds_id:
+        print(f"  Dataset created — id: {ds_id}")
+    return ds_id
+
+
+def fetch_example_ids(dataset_id):
+    """Pull server-assigned example_ids for a freshly-created dataset.
+
+    `ax datasets export` returns rows shaped as
+        {"id": "<uuid>", "created_at": ..., "additional_properties": {...user fields...}}
+    We flatten `additional_properties` up to the top so callers can read
+    `ex["user_input"]`, `ex["expected_output"]`, etc.
+    """
+    if not _ax_available():
+        return []
+    resp = _ax_run(["datasets", "export", dataset_id, "--stdout"])
+    if isinstance(resp, str):
+        try:
+            resp = json.loads(resp)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(resp, list):
+        return []
+    flattened = []
+    for row in resp:
+        merged = {**(row.get("additional_properties") or {}), **{
+            k: v for k, v in row.items() if k != "additional_properties"
+        }}
+        flattened.append(merged)
+    return flattened
+
+
+# ── Output perturbations ─────────────────────────────────────────────────────
+
+import re
+
+_FIGURE_RE = re.compile(r"\$\d[\d,\.]*\s?(?:[KMBT]|trillion|billion|million)?", re.I)
+_PCT_RE = re.compile(r"\d+(?:\.\d+)?\s?%")
+
+
+def _tighten_format(text):
+    """Crude bullet-style reformat — split on '. ' and prefix with '- '."""
+    if not text:
+        return text
+    parts = [p.strip() for p in text.replace("\n", " ").split(". ") if p.strip()]
+    head = parts[0]
+    bullets = parts[1:5] if len(parts) > 1 else []
+    body = "\n".join(f"- {b.rstrip('.') }." for b in bullets)
+    return (head.rstrip(".") + ".\nKey points:\n" + body) if body else head
+
+
+def _shorten(text, *, keep_frac=0.6):
+    if not text:
+        return text
+    sentences = [s.strip() for s in text.split(". ") if s.strip()]
+    keep = max(1, int(round(len(sentences) * keep_frac)))
+    out = ". ".join(sentences[:keep])
+    return out + ("." if not out.endswith(".") else "")
+
+
+def _drop_specific_figures(text):
+    """Replace specific dollar amounts and percentages with vague phrasing."""
+    if not text:
+        return text
+    out = _FIGURE_RE.sub("a sizeable amount", text, count=3)
+    out = _PCT_RE.sub("a notable percentage", out, count=3)
+    sentences = [s for s in out.split(". ") if s.strip()]
+    if len(sentences) > 2:
+        sentences = sentences[:-1]
+    out = ". ".join(sentences)
+    return out + ("." if not out.endswith(".") else "")
+
+
+def _hallucinate(text):
+    """Add a plausible-but-wrong fragment for failed runs."""
+    if not text:
+        return text
+    head = text.split(". ")[0]
+    fabrications = [
+        " (Note: per the latest filing the figure was revised upward — see updated table.)",
+        " Methodology applied a 1.4x sector multiplier consistent with house view.",
+        " Reported in line with the Q4 supplementary disclosure schedule B.",
+    ]
+    return head.rstrip(".") + "." + random.choice(fabrications)
+
+
+def _perturb_output(expected_output, perturbation, *, did_fail=False):
+    if did_fail:
+        return _hallucinate(expected_output)
+    if perturbation == "none":
+        return expected_output
+    if perturbation == "tighten_format":
+        return _tighten_format(expected_output)
+    if perturbation == "shorten":
+        return _shorten(expected_output)
+    if perturbation == "drop_detail":
+        return _drop_specific_figures(expected_output)
+    return expected_output
+
+
+# ── Synthetic evaluations per run ────────────────────────────────────────────
+
+def _gauss_clamped(mean, sigma=0.10, lo=0.0, hi=1.0):
+    return max(lo, min(hi, random.gauss(mean, sigma)))
+
+
+def _build_evals(*, scenario_row, model_short, prompt_version, did_fail, perturbation):
+    cell = QUALITY_MATRIX[(model_short, prompt_version)]
+    pr = cell["pass_rate"]
+
+    if did_fail:
+        correctness = {"label": "incorrect", "score": 0.0}
+    elif random.random() < 0.15 and perturbation in ("shorten", "drop_detail"):
+        correctness = {"label": "partial", "score": 0.5}
+    else:
+        correctness = {"label": "correct", "score": 1.0}
+
+    fmt_pass_rate = pr + (0.06 if prompt_version == "v2.0" else 0.0)
+    fmt_pass = (random.random() < fmt_pass_rate) and not did_fail
+    format_adherence = {"label": "pass" if fmt_pass else "fail", "score": 1.0 if fmt_pass else 0.0}
+
+    fact_score = _gauss_clamped(pr - (0.30 if did_fail else 0.0), sigma=0.08)
+    factual_accuracy = {"score": round(fact_score, 3)}
+
+    ui = scenario_row.get("user_input", "")[:80]
+
+    if correctness["score"] == 1.0:
+        c_expl = (
+            f"Output for \"{ui}\" matches the dataset expected_output on key figures and "
+            f"recommendation. Would pass first-draft reviewer check."
+        )
+    elif correctness["score"] == 0.5:
+        c_expl = (
+            f"Output for \"{ui}\" captures the headline but trims supporting detail "
+            f"({perturbation}). Reviewer would request the missing context before publication."
+        )
+    else:
+        c_expl = (
+            f"Output for \"{ui}\" introduces a fabricated assertion not present in the "
+            f"dataset expected_output. Reviewer would flag for factual revision."
+        )
+
+    fmt_expl = (
+        "Output follows the v2 structured template (rating / drivers / risks)."
+        if fmt_pass else
+        f"Output is missing one or more required sections of the {prompt_version} template."
+    )
+
+    fact_expl = (
+        f"Factual accuracy at {fact_score:.2f}; "
+        + ("most figures verbatim from dataset." if fact_score > 0.8
+           else "several figures approximated rather than quoted from dataset.")
+    )
+
+    correctness["explanation"] = c_expl
+    format_adherence["explanation"] = fmt_expl
+    factual_accuracy["explanation"] = fact_expl
+
+    return {
+        "correctness": correctness,
+        "format_adherence": format_adherence,
+        "factual_accuracy": factual_accuracy,
+    }
+
+
+# ── Experiment runs builder ──────────────────────────────────────────────────
+
+def build_experiment_runs(examples, *, model_short, prompt_version):
+    """Build a list of run dicts for one (model_short, prompt_version) cell.
+
+    `examples` is the list returned by fetch_example_ids — each has an `id`
+    plus the dataset fields (user_input, prompt_variables, expected_output).
+
+    IMPORTANT — evaluations are emitted as FLAT columns:
+        eval.<eval_name>.label       (string)
+        eval.<eval_name>.score       (number)
+        eval.<eval_name>.explanation (string)
+    This is the schema the Arize backend recognizes for native UI rendering
+    (Summary Metrics, sortable score columns, compare view). Nested
+    `evaluations: {...}` dicts get stored as opaque `additional_properties`
+    strings and do NOT light up in the UI.
+
+    Per-experiment metadata uses the same flat pattern: `metadata.<key>`.
+    """
+    cell = QUALITY_MATRIX[(model_short, prompt_version)]
+    perturbation = cell["perturbation"]
+    pass_rate = cell["pass_rate"]
+    runs = []
+    for ex in examples:
+        expected = ex.get("expected_output", "") or ""
+        did_fail = random.random() > pass_rate
+        output = _perturb_output(expected, perturbation, did_fail=did_fail)
+        evals = _build_evals(
+            scenario_row=ex,
+            model_short=model_short,
+            prompt_version=prompt_version,
+            did_fail=did_fail,
+            perturbation=perturbation,
+        )
+        run = {
+            "example_id": ex.get("id"),
+            "output": output,
+            "metadata.model": MODEL_FAMILY_GRID[model_short],
+            "metadata.model_short": MODEL_LABELS[model_short],
+            "metadata.prompt_template": EXPERIMENT_PROMPT_TEMPLATE_NAME,
+            "metadata.prompt_version": prompt_version,
+            "metadata.perturbation": perturbation,
+            "metadata.synthetic": True,
+        }
+        for eval_name, payload in evals.items():
+            if "label" in payload:
+                run[f"eval.{eval_name}.label"] = payload["label"]
+            if "score" in payload:
+                run[f"eval.{eval_name}.score"] = payload["score"]
+            if "explanation" in payload:
+                run[f"eval.{eval_name}.explanation"] = payload["explanation"]
+        runs.append(run)
+    return runs
+
+
+# ── Prompt hub upload ────────────────────────────────────────────────────────
+# Uploads the primary prompt (EXPERIMENT_PROMPT_TEMPLATE_NAME) to the Arize
+# Prompt Hub so SAs can open the Prompt Playground, attach the demo dataset,
+# and start iterating on the same prompt that shows up in the LLM spans.
+#
+# Design:
+#   - ONE prompt is created per demo, named <company_slug>_<template_name>
+#   - v1.0 is the initial version (from PROMPT_TEMPLATES[EXPERIMENT_PROMPT_TEMPLATE_NAME])
+#   - v2.0 is added as create-version if PROMPT_TEMPLATES has a `..._v2` entry
+#   - The template's primary user-facing variable is renamed to `{user_input}`
+#     to match the dataset `user_input` column — gives a zero-setup playground run
+#   - Other variables in the template (e.g. {research_data}, {state}) are left
+#     as-is; SAs can paste values or leave them blank for a quick smoke test
+
+# <<<FILL: pick the right provider for your framework. Allowed values:
+#          openAI | azureOpenAI | awsBedrock | vertexAI | custom>>>
+PROMPT_PROVIDER = "<<<FILL: e.g. awsBedrock>>>"
+
+# Which variable name in the user message should map to the dataset `user_input`
+# column. Default `{user_input}` matches the dataset schema directly — leave it.
+PROMPT_USER_INPUT_VAR = "user_input"
+
+
+def _primary_question_var(template_text):
+    """Find which placeholder (question/query/user_input) is the main user-facing var."""
+    for candidate in ("user_input", "question", "query", "prompt"):
+        if "{" + candidate + "}" in template_text:
+            return candidate
+    return None
+
+
+def _rewrite_template_for_prompt_hub(template_text):
+    """Rename the primary user-facing variable to {user_input}.
+
+    This is the single source of truth for the dataset schema and the uploaded
+    prompt's messages — both use the rewritten text so the Playground auto-binds
+    every variable to a dataset column."""
+    primary = _primary_question_var(template_text or "")
+    if primary and primary != PROMPT_USER_INPUT_VAR:
+        return template_text.replace("{" + primary + "}",
+                                     "{" + PROMPT_USER_INPUT_VAR + "}")
+    return template_text or "{user_input}"
+
+
+def build_prompt_messages(template_entry):
+    """Convert a PROMPT_TEMPLATES entry into [{role, content}, ...] for ax prompts."""
+    system_msg = template_entry.get("system_message") or ""
+    user_body = _rewrite_template_for_prompt_hub(template_entry.get("template") or "{user_input}")
+
+    messages = []
+    if system_msg:
+        messages.append({"role": "system", "content": system_msg})
+    messages.append({"role": "user", "content": user_body})
+    return messages
+
+
+def _ax_prompts_create(*, name, space_id, messages, provider, model,
+                       commit_message, description=None):
+    messages_path = f".ax_prompt_messages_{name}.json"
+    with open(messages_path, "w") as f:
+        json.dump(messages, f, indent=2)
+    args = [
+        "prompts", "create",
+        "--name", name,
+        "--space", space_id,
+        "--provider", provider,
+        "--input-variable-format", "f_string",
+        "--messages", messages_path,
+        "--model", model,
+        "--commit-message", commit_message,
+    ]
+    if description:
+        args.extend(["--description", description])
+    args.extend(["-o", "json"])
+    try:
+        resp = _ax_run(args)
+    finally:
+        try:
+            os.remove(messages_path)
+        except OSError:
+            pass
+    if isinstance(resp, dict):
+        prompt = resp.get("prompt") or resp
+        return prompt.get("id") or resp.get("id")
+    return None
+
+
+def _ax_prompts_create_version(*, name_or_id, space_id, messages, provider,
+                               model, commit_message):
+    messages_path = f".ax_prompt_version_{name_or_id}.json"
+    with open(messages_path, "w") as f:
+        json.dump(messages, f, indent=2)
+    args = [
+        "prompts", "create-version", name_or_id,
+        "--space", space_id,
+        "--provider", provider,
+        "--input-variable-format", "f_string",
+        "--messages", messages_path,
+        "--model", model,
+        "--commit-message", commit_message,
+        "-o", "json",
+    ]
+    try:
+        resp = _ax_run(args)
+    finally:
+        try:
+            os.remove(messages_path)
+        except OSError:
+            pass
+    return resp
+
+
+def build_demo_prompts():
+    """Build the messages-lists for the demo prompt's v1.0 and optional v2.0.
+
+    Returns dict:
+        {"name": <prompt_name>,
+         "versions": [{"label": "v1.0", "messages": [...], "commit": "..."},
+                      {"label": "v2.0", "messages": [...], "commit": "..."}]}
+    """
+    if EXPERIMENT_PROMPT_TEMPLATE_NAME not in PROMPT_TEMPLATES:
+        raise RuntimeError(
+            f"EXPERIMENT_PROMPT_TEMPLATE_NAME='{EXPERIMENT_PROMPT_TEMPLATE_NAME}' "
+            f"not found in PROMPT_TEMPLATES keys: {list(PROMPT_TEMPLATES)}"
+        )
+
+    v1 = PROMPT_TEMPLATES[EXPERIMENT_PROMPT_TEMPLATE_NAME]
+    versions = [{
+        "label": "v1.0",
+        "messages": build_prompt_messages(v1),
+        "commit": f"v1.0 — {EXPERIMENT_PROMPT_TEMPLATE_NAME} baseline",
+    }]
+
+    v2_key = f"{EXPERIMENT_PROMPT_TEMPLATE_NAME}_v2"
+    if v2_key in PROMPT_TEMPLATES:
+        versions.append({
+            "label": "v2.0",
+            "messages": build_prompt_messages(PROMPT_TEMPLATES[v2_key]),
+            "commit": f"v2.0 — structured-format variant",
+        })
+    else:
+        for k, v in PROMPT_TEMPLATES.items():
+            if k != EXPERIMENT_PROMPT_TEMPLATE_NAME and v.get("version") == "v2.0":
+                versions.append({
+                    "label": "v2.0",
+                    "messages": build_prompt_messages(v),
+                    "commit": f"v2.0 — from template '{k}'",
+                })
+                break
+
+    return {"name": None, "versions": versions}
+
+
+def upload_prompts_via_ax(*, prompt_name, space_id, model, upload=True):
+    """Write the demo prompt (v1.0 + optional v2.0) to the Arize Prompt Hub.
+
+    Does nothing destructive if upload=False — just writes the messages JSON
+    files next to the demo and prints the exact ax commands the SA can run.
+    """
+    bundle = build_demo_prompts()
+    versions = bundle["versions"]
+
+    # Always write the messages files locally for reference / replay.
+    local_dir = "prompts"
+    os.makedirs(local_dir, exist_ok=True)
+    for v in versions:
+        path = os.path.join(local_dir, f"{prompt_name}_{v['label']}.json")
+        with open(path, "w") as f:
+            json.dump(v["messages"], f, indent=2)
+        print(f"  Wrote {v['label']} messages → {path}")
+
+    if not upload:
+        print(f"\n  Skipping upload (--upload not set). To upload manually:")
+        print(f"     ax prompts create --name '{prompt_name}' --space '{space_id}' "
+              f"--provider {PROMPT_PROVIDER} --input-variable-format f_string "
+              f"--model '{model}' --messages {local_dir}/{prompt_name}_v1.0.json")
+        if len(versions) > 1:
+            print(f"     ax prompts create-version '{prompt_name}' --space '{space_id}' "
+                  f"--provider {PROMPT_PROVIDER} --input-variable-format f_string "
+                  f"--model '{model}' --messages {local_dir}/{prompt_name}_v2.0.json")
+        return None
+
+    if not space_id:
+        print("  ARIZE_SPACE_ID not set — skipping upload.")
+        return None
+    if not _ax_available():
+        print("  `ax` CLI not installed — skipping upload.")
+        return None
+
+    v1 = versions[0]
+    prompt_id = _ax_prompts_create(
+        name=prompt_name,
+        space_id=space_id,
+        messages=v1["messages"],
+        provider=PROMPT_PROVIDER,
+        model=model,
+        commit_message=v1["commit"],
+        description=f"Synthetic demo prompt — {EXPERIMENT_PROMPT_TEMPLATE_NAME}",
+    )
+    print(f"  Prompt created — '{prompt_name}' (v1.0)" + (f" id={prompt_id}" if prompt_id else ""))
+
+    for v in versions[1:]:
+        _ax_prompts_create_version(
+            name_or_id=prompt_name,
+            space_id=space_id,
+            messages=v["messages"],
+            provider=PROMPT_PROVIDER,
+            model=model,
+            commit_message=v["commit"],
+        )
+        print(f"  Added version {v['label']} to '{prompt_name}'")
+
+    return prompt_id
+
+
+# ── Top-level orchestration ──────────────────────────────────────────────────
+
+def build_dataset_and_upload(*, dataset_name, space_id, csv_path="dataset.csv", upload=True):
+    csv_path, rows = write_dataset_csv(csv_path)
+    if not upload:
+        print(f"  Skipping upload (--upload not set). To upload manually, run:")
+        print(f"     ax datasets create --name '{dataset_name}' --space-id '{space_id}' --file {csv_path}")
+        return None, rows
+    if not space_id:
+        print("  ARIZE_SPACE_ID not set — skipping upload.")
+        return None, rows
+    ds_id = upload_dataset_via_ax(csv_path, dataset_name, space_id)
+    return ds_id, rows
+
+
+def run_experiment_grid(*, dataset_id, dataset_name, space_id, out_dir="experiments", upload=True):
+    """Build runs for all 4 cells. Upload if upload=True and ax is available."""
+    os.makedirs(out_dir, exist_ok=True)
+
+    if dataset_id and upload:
+        examples = fetch_example_ids(dataset_id)
+        if not examples:
+            print("  Could not fetch example_ids from Arize — falling back to local rows.")
+            examples = [{**r, "id": f"local_ex_{i:03d}"}
+                        for i, r in enumerate(build_dataset_rows())]
+    else:
+        examples = [{**r, "id": f"local_ex_{i:03d}"}
+                    for i, r in enumerate(build_dataset_rows())]
+
+    print(f"  Building experiment runs against {len(examples)} examples...")
+
+    cells = [(m, p) for m in ("strong", "weak") for p in ("v1.0", "v2.0")]
+    summary = []
+    for model_short, prompt_version in cells:
+        runs = build_experiment_runs(examples,
+                                     model_short=model_short,
+                                     prompt_version=prompt_version)
+        exp_name = f"{MODEL_LABELS[model_short]}_{prompt_version}"
+        runs_path = os.path.join(out_dir, f"runs_{exp_name}.json")
+        with open(runs_path, "w") as f:
+            json.dump(runs, f, indent=2)
+        n_correct = sum(1 for r in runs if r.get("eval.correctness.score") == 1.0)
+        print(f"    {exp_name:<24} → {len(runs)} runs, {n_correct} correct ({n_correct/len(runs)*100:.0f}%) → {runs_path}")
+        summary.append({"name": exp_name, "path": runs_path, "n_runs": len(runs),
+                        "n_correct": n_correct})
+
+    if not upload or not dataset_id:
+        if not dataset_id:
+            print("  No dataset_id provided — skipping experiment uploads.")
+        else:
+            print("  Skipping uploads (--upload not set). To upload manually:")
+            for s in summary:
+                print(f"     ax experiments create --name '{s['name']}' --dataset-id {dataset_id} --file {s['path']}")
+        return summary
+
+    if not _ax_available():
+        print("  `ax` CLI not installed — skipping experiment uploads.")
+        return summary
+
+    print(f"\n  Uploading {len(summary)} experiments to Arize...")
+    for s in summary:
+        try:
+            _ax_run([
+                "experiments", "create",
+                "--name", s["name"],
+                "--dataset", dataset_id,
+                "--file", s["path"],
+                "-o", "json",
+            ])
+            print(f"    Uploaded {s['name']}")
+        except RuntimeError as e:
+            print(f"    Failed to upload {s['name']}: {e}")
+    return summary

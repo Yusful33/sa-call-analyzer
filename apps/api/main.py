@@ -1052,6 +1052,127 @@ async def custom_demo_skill_info():
 
 
 # ============================================================
+# Generate Demo (execute arize-synthetic-demo skill)
+# ============================================================
+
+
+class GenerateDemoRequest(BaseModel):
+    """Request to generate a synthetic demo by executing the arize-synthetic-demo skill."""
+
+    account_name: str
+    industry_or_use_case: str
+    skill_framework: str
+    agent_architecture: str
+    num_traces: Optional[int] = 500
+    with_evals: Optional[bool] = True
+    with_dataset_and_experiments: Optional[bool] = True
+    scenarios: Optional[list[str]] = None
+    tools_text: Optional[str] = None
+    additional_context: Optional[str] = None
+
+
+class GenerateDemoResponse(BaseModel):
+    """Response with metadata about the generated demo (file returned separately as download)."""
+
+    folder_name: str
+    project_name: str
+    dataset_name: str
+    prompt_name: str
+    agent_name: str
+    framework: str
+    architecture: str
+    llm_model: str
+    files: list[str]
+    domain_content: dict
+
+
+@app.post("/api/generate-demo")
+async def generate_demo(request: GenerateDemoRequest):
+    """
+    Generate a synthetic demo by executing the arize-synthetic-demo skill logic.
+    
+    Uses an LLM to generate domain-specific content (queries, tools, prompts),
+    fills in the generator skeleton template, and returns a downloadable ZIP file.
+    """
+    from demo_generator import generate_demo_files, SKILL_PATH
+    from synthetic_demo_skill import (
+        SKILL_AGENT_ARCHITECTURE_VALUES,
+        SKILL_FRAMEWORK_VALUES,
+        SKILL_SCENARIO_VALUES,
+    )
+
+    with api_span("generate_demo", account_name=request.account_name):
+        # Validate inputs
+        if not (request.industry_or_use_case or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="industry_or_use_case is required.",
+            )
+
+        sf = request.skill_framework.strip().lower()
+        if sf not in SKILL_FRAMEWORK_VALUES:
+            raise HTTPException(status_code=400, detail=f"Invalid skill_framework: {request.skill_framework!r}")
+        
+        aa = request.agent_architecture.strip()
+        if aa not in SKILL_AGENT_ARCHITECTURE_VALUES:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid agent_architecture: {request.agent_architecture!r}"
+            )
+        
+        if request.scenarios:
+            bad = [s for s in request.scenarios if s not in SKILL_SCENARIO_VALUES]
+            if bad:
+                raise HTTPException(status_code=400, detail=f"Invalid scenario value(s): {bad}")
+
+        # Check that skill templates exist
+        if not SKILL_PATH.exists():
+            raise HTTPException(
+                status_code=503,
+                detail="arize-synthetic-demo skill not found. Please ensure the skill is installed.",
+            )
+
+        # Parse tools from text
+        tools_parsed = _parse_demo_tools_text(request.tools_text)
+
+        try:
+            zip_bytes, metadata = generate_demo_files(
+                company_name=request.account_name.strip(),
+                industry_or_use_case=request.industry_or_use_case.strip(),
+                framework=sf,
+                agent_architecture=aa,
+                num_traces=request.num_traces or 500,
+                tools=tools_parsed or None,
+                additional_context=request.additional_context,
+                with_evals=request.with_evals if request.with_evals is not None else True,
+                with_dataset_and_experiments=request.with_dataset_and_experiments if request.with_dataset_and_experiments is not None else True,
+                scenarios=request.scenarios,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Skill template not found: {e}",
+            )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to parse LLM response: {e}",
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Demo generation failed: {str(e)[:500]}",
+            )
+
+        filename = f"{metadata['folder_name']}.zip"
+
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+
+# ============================================================
 # Demo Insights (auto-populate demo builder from Gong calls)
 # ============================================================
 

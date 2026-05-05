@@ -1,0 +1,23 @@
+# Pinned to v7 — required for arize.pandas.logger eval logging.
+# v8 is a parallel track for OTLP-only demos; v7 remains the default
+# for the synthetic-data recipe.
+arize>=7,<8
+arize-otel
+opentelemetry-api
+opentelemetry-sdk
+openinference-semantic-conventions
+python-dotenv
+pandas
+# Transitive dependency of arize.pandas.logger not always pulled in automatically.
+packaging
+
+# NOTE on `ax` CLI (used by --build-dataset --upload / --build-experiments --upload):
+# Do NOT install `arize-ax-cli` in this venv — it pins arize==8.x which conflicts
+# with the v7 requirement above. Install it isolated instead:
+#     uv tool install arize-ax-cli            (preferred)
+#     pipx install arize-ax-cli               (alternative)
+# Or with neither tool available, dedicated venv:
+#     python3 -m venv ~/.local/share/arize-ax-cli
+#     ~/.local/share/arize-ax-cli/bin/pip install arize-ax-cli
+#     ln -sf ~/.local/share/arize-ax-cli/bin/ax ~/.local/bin/ax
+# Verify:  ax --version

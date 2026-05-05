@@ -1,0 +1,205 @@
+# ─── multi_agent_coordinator emitters ────────────────────────────────────────
+
+COORDINATOR_NAME = "coordinator_agent"
+SUB_AGENTS = ["{{PLANNING_AGENT}}", "{{WORKER_AGENT}}", "{{RESPONSE_AGENT}}"]
+# Default: ["planning_agent", "engineer_agent", "response_agent"]
+
+CHAIN_ROOT_NAME = "invocation [{{COMPANY_SLUG}}-agent]"
+
+COORDINATOR_ROUTING_TEMPLATE = (
+    "User question: {question}\n\nCurrent state: {state}\n\n"
+    'Return JSON: {{"action": "...", "target": "...", "reasoning": "..."}}'
+)
+COORDINATOR_SYSTEM = "You are the {{COMPANY_NAME}} coordinator agent. Route the user's request to the appropriate sub-agent."
+
+
+def _emit_routing(tracer, question, state, decision, session_id):
+    with tracer.start_as_current_span(LLM_SPAN_NAME) as span:
+        _set_llm_attrs(
+            span,
+            system_msg=COORDINATOR_SYSTEM,
+            user_msg=COORDINATOR_ROUTING_TEMPLATE.format(question=question, state=state),
+            assistant_msg=json.dumps(decision),
+            prompt_tokens=random.randint(250, 450),
+            completion_tokens=random.randint(40, 120),
+            template=COORDINATOR_ROUTING_TEMPLATE,
+            template_version="v1.0",
+            template_vars={"question": question[:200], "state": state[:200]},
+        )
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(400, 1200), 2))
+        span.set_status(Status(StatusCode.OK))
+        return _span_id(span)
+
+
+def _emit_tool_call(tracer, tool_call, session_id, *, failed=False):
+    with tracer.start_as_current_span(tool_call["name"]) as span:
+        _set_tool_attrs(span, tool_name=tool_call["name"],
+                        input_val=tool_call.get("input", {}),
+                        output_val=tool_call.get("output", {}))
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(50, 400), 2))
+        if failed:
+            _mark_error(span, "ToolExecutionError", tool_call.get("error", "Tool call failed"))
+        else:
+            span.set_status(Status(StatusCode.OK))
+
+
+def _emit_llm(tracer, scenario, *, template_name, user_msg, assistant_msg, session_id, is_poisoned=False):
+    template = PROMPT_TEMPLATES.get(template_name, {})
+    version = scenario.get("prompt_version", template.get("version", "v1.0"))
+    with tracer.start_as_current_span(LLM_SPAN_NAME) as span:
+        _set_llm_attrs(
+            span,
+            system_msg=template.get("system_message"),
+            user_msg=user_msg,
+            assistant_msg=assistant_msg,
+            template=template.get("template", "{user_query}"),
+            template_version=version,
+            template_vars={"user_query": scenario.get("question", "")[:200]},
+            is_poisoned=is_poisoned,
+        )
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(800, 2500), 2))
+        span.set_status(Status(StatusCode.OK))
+        return _span_id(span)
+
+
+def _emit_sub_agent(tracer, agent_name, scenario, session_id, *, is_poisoned=False, blocking_ambiguity=False):
+    with tracer.start_as_current_span(f"agent_run [{agent_name}]") as agent:
+        _set_kind(agent, "AGENT")
+        agent.set_attribute("agent.name", agent_name)
+        _set_io(agent, scenario.get("question", ""), None)
+        _annotate_session(agent, session_id)
+        agent_sid = _span_id(agent)
+
+        for tc in scenario.get("tool_calls", []):
+            _emit_tool_call(tracer, tc, session_id)
+
+        if blocking_ambiguity:
+            output = {"status": "BLOCKING_AMBIGUITY", "reason": scenario.get("ambiguity_reason", "Query is ambiguous.")}
+        else:
+            output = {"status": "SUCCESS", "answer": scenario.get("answer", "")}
+
+        _emit_llm(tracer, scenario,
+                  template_name=next(iter(PROMPT_TEMPLATES), "default"),
+                  user_msg=scenario.get("question", ""),
+                  assistant_msg=json.dumps(output),
+                  session_id=session_id,
+                  is_poisoned=is_poisoned and agent_name in POISONED_DATA.get("poisoned_agents", {}))
+        _set_io(agent, None, output)
+        agent.set_attribute("latency_ms", round(random.uniform(1500, 5000), 2))
+        agent.set_status(Status(StatusCode.OK))
+        return output, agent_sid
+
+
+def create_trace(tracer, scenario, session_id=None):
+    span_ids = {"type": scenario["type"]}
+    is_poisoned = scenario.get("is_poisoned", False)
+
+    with tracer.start_as_current_span(CHAIN_ROOT_NAME) as root:
+        _set_kind(root, "CHAIN")
+        _set_io(root, scenario.get("question", ""), None)
+        _annotate_session(root, session_id)
+        span_ids["root"] = _span_id(root)
+
+        with tracer.start_as_current_span(f"agent_run [{COORDINATOR_NAME}]") as coord:
+            _set_kind(coord, "AGENT")
+            coord.set_attribute("agent.name", COORDINATOR_NAME)
+            _set_io(coord, scenario.get("question", ""), None)
+            _annotate_session(coord, session_id)
+
+            stype = scenario["type"]
+            planning_agent, worker_agent, response_agent = SUB_AGENTS
+
+            if stype == "no_llm_needed":
+                _emit_routing(tracer, scenario["question"], "No agents called.",
+                              {"action": "route_to_agent", "target": response_agent, "reasoning": "Direct answer."},
+                              session_id)
+                _, resp_sid = _emit_sub_agent(tracer, response_agent, scenario, session_id)
+                final = scenario.get("answer", "")
+
+            elif stype == "ambiguity":
+                _emit_routing(tracer, scenario["question"], "No agents called.",
+                              {"action": "route_to_agent", "target": planning_agent, "reasoning": "Plan."},
+                              session_id)
+                _, plan_sid = _emit_sub_agent(tracer, planning_agent, scenario, session_id, is_poisoned=is_poisoned)
+                span_ids["planning"] = plan_sid
+
+                _emit_routing(tracer, scenario["question"], "Planning complete.",
+                              {"action": "route_to_agent", "target": worker_agent, "reasoning": "Process."},
+                              session_id)
+                _emit_sub_agent(tracer, worker_agent, scenario, session_id, is_poisoned=is_poisoned, blocking_ambiguity=True)
+
+                _emit_routing(tracer, scenario["question"], "Worker returned BLOCKING_AMBIGUITY.",
+                              {"action": "route_to_agent", "target": response_agent, "reasoning": "Ask for clarification."},
+                              session_id)
+
+                with tracer.start_as_current_span("await_user_clarification") as w:
+                    _set_kind(w, "CHAIN")
+                    w.set_attribute("clarification.question", scenario.get("clarification_question", ""))
+                    resolved = random.random() < 0.7
+                    w.set_attribute("clarification.resolved", resolved)
+                    _annotate_session(w, session_id)
+                    if resolved:
+                        w.set_attribute("clarification.user_response", scenario.get("clarified_question", ""))
+                        w.set_attribute("clarification.wait_time_ms", round(random.uniform(5000, 45000), 2))
+                        w.set_status(Status(StatusCode.OK))
+                    else:
+                        w.set_attribute("clarification.wait_time_ms", round(random.uniform(60000, 300000), 2))
+                        _mark_error(w, "ClarificationTimeout", "User did not respond to clarification request.")
+
+                _, resp_sid = _emit_sub_agent(tracer, response_agent, scenario, session_id, is_poisoned=is_poisoned)
+                final = scenario.get("answer", "")
+
+            elif stype == "execution_failure":
+                _emit_routing(tracer, scenario["question"], "No agents called.",
+                              {"action": "route_to_agent", "target": planning_agent, "reasoning": "Plan."},
+                              session_id)
+                _, plan_sid = _emit_sub_agent(tracer, planning_agent, scenario, session_id, is_poisoned=is_poisoned)
+                span_ids["planning"] = plan_sid
+                _emit_routing(tracer, scenario["question"], "Planning complete.",
+                              {"action": "route_to_agent", "target": worker_agent, "reasoning": "Process."},
+                              session_id)
+                _, worker_sid = _emit_sub_agent(tracer, worker_agent, scenario, session_id, is_poisoned=is_poisoned)
+                span_ids["worker"] = worker_sid
+
+                with tracer.start_as_current_span("execute_action") as ex:
+                    _set_kind(ex, "TOOL")
+                    ex.set_attribute("tool.name", "execute_action")
+                    _set_io(ex, scenario.get("question"), None)
+                    _annotate_session(ex, session_id)
+                    _mark_error(ex, "ExecutionTimeout", "Action timed out after 30s")
+
+                _, resp_sid = _emit_sub_agent(tracer, response_agent,
+                                              {**scenario, "answer": "The action failed. Please try again."},
+                                              session_id)
+                final = "(execution failed)"
+
+            else:  # happy_path, tool_failure, retry, poisoned_tokens, guardrail_denial fallback
+                _emit_routing(tracer, scenario["question"], "No agents called.",
+                              {"action": "route_to_agent", "target": planning_agent, "reasoning": "Plan."},
+                              session_id)
+                _, plan_sid = _emit_sub_agent(tracer, planning_agent, scenario, session_id, is_poisoned=is_poisoned)
+                span_ids["planning"] = plan_sid
+
+                _emit_routing(tracer, scenario["question"], "Planning complete.",
+                              {"action": "route_to_agent", "target": worker_agent, "reasoning": "Process."},
+                              session_id)
+                _, worker_sid = _emit_sub_agent(tracer, worker_agent, scenario, session_id, is_poisoned=is_poisoned)
+                span_ids["worker"] = worker_sid
+
+                _emit_routing(tracer, scenario["question"], "Worker complete.",
+                              {"action": "route_to_agent", "target": response_agent, "reasoning": "Respond."},
+                              session_id)
+                _, resp_sid = _emit_sub_agent(tracer, response_agent, scenario, session_id, is_poisoned=is_poisoned)
+                final = scenario.get("answer", "")
+
+            span_ids["response"] = resp_sid
+            _set_io(coord, None, final)
+            coord.set_attribute("latency_ms", round(random.uniform(5000, 20000), 2))
+            coord.set_status(Status(StatusCode.OK))
+
+        _set_io(root, None, final)
+        root.set_status(Status(StatusCode.OK))
+    return span_ids

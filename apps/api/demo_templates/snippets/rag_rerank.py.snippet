@@ -1,0 +1,114 @@
+# ─── rag_rerank emitters (CHAIN -> RETRIEVER -> RERANKER -> AGENT -> LLM) ────
+
+AGENT_NAME = "{{AGENT_NAME}}"
+RETRIEVER_SPAN = "candidate_retrieval"
+RERANKER_SPAN = "rerank_candidates"
+RERANKER_MODEL = "{{RERANKER_MODEL}}"   # e.g. "cohere-rerank-english-v3.0", "bge-reranker-large"
+CHAIN_ROOT_NAME = "invocation [{{COMPANY_SLUG}}-{{USE_CASE_SLUG}}]"
+
+
+def _emit_retriever(tracer, query, docs, session_id, *, failed=False):
+    with tracer.start_as_current_span(RETRIEVER_SPAN) as span:
+        _set_kind(span, "RETRIEVER")
+        _set_io(span, query, None)
+        for i, doc in enumerate(docs):
+            span.set_attribute(f"retrieval.documents.{i}.document.id", doc["id"])
+            span.set_attribute(f"retrieval.documents.{i}.document.content", doc.get("content", "")[:2000])
+            span.set_attribute(f"retrieval.documents.{i}.document.score", float(doc.get("score", 0.0)))
+        span.set_attribute("retrieval.num_documents", len(docs))
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(50, 300), 2))
+        if failed:
+            _mark_error(span, "RetrievalError", "Vector store unavailable")
+        else:
+            span.set_status(Status(StatusCode.OK))
+
+
+def _emit_reranker(tracer, query, input_docs, reranked_docs, session_id, *, top_k=5):
+    with tracer.start_as_current_span(RERANKER_SPAN) as span:
+        _set_kind(span, "RERANKER")
+        span.set_attribute("reranker.model_name", RERANKER_MODEL)
+        span.set_attribute("reranker.query", query)
+        span.set_attribute("reranker.top_k", top_k)
+        for i, d in enumerate(input_docs):
+            span.set_attribute(f"reranker.input_documents.{i}.document.id", d["id"])
+            span.set_attribute(f"reranker.input_documents.{i}.document.content", d.get("content", "")[:2000])
+        for i, d in enumerate(reranked_docs):
+            span.set_attribute(f"reranker.output_documents.{i}.document.id", d["id"])
+            span.set_attribute(f"reranker.output_documents.{i}.document.content", d.get("content", "")[:2000])
+            span.set_attribute(f"reranker.output_documents.{i}.document.score", float(d.get("score", 0.0)))
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(100, 500), 2))
+        span.set_status(Status(StatusCode.OK))
+
+
+def _emit_llm_synthesize(tracer, scenario, reranked_docs, session_id, *, is_poisoned=False):
+    template_name = next(iter(PROMPT_TEMPLATES)) if PROMPT_TEMPLATES else None
+    template = PROMPT_TEMPLATES.get(template_name, {}) if template_name else {}
+    template_str = template.get("template", "Question: {user_query}\nReranked: {context}")
+    version = scenario.get("prompt_version", template.get("version", "v1.0"))
+
+    context_str = "\n".join(f"- {d['id']}: {d.get('content', '')[:300]}" for d in reranked_docs)
+    user_msg = template_str.format(user_query=scenario.get("question", ""), context=context_str)
+
+    with tracer.start_as_current_span(LLM_SPAN_NAME) as span:
+        _set_llm_attrs(
+            span,
+            system_msg=template.get("system_message"),
+            user_msg=user_msg,
+            assistant_msg=scenario.get("answer", ""),
+            template=template_str,
+            template_version=version,
+            template_vars={"user_query": scenario.get("question", "")[:200], "num_docs": len(reranked_docs)},
+            is_poisoned=is_poisoned,
+        )
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(800, 3000), 2))
+        span.set_status(Status(StatusCode.OK))
+        return _span_id(span)
+
+
+def create_trace(tracer, scenario, session_id=None):
+    span_ids = {"type": scenario["type"]}
+    is_poisoned = scenario.get("is_poisoned", False)
+    all_docs = scenario.get("retrieved_docs", [])
+    reranked = sorted(all_docs, key=lambda d: -d.get("score", 0.0))[:5]
+
+    with tracer.start_as_current_span(CHAIN_ROOT_NAME) as root:
+        _set_kind(root, "CHAIN")
+        _set_io(root, scenario.get("question", ""), None)
+        _annotate_session(root, session_id)
+        span_ids["root"] = _span_id(root)
+
+        stype = scenario["type"]
+
+        _emit_retriever(tracer, scenario.get("question", ""), all_docs, session_id,
+                        failed=(stype == "tool_failure"))
+        _emit_reranker(tracer, scenario.get("question", ""), all_docs, reranked, session_id)
+
+        with tracer.start_as_current_span(f"agent_run [{AGENT_NAME}]") as agent:
+            _set_kind(agent, "AGENT")
+            agent.set_attribute("agent.name", AGENT_NAME)
+            _set_io(agent, scenario.get("question", ""), None)
+            _annotate_session(agent, session_id)
+            span_ids["agent"] = _span_id(agent)
+
+            if stype == "execution_failure":
+                with tracer.start_as_current_span("submit_answer") as s:
+                    _set_kind(s, "TOOL")
+                    s.set_attribute("tool.name", "submit_answer")
+                    _annotate_session(s, session_id)
+                    _mark_error(s, "DownstreamError", "Answer submission rejected")
+                final = "(execution failed)"
+            else:
+                _emit_llm_synthesize(tracer, scenario, reranked, session_id, is_poisoned=is_poisoned)
+                final = scenario.get("answer", "")
+
+            _set_io(agent, None, final)
+            agent.set_attribute("latency_ms", round(random.uniform(1000, 4000), 2))
+            agent.set_status(Status(StatusCode.OK))
+
+        _set_io(root, None, final)
+        root.set_status(Status(StatusCode.OK))
+
+    return span_ids

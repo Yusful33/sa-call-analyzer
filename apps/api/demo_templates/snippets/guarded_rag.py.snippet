@@ -1,0 +1,130 @@
+# ─── guarded_rag emitters (RAG + GUARDRAIL spans around LLM calls) ───────────
+
+AGENT_NAME = "{{AGENT_NAME}}"
+RETRIEVER_SPAN = "candidate_retrieval"
+GUARDRAIL_SPAN = "ApplyGuardrail"
+CHAIN_ROOT_NAME = "invocation [{{COMPANY_SLUG}}-{{USE_CASE_SLUG}}]"
+
+# Guardrail filters applied before/after LLM calls
+GUARDRAILS = [
+    {"name": "content_filter", "blocks_on": "toxic_content"},
+    {"name": "pii_filter", "blocks_on": "pii_detected"},
+]
+
+
+def _emit_retriever(tracer, query, docs, session_id):
+    with tracer.start_as_current_span(RETRIEVER_SPAN) as span:
+        _set_kind(span, "RETRIEVER")
+        _set_io(span, query, None)
+        for i, doc in enumerate(docs):
+            span.set_attribute(f"retrieval.documents.{i}.document.id", doc["id"])
+            span.set_attribute(f"retrieval.documents.{i}.document.content", doc.get("content", "")[:2000])
+            span.set_attribute(f"retrieval.documents.{i}.document.score", float(doc.get("score", 0.0)))
+        span.set_attribute("retrieval.num_documents", len(docs))
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(50, 300), 2))
+        span.set_status(Status(StatusCode.OK))
+
+
+def _emit_guardrail(tracer, *, name, input_text, session_id, denied=False):
+    with tracer.start_as_current_span(GUARDRAIL_SPAN) as span:
+        _set_kind(span, "GUARDRAIL")
+        span.set_attribute("guardrail.name", name)
+        _set_io(span, input_text[:2000], None)
+        result = "denied" if denied else "allowed"
+        span.set_attribute("guardrail.result", result)
+        _set_io(span, None, {"result": result})
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(10, 80), 2))
+        if denied:
+            _mark_error(span, "GuardrailBlocked", f"{name} blocked the content")
+        else:
+            span.set_status(Status(StatusCode.OK))
+        return not denied
+
+
+def _emit_llm_call(tracer, scenario, template_name, user_msg, assistant_msg, session_id, *, is_poisoned=False):
+    template = PROMPT_TEMPLATES.get(template_name, {})
+    version = scenario.get("prompt_version", template.get("version", "v1.0"))
+    with tracer.start_as_current_span(LLM_SPAN_NAME) as span:
+        _set_llm_attrs(
+            span,
+            system_msg=template.get("system_message"),
+            user_msg=user_msg,
+            assistant_msg=assistant_msg,
+            template=template.get("template", "{user_query}"),
+            template_version=version,
+            template_vars={"user_query": scenario.get("question", "")[:200]},
+            is_poisoned=is_poisoned,
+        )
+        _annotate_session(span, session_id)
+        span.set_attribute("latency_ms", round(random.uniform(800, 2500), 2))
+        span.set_status(Status(StatusCode.OK))
+        return _span_id(span)
+
+
+def create_trace(tracer, scenario, session_id=None):
+    span_ids = {"type": scenario["type"]}
+    is_poisoned = scenario.get("is_poisoned", False)
+    docs = scenario.get("retrieved_docs", [])
+    stype = scenario["type"]
+    guardrail_denial = stype == "guardrail_denial"
+
+    template_names = list(PROMPT_TEMPLATES.keys())
+    summarize_tpl = template_names[0] if template_names else "summarize"
+    personalize_tpl = template_names[1] if len(template_names) > 1 else summarize_tpl
+
+    with tracer.start_as_current_span(CHAIN_ROOT_NAME) as root:
+        _set_kind(root, "CHAIN")
+        _set_io(root, scenario.get("question", ""), None)
+        _annotate_session(root, session_id)
+        span_ids["root"] = _span_id(root)
+
+        if stype != "no_llm_needed":
+            _emit_retriever(tracer, scenario.get("question", ""), docs, session_id)
+
+        with tracer.start_as_current_span(f"agent_run [{AGENT_NAME}]") as agent:
+            _set_kind(agent, "AGENT")
+            agent.set_attribute("agent.name", AGENT_NAME)
+            _set_io(agent, scenario.get("question", ""), None)
+            _annotate_session(agent, session_id)
+            span_ids["agent"] = _span_id(agent)
+
+            # Step 1: summarize (LLM)
+            summarize_out = f"Summary for: {scenario.get('question', '')[:80]}"
+            _emit_llm_call(tracer, scenario, summarize_tpl,
+                           scenario.get("question", ""), summarize_out,
+                           session_id, is_poisoned=is_poisoned)
+
+            # Step 2: guardrails after summarize
+            allowed = _emit_guardrail(tracer, name="content_filter",
+                                       input_text=summarize_out, session_id=session_id,
+                                       denied=guardrail_denial)
+            if not allowed:
+                _set_io(agent, None, "Content blocked by guardrail")
+                agent.set_status(Status(StatusCode.OK))
+                _set_io(root, None, "Content blocked")
+                root.set_status(Status(StatusCode.OK))
+                return span_ids
+
+            _emit_guardrail(tracer, name="pii_filter",
+                            input_text=summarize_out, session_id=session_id, denied=False)
+
+            # Step 3: personalize (LLM)
+            personalize_out = scenario.get("answer", "")
+            _emit_llm_call(tracer, scenario, personalize_tpl,
+                           summarize_out, personalize_out,
+                           session_id, is_poisoned=is_poisoned)
+
+            # Step 4: final guardrail before returning to user
+            _emit_guardrail(tracer, name="content_filter",
+                            input_text=personalize_out, session_id=session_id, denied=False)
+
+            _set_io(agent, None, personalize_out)
+            agent.set_attribute("latency_ms", round(random.uniform(1500, 5000), 2))
+            agent.set_status(Status(StatusCode.OK))
+
+        _set_io(root, None, scenario.get("answer", ""))
+        root.set_status(Status(StatusCode.OK))
+
+    return span_ids
