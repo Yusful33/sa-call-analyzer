@@ -1,10 +1,14 @@
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
-import { BatchSpanProcessor, ConsoleSpanExporter } from "@opentelemetry/sdk-trace-base";
-import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-import { resourceFromAttributes } from "@opentelemetry/resources";
+export async function register() {
+  // Skip in Edge runtime (middleware) — OTel Node SDK requires Node.js APIs
+  if (typeof globalThis.EdgeRuntime !== "undefined") {
+    return;
+  }
 
-export function register() {
+  const { NodeTracerProvider } = await import("@opentelemetry/sdk-trace-node");
+  const { OTLPTraceExporter } = await import("@opentelemetry/exporter-trace-otlp-proto");
+  const { BatchSpanProcessor, ConsoleSpanExporter } = await import("@opentelemetry/sdk-trace-base");
+  const { ATTR_SERVICE_NAME } = await import("@opentelemetry/semantic-conventions");
+  const { resourceFromAttributes } = await import("@opentelemetry/resources");
   const spaceId = process.env.ARIZE_SPACE_ID;
   const apiKey = process.env.ARIZE_API_KEY;
 
@@ -49,5 +53,7 @@ export function register() {
     `[instrumentation] Arize OTEL tracing enabled — project="${projectName}"`
   );
 
-  process.on("SIGTERM", () => provider.shutdown());
+  if (typeof process.on === "function") {
+    process.on("SIGTERM", () => provider.shutdown());
+  }
 }
