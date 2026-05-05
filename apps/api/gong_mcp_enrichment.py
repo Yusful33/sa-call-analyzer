@@ -163,9 +163,12 @@ def maybe_enrich_overview_with_gong_mcp(
         return overview
 
     lookback = int(os.environ.get("POC_GONG_MCP_LOOKBACK_DAYS", "45"))
-    # Caps Gong MCP /calls work; higher values risk read timeouts on the API→MCP HTTP hop.
-    max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "400"))
-    max_tx = int(os.environ.get("POC_GONG_MCP_MAX_TRANSCRIPTS", "8"))
+    # Caps Gong MCP /calls work. Lower default to avoid hitting Gong API rate limits
+    # (400 calls = 8+ API calls for extensive metadata + transcript fetches).
+    # Default 50 calls = 1-2 extensive batches, staying well under rate limits.
+    max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "50"))
+    # Reduce transcript fetches to avoid rate limits (each is an API call)
+    max_tx = int(os.environ.get("POC_GONG_MCP_MAX_TRANSCRIPTS", "3"))
     snippet_limit = int(os.environ.get("POC_GONG_MCP_TRANSCRIPT_SNIPPET_CHARS", "8000"))
 
     now = datetime.now(timezone.utc)
@@ -219,7 +222,8 @@ def maybe_enrich_overview_with_gong_mcp(
 
     n_transcripts_applied = 0
     if fetch_gids:
-        tx_results = gong_client.get_transcripts_parallel(fetch_gids, max_workers=4)
+        # Use max 2 workers to avoid Gong API rate limits
+        tx_results = gong_client.get_transcripts_parallel(fetch_gids, max_workers=2)
         gid_to_idx: Dict[str, int] = {}
         for i, c in enumerate(work):
             g = _gong_numeric_id_from_call(c)

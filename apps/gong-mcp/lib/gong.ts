@@ -121,13 +121,20 @@ export async function listCallsExtensive(
   toDateTime: string,
   maxCalls?: number
 ): Promise<{ calls: FormattedCall[]; total: number }> {
-  const ids = await listCallIds(fromDateTime, toDateTime, maxCalls);
+  // Cap to prevent excessive API calls that hit rate limits
+  const effectiveMax = maxCalls !== undefined ? Math.min(maxCalls, 100) : 100;
+  const ids = await listCallIds(fromDateTime, toDateTime, effectiveMax);
   if (ids.length === 0) return { calls: [], total: 0 };
 
-  const batchSize = 50;
+  // Reduced batch size to stay under rate limits (fewer API calls)
+  const batchSize = 25;
   const all: FormattedCall[] = [];
   for (let i = 0; i < ids.length; i += batchSize) {
     const batch = ids.slice(i, i + batchSize);
+    // Add small delay between batches to avoid burst rate limits
+    if (i > 0) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
     const res = (await gongRequest("/calls/extensive", {
       method: "POST",
       body: {

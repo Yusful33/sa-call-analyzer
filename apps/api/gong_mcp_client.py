@@ -99,13 +99,14 @@ class GongMCPClient:
             return False
         return (time.time() - cache_times[key]) < self._cache_ttl_seconds
 
-    def _make_request(self, endpoint: str, payload: Dict) -> Dict:
+    def _make_request(self, endpoint: str, payload: Dict, retry_on_429: bool = True) -> Dict:
         """
         Make HTTP request to the Gong MCP server.
 
         Args:
             endpoint: API endpoint (e.g., "/transcript", "/calls")
             payload: Request payload
+            retry_on_429: If True, retry once with backoff on rate limit errors
 
         Returns:
             Response dictionary
@@ -125,39 +126,60 @@ class GongMCPClient:
                 "openinference.span.kind": "tool",
             }
         ) as span:
-            try:
-                response = requests.post(
-                    url,
-                    json=payload,
-                    timeout=90,
-                    headers=self._mcp_request_headers(),
-                )
+            max_attempts = 2 if retry_on_429 else 1
+            last_error = None
+            
+            for attempt in range(max_attempts):
+                try:
+                    response = requests.post(
+                        url,
+                        json=payload,
+                        timeout=90,
+                        headers=self._mcp_request_headers(),
+                    )
 
-                span.set_attribute("http.status_code", response.status_code)
+                    span.set_attribute("http.status_code", response.status_code)
 
-                if response.status_code != 200:
-                    error_msg = f"Gong MCP error {response.status_code}: {response.text[:2000]}"
-                    if response.status_code == 401 and "Vercel" in response.text:
-                        error_msg += (
-                            " — If Gong MCP runs on Vercel with Deployment Protection enabled, "
-                            "create a **Protection Bypass for Automation** secret on the **gong-mcp** project "
-                            "and set **GONG_MCP_VERCEL_BYPASS_SECRET** on this API to that same value."
-                        )
+                    if response.status_code == 429:
+                        error_msg = f"Gong MCP error 429: {response.text[:500]}"
+                        if attempt < max_attempts - 1:
+                            span.add_event("rate_limit_retry", {"attempt": attempt + 1})
+                            time.sleep(2 ** attempt)  # 1s, then 2s backoff
+                            continue
+                        span.set_status(Status(StatusCode.ERROR, error_msg))
+                        raise RuntimeError(error_msg)
+
+                    if response.status_code != 200:
+                        error_msg = f"Gong MCP error {response.status_code}: {response.text[:2000]}"
+                        if response.status_code == 401 and "Vercel" in response.text:
+                            error_msg += (
+                                " — If Gong MCP runs on Vercel with Deployment Protection enabled, "
+                                "create a **Protection Bypass for Automation** secret on the **gong-mcp** project "
+                                "and set **GONG_MCP_VERCEL_BYPASS_SECRET** on this API to that same value."
+                            )
+                        span.set_status(Status(StatusCode.ERROR, error_msg))
+                        raise RuntimeError(error_msg)
+                    
+                    result = response.json()
+                    span.set_attribute("output.value", json.dumps(result))
+                    span.set_attribute("output.mime_type", "application/json")
+                    span.set_status(Status(StatusCode.OK))
+                    
+                    return result
+                    
+                except requests.RequestException as e:
+                    last_error = e
+                    if attempt < max_attempts - 1:
+                        span.add_event("request_retry", {"attempt": attempt + 1, "error": str(e)})
+                        time.sleep(1)
+                        continue
+                    error_msg = f"HTTP request failed: {str(e)}"
                     span.set_status(Status(StatusCode.ERROR, error_msg))
+                    span.record_exception(e)
                     raise RuntimeError(error_msg)
-                
-                result = response.json()
-                span.set_attribute("output.value", json.dumps(result))
-                span.set_attribute("output.mime_type", "application/json")
-                span.set_status(Status(StatusCode.OK))
-                
-                return result
-                
-            except requests.RequestException as e:
-                error_msg = f"HTTP request failed: {str(e)}"
-                span.set_status(Status(StatusCode.ERROR, error_msg))
-                span.record_exception(e)
-                raise RuntimeError(error_msg)
+            
+            # Should not reach here, but just in case
+            raise RuntimeError(f"Request failed after {max_attempts} attempts: {last_error}")
 
     @staticmethod
     def extract_call_id_from_url(gong_url: str) -> str:
@@ -278,14 +300,14 @@ class GongMCPClient:
     def get_transcripts_parallel(
         self,
         call_ids: List[str],
-        max_workers: int = 5
+        max_workers: int = 2
     ) -> Dict[str, Dict]:
         """
-        Fetch transcripts for multiple calls in parallel.
+        Fetch transcripts for multiple calls with limited concurrency.
 
         Args:
             call_ids: List of Gong call IDs
-            max_workers: Maximum number of parallel workers (default 5)
+            max_workers: Maximum number of parallel workers (default 2, reduced for rate limits)
 
         Returns:
             Dictionary mapping call_id -> transcript_data
@@ -315,12 +337,17 @@ class GongMCPClient:
                 span.set_status(Status(StatusCode.OK))
                 return results
 
-            # Fetch remaining transcripts in parallel
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Propagate OTel context into worker threads so child spans from
-                # _make_request attach to this parent span (avoid orphan roots).
+            # Fetch transcripts with limited concurrency to avoid rate limits
+            # Use max 2 workers to stay well under Gong API limits
+            effective_workers = min(max_workers, 2)
+            rate_limit_hit = False
+            
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                 future_to_call_id = {}
-                for cid in calls_to_fetch:
+                for i, cid in enumerate(calls_to_fetch):
+                    # Add small delay between submissions to avoid burst
+                    if i > 0:
+                        time.sleep(0.3)
                     ctx = contextvars.copy_context()
                     fut = executor.submit(ctx.run, self._make_request, "/transcript", {"call_id": cid})
                     future_to_call_id[fut] = cid
@@ -330,17 +357,22 @@ class GongMCPClient:
                     try:
                         transcript_data = future.result()
                         results[call_id] = transcript_data
-                        # Cache the result
                         self._transcript_cache[call_id] = transcript_data
                         self._transcript_cache_times[call_id] = time.time()
                     except Exception as e:
+                        error_str = str(e)
                         span.add_event("transcript_fetch_failed", {
                             "call_id": call_id,
-                            "error": str(e)
+                            "error": error_str
                         })
-                        # Store None for failed fetches
+                        # Detect rate limit errors and stop fetching more
+                        if "429" in error_str or "rate" in error_str.lower():
+                            rate_limit_hit = True
+                            span.add_event("rate_limit_detected", {"stopping_fetches": True})
                         results[call_id] = None
 
+            if rate_limit_hit:
+                span.set_attribute("rate_limit.hit", True)
             span.set_attribute("calls.fetched", len([r for r in results.values() if r is not None]))
             span.set_status(Status(StatusCode.OK))
             return results
