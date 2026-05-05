@@ -7,7 +7,7 @@ This repo was re-linked from **`stillness`** / **`stillness-api`** to new projec
 | App | Vercel project | Default production hostname |
 |-----|----------------|------------------------------|
 | Next.js (`apps/web`) | **arize-gtm-stillness** | `https://arize-gtm-stillness.vercel.app` |
-| FastAPI (`apps/api`) | **arize-gtm-stillness-api** | `https://arize-gtm-stillness-api.vercel.app` |
+| FastAPI (`apps/api`) | **arize-gtm-stillness-api** | `https://arize-gtm-stillness-api-six.vercel.app` |
 
 ### If `*.vercel.app` shows `DEPLOYMENT_NOT_FOUND`
 
