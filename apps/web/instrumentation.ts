@@ -1,6 +1,6 @@
 export async function register() {
   // Skip in Edge runtime (middleware) — OTel Node SDK requires Node.js APIs
-  if (typeof globalThis.EdgeRuntime !== "undefined") {
+  if (typeof (globalThis as Record<string, unknown>).EdgeRuntime !== "undefined") {
     return;
   }
 
