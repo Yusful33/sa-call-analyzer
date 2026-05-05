@@ -8,7 +8,12 @@ import DemoTab from "@/components/DemoTab";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
 import AccountSuggestModal from "@/components/AccountSuggestModal";
-import EasterEggs, { useEmojiClick } from "@/components/EasterEggs";
+import {
+  AchievementProvider,
+  AchievementToast,
+  AchievementBadges,
+  useAchievements,
+} from "@/components/UsageAchievements";
 import { apiPost } from "@/lib/api";
 import type {
   AccountResolveInput,
@@ -33,25 +38,24 @@ type SuggestUi = {
   resolve: (c: "cancel" | "keep" | AccountSuggestionMatch) => void;
 };
 
-export default function Home() {
+function HomeContent() {
   const [activeTab, setActiveTab] = useState<TabId>("prospect");
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [resultHtml, setResultHtml] = useState("");
   const [resultOwner, setResultOwner] = useState<TabId | null>(null);
   const [suggestUi, setSuggestUi] = useState<SuggestUi | null>(null);
-  const [innerPeaceMode, setInnerPeaceMode] = useState(false);
-  const { handleClick: handleEmojiClick, triggered: emojiTriggered } = useEmojiClick(3);
+
+  const {
+    trackProspectRun,
+    trackGongSuccess,
+    trackDemoBuild,
+    trackTabUsed,
+  } = useAchievements();
 
   useEffect(() => {
-    if (emojiTriggered) {
-      setInnerPeaceMode(true);
-      document.body.classList.add("inner-peace-mode");
-    } else {
-      setInnerPeaceMode(false);
-      document.body.classList.remove("inner-peace-mode");
-    }
-  }, [emojiTriggered]);
+    trackTabUsed(activeTab);
+  }, [activeTab, trackTabUsed]);
 
   const onLoading = useCallback(
     (msg: string) => {
@@ -72,8 +76,18 @@ export default function Home() {
       setLoading(false);
       setResultHtml(html);
       setResultOwner(html ? tab : null);
+
+      if (html) {
+        if (tab === "prospect") {
+          trackProspectRun();
+        } else if (tab === "gong") {
+          trackGongSuccess();
+        } else if (tab === "demo") {
+          trackDemoBuild();
+        }
+      }
     },
-    []
+    [trackProspectRun, trackGongSuccess, trackDemoBuild]
   );
 
   const resolveAccount = useCallback(
@@ -159,15 +173,8 @@ export default function Home() {
     <div className="container">
       <div className="header">
         <h1>
-          <span
-            className="clickable-emoji"
-            onClick={handleEmojiClick}
-            role="button"
-            aria-label="meditation emoji"
-          >
-            {"\u{1F9D8}"}
-          </span>{" "}
-          Stillness
+          <span>{"\u{1F9D8}"}</span> Stillness
+          <AchievementBadges />
         </h1>
         <p className="app-summary">
           <strong>360° prospect intelligence:</strong> CRM data, call insights,
@@ -176,7 +183,7 @@ export default function Home() {
         </p>
       </div>
 
-      <EasterEggs onInnerPeaceToggle={setInnerPeaceMode} />
+      <AchievementToast />
 
       <div className="card">
         <div className="tabs-container">
@@ -234,5 +241,13 @@ export default function Home() {
         />
       ) : null}
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <AchievementProvider>
+      <HomeContent />
+    </AchievementProvider>
   );
 }
