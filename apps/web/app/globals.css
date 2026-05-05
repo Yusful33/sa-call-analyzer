@@ -208,3 +208,172 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Tab content visibility */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+
+/* ===== EASTER EGGS ===== */
+
+/* Konami Code Easter Egg */
+.easter-egg-konami {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.konami-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  animation: konami-appear 0.5s ease-out;
+}
+
+.konami-emoji {
+  font-size: 4rem;
+  display: block;
+  animation: konami-bounce 1s ease-in-out infinite;
+}
+
+.konami-text {
+  font-size: 2rem;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 20px rgba(102, 126, 234, 0.8);
+  margin: 1rem 0 0.5rem;
+}
+
+.konami-quote {
+  font-size: 1.1rem;
+  color: white;
+  font-style: italic;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  opacity: 0.9;
+}
+
+@keyframes konami-appear {
+  from { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+@keyframes konami-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}
+
+.sparkle {
+  position: absolute;
+  top: -20px;
+  width: 10px;
+  height: 10px;
+  background: radial-gradient(circle, #ffd700 0%, #ff6b6b 50%, transparent 70%);
+  border-radius: 50%;
+  animation: sparkle-fall linear forwards;
+  box-shadow: 0 0 10px #ffd700, 0 0 20px #ff6b6b;
+}
+
+@keyframes sparkle-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+/* Serenity Easter Egg */
+.easter-egg-serenity {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  overflow: hidden;
+}
+
+.lotus {
+  position: absolute;
+  bottom: -50px;
+  animation: lotus-float 4s ease-in-out forwards;
+}
+
+@keyframes lotus-float {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-110vh) rotate(360deg); opacity: 0; }
+}
+
+.serenity-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, rgba(255,182,193,0.95) 0%, rgba(255,218,185,0.95) 100%);
+  padding: 1.5rem 3rem;
+  border-radius: 50px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #8b4513;
+  box-shadow: 0 10px 40px rgba(255,182,193,0.5);
+  animation: serenity-pulse 2s ease-in-out infinite;
+}
+
+@keyframes serenity-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.05); }
+}
+
+/* Inner Peace Mode */
+.inner-peace-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: linear-gradient(90deg, 
+    #ff6b6b, #ffd93d, #6bcb77, #4d96ff, #9b59b6, #ff6b6b);
+  background-size: 300% 100%;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 30px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+  animation: rainbow-shift 3s linear infinite;
+  z-index: 9997;
+}
+
+@keyframes rainbow-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+
+/* Inner Peace Mode - Header glow effect */
+body.inner-peace-mode .header {
+  animation: peaceful-glow 4s ease-in-out infinite;
+}
+
+@keyframes peaceful-glow {
+  0%, 100% { 
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+  }
+  25% { 
+    box-shadow: 0 8px 32px rgba(107, 203, 119, 0.4);
+  }
+  50% { 
+    box-shadow: 0 8px 32px rgba(255, 182, 193, 0.4);
+  }
+  75% { 
+    box-shadow: 0 8px 32px rgba(77, 150, 255, 0.4);
+  }
+}
+
+/* Clickable emoji in header */
+.header h1 .clickable-emoji {
+  cursor: pointer;
+  display: inline-block;
+  transition: transform 0.2s;
+  user-select: none;
+}
+
+.header h1 .clickable-emoji:hover {
+  transform: scale(1.1);
+}
+
+.header h1 .clickable-emoji:active {
+  transform: scale(0.95);
+}

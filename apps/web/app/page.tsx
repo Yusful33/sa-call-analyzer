@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import ProspectTab from "@/components/ProspectTab";
 import HypothesisTab from "@/components/HypothesisTab";
 import GongTab from "@/components/GongTab";
@@ -8,6 +8,7 @@ import DemoTab from "@/components/DemoTab";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
 import AccountSuggestModal from "@/components/AccountSuggestModal";
+import EasterEggs, { useEmojiClick } from "@/components/EasterEggs";
 import { apiPost } from "@/lib/api";
 import type {
   AccountResolveInput,
@@ -39,6 +40,18 @@ export default function Home() {
   const [resultHtml, setResultHtml] = useState("");
   const [resultOwner, setResultOwner] = useState<TabId | null>(null);
   const [suggestUi, setSuggestUi] = useState<SuggestUi | null>(null);
+  const [innerPeaceMode, setInnerPeaceMode] = useState(false);
+  const { handleClick: handleEmojiClick, triggered: emojiTriggered } = useEmojiClick(7);
+
+  useEffect(() => {
+    if (emojiTriggered) {
+      setInnerPeaceMode(true);
+      document.body.classList.add("inner-peace-mode");
+    } else {
+      setInnerPeaceMode(false);
+      document.body.classList.remove("inner-peace-mode");
+    }
+  }, [emojiTriggered]);
 
   const onLoading = useCallback(
     (msg: string) => {
@@ -145,13 +158,25 @@ export default function Home() {
   return (
     <div className="container">
       <div className="header">
-        <h1>{"\u{1F9D8}"} Stillness</h1>
+        <h1>
+          <span
+            className="clickable-emoji"
+            onClick={handleEmojiClick}
+            role="button"
+            aria-label="meditation emoji"
+          >
+            {"\u{1F9D8}"}
+          </span>{" "}
+          Stillness
+        </h1>
         <p className="app-summary">
           <strong>360° prospect intelligence:</strong> CRM data, call insights,
           product usage, and user behavior — unified in one place to prepare for
           your next customer conversation.
         </p>
       </div>
+
+      <EasterEggs onInnerPeaceToggle={setInnerPeaceMode} />
 
       <div className="card">
         <div className="tabs-container">
