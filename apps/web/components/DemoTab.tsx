@@ -160,11 +160,26 @@ export default function DemoTab({
     }
 
     setInsightsLoading(true);
-    onLoading("Fetching Gong call insights for " + accountName.trim() + "...");
+    onLoading("Resolving account...");
 
     try {
+      const resolved = await resolveAccount({
+        accountName: accountName.trim(),
+        accountDomain: "",
+        sfdcAccountId: "",
+      });
+      if (!resolved.proceed) {
+        setInsightsLoading(false);
+        onLoading("");
+        return;
+      }
+      const useName = (resolved.accountName || accountName).trim();
+      if (useName !== accountName.trim()) setAccountName(useName);
+
+      onLoading("Fetching Gong call insights for " + useName + "...");
+
       const data = await apiPost<DemoInsightsResponse>("/api/demo-insights", {
-        account_name: accountName.trim(),
+        account_name: useName,
       });
 
       const newAutoFilled: AutoFilledFields = {};
@@ -481,6 +496,24 @@ export default function DemoTab({
           Used for BigQuery Gong/Salesforce hints shown below the skill JSON. The skill inputs below follow SKILL.md
           exactly, except <strong>additional context</strong> at the bottom (app-only field).
         </p>
+        {!insightsSummary && !dataSourcesNote && gongCallsAnalyzed === 0 && (
+          <button
+            type="button"
+            style={{
+              marginTop: 8,
+              background: "none",
+              border: "1px solid #1976d2",
+              color: "#1976d2",
+              cursor: "pointer",
+              fontSize: "0.85em",
+              padding: "6px 12px",
+              borderRadius: 6,
+            }}
+            onClick={() => setPhase("lookup")}
+          >
+            Try auto-fill from Gong
+          </button>
+        )}
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
