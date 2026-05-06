@@ -9,7 +9,7 @@
     "api/index.py": {
       "runtime": "@vercel/python@4.5.0",
       "maxDuration": 300,
-      "includeFiles": "templates/**/*.docx"
+      "includeFiles": "../templates/poc_pot/*.docx"
     }
   },
   "rewrites": [
