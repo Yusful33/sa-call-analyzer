@@ -1822,6 +1822,84 @@
         /** Which tab last populated #results (prospect | hypothesis | demo | gong). PoC/PoT does not use this panel. */
         let stillnessResultsOwnerTab = null;
 
+        // ============================================================
+        // Prefetch prospect data to warm the server cache
+        // ============================================================
+        let _prefetchDebounceTimer = null;
+        let _lastPrefetchKey = '';
+
+        function prefetchProspect(accountName, domain, sfdcId) {
+            const key = `${(accountName || '').toLowerCase().trim()}|${(domain || '').toLowerCase().trim()}|${(sfdcId || '').trim()}`;
+            if (!accountName && !domain && !sfdcId) return;
+            if (key === _lastPrefetchKey) return;
+            
+            if (_prefetchDebounceTimer) {
+                clearTimeout(_prefetchDebounceTimer);
+            }
+            
+            _prefetchDebounceTimer = setTimeout(() => {
+                _lastPrefetchKey = key;
+                fetch('/api/prefetch-prospect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_name: accountName || null,
+                        domain: domain || null,
+                        sfdc_account_id: sfdcId || null,
+                    }),
+                }).catch(() => {
+                    // Fire and forget - ignore errors
+                });
+            }, 800);
+        }
+
+        // Wire up prefetch to account name inputs
+        document.addEventListener('DOMContentLoaded', () => {
+            // Prospect tab inputs
+            const acctInput = document.getElementById('accountName');
+            const domainInput = document.getElementById('accountDomain');
+            if (acctInput) {
+                acctInput.addEventListener('input', () => {
+                    const name = acctInput.value.trim();
+                    const domain = domainInput ? domainInput.value.trim() : '';
+                    if (name.length >= 3) {
+                        prefetchProspect(name, domain || undefined, undefined);
+                    }
+                });
+            }
+            if (domainInput) {
+                domainInput.addEventListener('input', () => {
+                    const name = acctInput ? acctInput.value.trim() : '';
+                    const domain = domainInput.value.trim();
+                    if (name.length >= 3 || domain.length >= 3) {
+                        prefetchProspect(name || undefined, domain || undefined, undefined);
+                    }
+                });
+            }
+
+            // PoC/PoT tab inputs
+            const pocAcctInput = document.getElementById('pocAccountName');
+            const pocDomainInput = document.getElementById('pocAccountDomain');
+            if (pocAcctInput) {
+                pocAcctInput.addEventListener('input', () => {
+                    const name = pocAcctInput.value.trim();
+                    const domain = pocDomainInput ? pocDomainInput.value.trim() : '';
+                    if (name.length >= 3) {
+                        prefetchProspect(name, domain || undefined, undefined);
+                    }
+                });
+            }
+            if (pocDomainInput) {
+                pocDomainInput.addEventListener('input', () => {
+                    const name = pocAcctInput ? pocAcctInput.value.trim() : '';
+                    const domain = pocDomainInput.value.trim();
+                    if (name.length >= 3 || domain.length >= 3) {
+                        prefetchProspect(name || undefined, domain || undefined, undefined);
+                    }
+                });
+            }
+        });
+
         /**
          * When the typed company name does not substring-match Salesforce (e.g. two words vs one),
          * ask the user to pick a CRM record or keep their spelling.

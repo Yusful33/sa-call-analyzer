@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { apiPost } from "@/lib/api";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { apiPost, prefetchProspect } from "@/lib/api";
 import {
   escapeHtml,
   formatCurrency,
@@ -9,7 +9,11 @@ import {
   formatDate,
   formatMinutes,
 } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
+import type { ShareQuery } from "@/lib/shareableUrl";
+import AccountAutocompleteInput from "@/components/AccountAutocompleteInput";
+import ProspectIntelPanel from "@/components/ProspectIntelPanel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -414,27 +418,81 @@ function buildProspectHtml(overview: any): string {
 
 /* ---------- Component ---------- */
 
+export type ProspectShareHints = Pick<
+  ShareQuery,
+  "account_name" | "domain" | "sfdc_account_id"
+>;
+
 export default function ProspectTab({
   onLoading,
   onResult,
   resolveAccount,
+  urlQuery,
+  onShareHintsChange,
 }: {
   onLoading: (msg: string) => void;
   onResult: (html: string) => void;
   resolveAccount: ResolveAccountFn;
+  /** One-shot hydration from ?account_name=&domain=&sfdc_account_id= */
+  urlQuery?: ShareQuery | null;
+  onShareHintsChange?: (hints: ProspectShareHints) => void;
 }) {
+  const toast = useToast();
   const [accountName, setAccountName] = useState("");
   const [accountDomain, setAccountDomain] = useState("");
   const [sfdcAccountId, setSfdcAccountId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [intel, setIntel] = useState<{
+    deal_health?: { score: number; band: string; factors?: { signal?: string; detail?: string; impact?: string }[] };
+    competitive_mentions?: {
+      competitor?: string | null;
+      what_they_said?: string | null;
+      targeted_response?: string | null;
+      mentioned_in?: string[] | null;
+      note?: string | null;
+    }[];
+    meeting_prep?: { bullets?: string[] };
+  } | null>(null);
+  const urlHydrated = useRef(false);
+
+  useEffect(() => {
+    if (!urlQuery || urlHydrated.current) return;
+    urlHydrated.current = true;
+    if (urlQuery.account_name) setAccountName(urlQuery.account_name);
+    if (urlQuery.domain) setAccountDomain(urlQuery.domain);
+    if (urlQuery.sfdc_account_id) setSfdcAccountId(urlQuery.sfdc_account_id);
+  }, [urlQuery]);
+
+  useEffect(() => {
+    onShareHintsChange?.({
+      account_name: accountName.trim() || undefined,
+      domain: accountDomain.trim() || undefined,
+      sfdc_account_id: sfdcAccountId.trim() || undefined,
+    });
+  }, [accountName, accountDomain, sfdcAccountId, onShareHintsChange]);
+
+  const handleAccountNameChange = useCallback((value: string) => {
+    setAccountName(value);
+    if (value.trim().length >= 3) {
+      prefetchProspect({ accountName: value.trim(), domain: accountDomain.trim() || undefined });
+    }
+  }, [accountDomain]);
+
+  const handleDomainChange = useCallback((value: string) => {
+    setAccountDomain(value);
+    if (accountName.trim().length >= 3 || value.trim().length >= 3) {
+      prefetchProspect({ accountName: accountName.trim() || undefined, domain: value.trim() || undefined });
+    }
+  }, [accountName]);
 
   async function submit() {
     if (!accountName.trim() && !accountDomain.trim() && !sfdcAccountId.trim()) {
-      alert("Please enter at least one search criteria");
+      toast.warning("Please enter at least one search criteria");
       return;
     }
     if (isLoading) return;
     setIsLoading(true);
+    setIntel(null);
     onLoading("Resolving account...");
 
     let nm = accountName.trim();
@@ -465,8 +523,25 @@ export default function ProspectTab({
       if (sid) body.sfdc_account_id = sid;
       const overview = await apiPost("/api/prospect-overview", body);
       onResult(buildProspectHtml(overview));
+
+      try {
+        const bundle = await apiPost<{
+          deal_health: { score: number; band: string; factors?: { signal?: string; detail?: string; impact?: string }[] };
+          competitive_mentions: {
+            competitor?: string | null;
+            what_they_said?: string | null;
+            targeted_response?: string | null;
+            mentioned_in?: string[] | null;
+            note?: string | null;
+          }[];
+          meeting_prep: { bullets?: string[] };
+        }>("/api/prospect-intelligence-bundle", body);
+        setIntel(bundle);
+      } catch {
+        setIntel(null);
+      }
     } catch (err: any) {
-      alert("Error: " + (err.message ?? String(err)));
+      toast.error("Error: " + (err.message ?? String(err)));
       onResult("");
     } finally {
       setIsLoading(false);
@@ -475,14 +550,19 @@ export default function ProspectTab({
 
   return (
     <>
-      <div className="input-section">
-        <label htmlFor="accountName">Account Name</label>
-        <input type="text" id="accountName" placeholder="e.g., Acme Corp, OpenAI, Stripe" value={accountName} onChange={(e) => setAccountName(e.target.value)} />
-        <p className="help-text">Search by account/company name (fuzzy matching supported).</p>
-      </div>
+      <AccountAutocompleteInput
+        id="accountName"
+        label="Account Name"
+        placeholder="e.g., Acme Corp, OpenAI, Stripe"
+        value={accountName}
+        domainHint={accountDomain}
+        onChange={(v) => handleAccountNameChange(v)}
+        helpText="Search by account name — Salesforce suggestions appear as you type."
+        disabled={isLoading}
+      />
       <div className="input-section" style={{ marginTop: 15 }}>
         <label htmlFor="accountDomain">Email Domain (Optional)</label>
-        <input type="text" id="accountDomain" placeholder="e.g., acme.com, openai.com" value={accountDomain} onChange={(e) => setAccountDomain(e.target.value)} />
+        <input type="text" id="accountDomain" placeholder="e.g., acme.com, openai.com" value={accountDomain} onChange={(e) => handleDomainChange(e.target.value)} />
         <p className="help-text">When set with account name, <strong>both</strong> must match.</p>
       </div>
       <div className="input-section" style={{ marginTop: 15 }}>
@@ -498,6 +578,14 @@ export default function ProspectTab({
           {isLoading ? "Loading..." : "Get Prospect Overview"}
         </button>
       </div>
+
+      {intel ? (
+        <ProspectIntelPanel
+          dealHealth={intel.deal_health}
+          competitiveMentions={intel.competitive_mentions}
+          meetingPrep={intel.meeting_prep}
+        />
+      ) : null}
     </>
   );
 }

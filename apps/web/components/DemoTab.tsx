@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiPost, apiPostBlob } from "@/lib/api";
 import { escapeHtml } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
+import type { ShareQuery } from "@/lib/shareableUrl";
 
 const SKILL_DOC =
   "https://github.com/Arize-ai/solutions-resources/blob/main/.claude/skills/arize-synthetic-demo/SKILL.md";
@@ -136,11 +138,16 @@ export default function DemoTab({
   onLoading,
   onResult,
   resolveAccount,
+  urlQuery,
+  onShareHintsChange,
 }: {
   onLoading: (msg: string) => void;
   onResult: (html: string) => void;
   resolveAccount: ResolveAccountFn;
+  urlQuery?: ShareQuery | null;
+  onShareHintsChange?: (hints: Pick<ShareQuery, "demo_account">) => void;
 }) {
+  const toast = useToast();
   const [accountName, setAccountName] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
   const [skillForm, setSkillForm] = useState<SkillFormState>(defaultSkillForm);
@@ -154,10 +161,24 @@ export default function DemoTab({
   const [gongCallsAnalyzed, setGongCallsAnalyzed] = useState<number>(0);
   const [generatingDemo, setGeneratingDemo] = useState(false);
   const [demoGenerated, setDemoGenerated] = useState(false);
+  const urlHydrated = useRef(false);
+
+  useEffect(() => {
+    if (!urlQuery || urlHydrated.current) return;
+    urlHydrated.current = true;
+    const seed = urlQuery.demo_account || urlQuery.account_name;
+    if (seed) setAccountName(seed);
+  }, [urlQuery]);
+
+  useEffect(() => {
+    onShareHintsChange?.({
+      demo_account: accountName.trim() || undefined,
+    });
+  }, [accountName, onShareHintsChange]);
 
   async function fetchInsights() {
     if (!accountName.trim()) {
-      alert("Please enter a prospect/account name to fetch insights.");
+      toast.warning("Please enter a prospect/account name to fetch insights.");
       return;
     }
 
@@ -220,7 +241,7 @@ export default function DemoTab({
       setPhase("input");
       onLoading("");
     } catch (err: any) {
-      alert("Error fetching insights: " + (err.message ?? String(err)));
+      toast.error("Error fetching insights: " + (err.message ?? String(err)));
       onLoading("");
     } finally {
       setInsightsLoading(false);
@@ -244,18 +265,18 @@ export default function DemoTab({
       onResult("");
       onLoading("");
     } catch (err: any) {
-      alert("Error: " + (err.message ?? String(err)));
+      toast.error("Error: " + (err.message ?? String(err)));
       onLoading("");
     }
   }
 
   async function classifyFromInput() {
     if (!accountName.trim()) {
-      alert("Please enter a prospect/account name (SKILL.md: company_name).");
+      toast.warning("Please enter a prospect/account name (SKILL.md: company_name).");
       return;
     }
     if (!skillForm.industryOrUseCase.trim()) {
-      alert("Please enter industry / use case (SKILL.md: industry_or_use_case).");
+      toast.warning("Please enter industry / use case (SKILL.md: industry_or_use_case).");
       return;
     }
     const resolved = await resolveAccount({
@@ -312,7 +333,7 @@ export default function DemoTab({
       setDemoGenerated(true);
       onLoading("");
     } catch (err: any) {
-      alert("Error generating demo: " + (err.message ?? String(err)));
+      toast.error("Error generating demo: " + (err.message ?? String(err)));
       onLoading("");
     } finally {
       setGeneratingDemo(false);

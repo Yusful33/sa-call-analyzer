@@ -159,3 +159,39 @@ export function apiStreamPost(
 
   return { promise, controller, clearTimeout: () => tid && clearTimeout(tid) };
 }
+
+/**
+ * Prefetch prospect data to warm the server cache.
+ * Fire-and-forget - does not throw on errors.
+ */
+let _prefetchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let _lastPrefetchKey = "";
+
+export function prefetchProspect(params: {
+  accountName?: string;
+  domain?: string;
+  sfdcAccountId?: string;
+}): void {
+  const key = `${params.accountName || ""}|${params.domain || ""}|${params.sfdcAccountId || ""}`;
+  if (!params.accountName && !params.domain && !params.sfdcAccountId) return;
+  if (key === _lastPrefetchKey) return;
+  
+  if (_prefetchDebounceTimer) {
+    clearTimeout(_prefetchDebounceTimer);
+  }
+  
+  _prefetchDebounceTimer = setTimeout(() => {
+    _lastPrefetchKey = key;
+    fetch(`${baseUrlForPath("/api/prefetch-prospect")}/api/prefetch-prospect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_name: params.accountName || null,
+        domain: params.domain || null,
+        sfdc_account_id: params.sfdcAccountId || null,
+      }),
+    }).catch(() => {
+      // Fire and forget - ignore errors
+    });
+  }, 800); // 800ms debounce
+}

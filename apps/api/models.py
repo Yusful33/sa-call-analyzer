@@ -557,11 +557,6 @@ class OpportunityData(BaseModel):
     lead_source: Optional[str] = None
     type: Optional[str] = None
     owner_name: Optional[str] = None
-    # Pre-sales team assignments (Salesforce custom fields on Opportunity).
-    # ``assigned_sa`` resolves ``opportunity.assigned_sa_c`` -> user.name.
-    # ``assigned_ai_se`` resolves ``opportunity.assigned_solutions_c`` -> user.name.
-    assigned_sa: Optional[str] = None
-    assigned_ai_se: Optional[str] = None
 
 
 class SalesforceTaskData(BaseModel):
@@ -957,23 +952,13 @@ class GeneratePocDocumentRequest(BaseModel):
             raise ValueError("'account_name' must be non-empty")
 
 
-class TransitionToCsRequest(BaseModel):
-    """Build a pre-sales -> post-sales (CS) Knowledge Transfer markdown document."""
+class TransitionToCSRequest(BaseModel):
+    """Build a Pre-Sales → CS Knowledge Transfer markdown doc from BigQuery + LLM."""
 
-    account_name: str = Field(
-        ...,
-        min_length=1,
-        description="Company / account name for BigQuery lookup",
-    )
-    domain: Optional[str] = None
-    sfdc_account_id: Optional[str] = None
+    account_name: str = Field(..., min_length=1, description="Company / account name for BigQuery lookup")
     manual_notes: Optional[str] = Field(
         default=None,
-        description="Optional free-text context to merge into the generated document (e.g. SA color, politics, sticking points).",
-    )
-    llm_model: Optional[str] = Field(
-        default=None,
-        description="Override the LLM used for the synthesis. Defaults to TRANSITION_DOC_MODEL or MODEL_NAME.",
+        description="Optional SA notes merged into the transition prompt.",
     )
 
     def model_post_init(self, __context):
@@ -981,10 +966,11 @@ class TransitionToCsRequest(BaseModel):
             raise ValueError("'account_name' must be non-empty")
 
 
-class TransitionToCsResponse(BaseModel):
+class TransitionToCSResponse(BaseModel):
     """Generated CS transition document, in markdown."""
 
-    account_name: str
     markdown: str
+    account_name: str
     model: str
     data_sources: List[str] = Field(default_factory=list)
+    stats: Dict[str, Any] = Field(default_factory=dict)

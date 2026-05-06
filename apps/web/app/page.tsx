@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import ProspectTab from "@/components/ProspectTab";
+import { Suspense, useState, useCallback, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import ProspectTab, { type ProspectShareHints } from "@/components/ProspectTab";
 import HypothesisTab from "@/components/HypothesisTab";
 import GongTab from "@/components/GongTab";
 import DemoTab from "@/components/DemoTab";
-import TransitionTab from "@/components/TransitionTab";
 import PocTab from "@/components/PocTab";
+import TransitionTab from "@/components/TransitionTab";
+import SalesStageRail, { stageBodyCopy } from "@/components/SalesStageRail";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
 import AccountSuggestModal from "@/components/AccountSuggestModal";
+import ShareToolbar from "@/components/ShareToolbar";
+import { parseShareQuery, type ShareQuery, type ShareableTab } from "@/lib/shareableUrl";
 import {
   AchievementProvider,
   AchievementToast,
@@ -24,114 +28,7 @@ import type {
   AccountSuggestionMatch,
 } from "@/lib/accountResolve";
 
-type ToolId =
-  | "hypothesis"
-  | "demo"
-  | "gong"
-  | "poc"
-  | "prospect"
-  | "transition";
-
-type StageId = "stage1" | "stage2" | "stage3" | "stage4" | "stage5";
-
-type Tool = {
-  id: ToolId;
-  label: string;
-  shortLabel: string;
-};
-
-type Stage = {
-  id: StageId;
-  number: 1 | 2 | 3 | 4 | 5;
-  name: string;
-  blurb: string;
-  tools: Tool[];
-};
-
-const STAGES: Stage[] = [
-  {
-    id: "stage1",
-    number: 1,
-    name: "Engaged",
-    blurb: "First touch. Pull AI/ML signals before the first call.",
-    tools: [
-      {
-        id: "hypothesis",
-        label: "\u{1F52C} Hypothesis Research",
-        shortLabel: "Hypothesis Research",
-      },
-    ],
-  },
-  {
-    id: "stage2",
-    number: 2,
-    name: "Qualification",
-    blurb:
-      "Validate fit. Build a tailored demo and dissect the discovery call.",
-    tools: [
-      {
-        id: "demo",
-        label: "\u{1F3AF} Custom Demo Builder",
-        shortLabel: "Custom Demo Builder",
-      },
-      {
-        id: "gong",
-        label: "\u{1F4DE} Single Call Analysis",
-        shortLabel: "Single Call Analysis",
-      },
-    ],
-  },
-  {
-    id: "stage3",
-    number: 3,
-    name: "Pre-PoC",
-    blurb:
-      "Stand up the PoC scope. Draft the PoT / PoC doc and align on success criteria.",
-    tools: [
-      {
-        id: "poc",
-        label: "\u{1F4C4} PoC / PoT Document",
-        shortLabel: "PoC / PoT Document",
-      },
-    ],
-  },
-  {
-    id: "stage4",
-    number: 4,
-    name: "PoC",
-    blurb: "PoC in flight. 360° view of the buyer and the deal as you push to close.",
-    tools: [
-      {
-        id: "prospect",
-        label: "\u{1F4CA} Prospect Overview",
-        shortLabel: "Prospect Overview",
-      },
-    ],
-  },
-  {
-    id: "stage5",
-    number: 5,
-    name: "Closed Won",
-    blurb: "Ship a clean Knowledge Transfer doc into Customer Success.",
-    tools: [
-      {
-        id: "transition",
-        label: "\u{1F501} Transition to CS",
-        shortLabel: "Transition to CS",
-      },
-    ],
-  },
-];
-
-const TOOL_TO_STAGE: Record<ToolId, StageId> = STAGES.reduce(
-  (acc, s) => {
-    s.tools.forEach((t) => {
-      acc[t.id] = s.id;
-    });
-    return acc;
-  },
-  {} as Record<ToolId, StageId>,
-);
+type ResultTab = Exclude<ShareableTab, "pocpot" | "transition">;
 
 type SuggestUi = {
   reason: string;
@@ -141,31 +38,45 @@ type SuggestUi = {
 };
 
 function HomeContent() {
-  // Default landing tool: Stage 1 / Hypothesis Research — the start of the funnel.
-  const [activeTool, setActiveTool] = useState<ToolId>("hypothesis");
+  const searchParams = useSearchParams();
+  /** Deferred from URL so server and client first paint match (useSearchParams differs on SSR). */
+  const [shareQuery, setShareQuery] = useState<ShareQuery>({});
+  const [activeTab, setActiveTab] = useState<ShareableTab>("prospect");
+  const [shareHints, setShareHints] = useState<Partial<ShareQuery>>({});
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [resultHtml, setResultHtml] = useState("");
-  const [resultOwner, setResultOwner] = useState<ToolId | null>(null);
+  const [resultOwner, setResultOwner] = useState<ResultTab | null>(null);
   const [suggestUi, setSuggestUi] = useState<SuggestUi | null>(null);
 
-  const {
-    trackProspectRun,
-    trackGongSuccess,
-    trackDemoBuild,
-    trackTabUsed,
-  } = useAchievements();
+  const stageHeader = useMemo(() => stageBodyCopy(activeTab), [activeTab]);
+
+  const queryString = searchParams.toString();
+  useEffect(() => {
+    const q = parseShareQuery(new URLSearchParams(queryString));
+    setShareQuery(q);
+    if (q.tab) setActiveTab(q.tab);
+  }, [queryString]);
+
+  const mergeShareHints = useCallback((patch: Partial<ShareQuery>) => {
+    setShareHints((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const onProspectShareHints = useCallback(
+    (hints: ProspectShareHints) =>
+      mergeShareHints({
+        account_name: hints.account_name,
+        domain: hints.domain,
+        sfdc_account_id: hints.sfdc_account_id,
+      }),
+    [mergeShareHints],
+  );
+
+  const { trackProspectRun, trackGongSuccess, trackDemoBuild, trackTabUsed } = useAchievements();
 
   useEffect(() => {
-    trackTabUsed(activeTool);
-  }, [activeTool, trackTabUsed]);
-
-  const activeStage = useMemo<Stage>(
-    () =>
-      STAGES.find((s) => s.id === TOOL_TO_STAGE[activeTool]) ??
-      STAGES[0],
-    [activeTool],
-  );
+    trackTabUsed(activeTab);
+  }, [activeTab, trackTabUsed]);
 
   const onLoading = useCallback((msg: string) => {
     if (msg) {
@@ -179,17 +90,17 @@ function HomeContent() {
   }, []);
 
   const makeOnResult = useCallback(
-    (tool: ToolId) => (html: string) => {
+    (tab: ResultTab) => (html: string) => {
       setLoading(false);
       setResultHtml(html);
-      setResultOwner(html ? tool : null);
+      setResultOwner(html ? tab : null);
 
       if (html) {
-        if (tool === "prospect") {
+        if (tab === "prospect") {
           trackProspectRun();
-        } else if (tool === "gong") {
+        } else if (tab === "gong") {
           trackGongSuccess();
-        } else if (tool === "demo") {
+        } else if (tab === "demo") {
           trackDemoBuild();
         }
       }
@@ -197,84 +108,82 @@ function HomeContent() {
     [trackProspectRun, trackGongSuccess, trackDemoBuild],
   );
 
-  const resolveAccount = useCallback(
-    async (input: AccountResolveInput): Promise<AccountResolveResult> => {
-      const sid = (input.sfdcAccountId || "").trim();
-      const an = (input.accountName || "").trim();
-      const dom = (input.accountDomain || "").trim();
-      if (sid) {
+  const resolveAccount = useCallback(async (input: AccountResolveInput): Promise<AccountResolveResult> => {
+    const sid = (input.sfdcAccountId || "").trim();
+    const an = (input.accountName || "").trim();
+    const dom = (input.accountDomain || "").trim();
+    if (sid) {
+      return {
+        proceed: true,
+        accountName: an,
+        accountDomain: dom || undefined,
+        sfdcAccountId: sid,
+      };
+    }
+    if (!an) {
+      return {
+        proceed: true,
+        accountName: an,
+        accountDomain: dom || undefined,
+      };
+    }
+    try {
+      const r = await apiPost<AccountSuggestionsResponse>("/api/account-suggestions", {
+        account_name: an,
+        domain: dom || null,
+      });
+      if (r.status === "ok" && r.matches?.length === 1) {
+        const m = r.matches[0];
+        return {
+          proceed: true,
+          accountName: m.name,
+          accountDomain: dom || undefined,
+          sfdcAccountId: m.id,
+        };
+      }
+      if (r.status !== "suggest" || !r.matches?.length) {
         return {
           proceed: true,
           accountName: an,
           accountDomain: dom || undefined,
-          sfdcAccountId: sid,
         };
       }
-      if (!an) {
-        return {
-          proceed: true,
-          accountName: an,
-          accountDomain: dom || undefined,
-        };
-      }
-      try {
-        const r = await apiPost<AccountSuggestionsResponse>(
-          "/api/account-suggestions",
-          { account_name: an, domain: dom || null },
-        );
-        if (r.status === "ok" && r.matches?.length === 1) {
-          const m = r.matches[0];
-          return {
-            proceed: true,
-            accountName: m.name,
-            accountDomain: dom || undefined,
-            sfdcAccountId: m.id,
-          };
-        }
-        if (r.status !== "suggest" || !r.matches?.length) {
-          return {
-            proceed: true,
-            accountName: an,
-            accountDomain: dom || undefined,
-          };
-        }
-        return await new Promise((resolve) => {
-          setSuggestUi({
-            reason: r.reason || "Pick an account.",
-            typedQuery: an,
-            matches: r.matches,
-            resolve: (choice) => {
-              setSuggestUi(null);
-              if (choice === "cancel") resolve({ proceed: false });
-              else if (choice === "keep") {
-                resolve({
-                  proceed: true,
-                  accountName: an,
-                  accountDomain: dom || undefined,
-                });
-              } else {
-                resolve({
-                  proceed: true,
-                  accountName: choice.name,
-                  accountDomain: dom || undefined,
-                  sfdcAccountId: choice.id,
-                });
-              }
-            },
-          });
+      return await new Promise((resolve) => {
+        setSuggestUi({
+          reason: r.reason || "Pick an account.",
+          typedQuery: an,
+          matches: r.matches,
+          resolve: (choice) => {
+            setSuggestUi(null);
+            if (choice === "cancel") resolve({ proceed: false });
+            else if (choice === "keep") {
+              resolve({
+                proceed: true,
+                accountName: an,
+                accountDomain: dom || undefined,
+              });
+            } else {
+              resolve({
+                proceed: true,
+                accountName: choice.name,
+                accountDomain: dom || undefined,
+                sfdcAccountId: choice.id,
+              });
+            }
+          },
         });
-      } catch {
-        return {
-          proceed: true,
-          accountName: an,
-          accountDomain: dom || undefined,
-        };
-      }
-    },
-    [],
-  );
+      });
+    } catch {
+      return {
+        proceed: true,
+        accountName: an,
+        accountDomain: dom || undefined,
+      };
+    }
+  }, []);
 
-  const showResults = resultOwner === activeTool && !!resultHtml;
+  const hideSharedResults = activeTab === "pocpot" || activeTab === "transition";
+  const showResults = !hideSharedResults && resultOwner === activeTab && !!resultHtml;
 
   return (
     <div className="container">
@@ -283,14 +192,7 @@ function HomeContent() {
           <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M16 2L30 28H2L16 2Z" fill="url(#arize-grad)" />
             <defs>
-              <linearGradient
-                id="arize-grad"
-                x1="2"
-                y1="28"
-                x2="30"
-                y2="2"
-                gradientUnits="userSpaceOnUse"
-              >
+              <linearGradient id="arize-grad" x1="2" y1="28" x2="30" y2="2" gradientUnits="userSpaceOnUse">
                 <stop stopColor="#E5117F" />
                 <stop offset="1" stopColor="#8E5BD3" />
               </linearGradient>
@@ -309,123 +211,59 @@ function HomeContent() {
           product usage, and user behavior — unified in one place to prepare for
           your next customer conversation.
         </p>
+        <ShareToolbar activeTab={activeTab} hints={shareHints} />
       </div>
+
+      <SalesStageRail activeTab={activeTab} onSelectTab={setActiveTab} />
 
       <AchievementToast />
 
-      <div className="stage-rail-wrapper">
-        <div className="stage-rail-eyebrow">Sales Stage</div>
-        <ol className="stage-rail" role="tablist" aria-label="Sales Stage">
-          {STAGES.map((s, i) => {
-            const stageActive = activeStage.id === s.id;
-            const isMulti = s.tools.length > 1;
-            const eyebrow = (
-              <div className="stage-card-eyebrow">
-                <span className="stage-card-number">Stage {s.number}</span>
-                <span className="stage-card-divider" aria-hidden="true">
-                  •
-                </span>
-                <span className="stage-card-name">{s.name}</span>
-              </div>
-            );
-
-            return (
-              <li key={s.id} className="stage-rail-item">
-                {isMulti ? (
-                  <div
-                    className={`stage-card stage-card-multi${stageActive ? " active" : ""}`}
-                  >
-                    {eyebrow}
-                    <div className="stage-card-tool-list" role="tablist">
-                      {s.tools.map((t) => {
-                        const toolActive = activeTool === t.id;
-                        return (
-                          <button
-                            key={t.id}
-                            type="button"
-                            role="tab"
-                            aria-selected={toolActive}
-                            className={`stage-tool-button${toolActive ? " active" : ""}`}
-                            onClick={() => setActiveTool(t.id)}
-                          >
-                            {t.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="stage-card-blurb">{s.blurb}</div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={stageActive}
-                    className={`stage-card stage-card-single${stageActive ? " active" : ""}`}
-                    onClick={() => setActiveTool(s.tools[0].id)}
-                  >
-                    {eyebrow}
-                    <div className="stage-card-tool-name">
-                      {s.tools[0].label}
-                    </div>
-                    <div className="stage-card-blurb">{s.blurb}</div>
-                  </button>
-                )}
-                {i < STAGES.length - 1 ? (
-                  <span className="stage-rail-arrow" aria-hidden="true">
-                    →
-                  </span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ol>
-      </div>
-
-      <div className="card stage-card-body">
-        <div className="stage-body-header">
-          <div>
-            <div className="stage-body-eyebrow">
-              Stage {activeStage.number} • {activeStage.name}
-            </div>
-            <div className="stage-body-tool-name">
-              {activeStage.tools.find((t) => t.id === activeTool)?.label ?? ""}
+      <div className="card">
+        <div className="tabs-container">
+          <div className="stage-body-header">
+            <div>
+              <div className="stage-body-eyebrow">{stageHeader.eyebrow}</div>
+              <div className="stage-body-tool-name">{stageHeader.toolName}</div>
             </div>
           </div>
-        </div>
 
-        <div className="tab-content-wrapper">
-          <div className={`tab-content${activeTool === "hypothesis" ? " active" : ""}`}>
-            <HypothesisTab
-              onLoading={onLoading}
-              onResult={makeOnResult("hypothesis")}
-              resolveAccount={resolveAccount}
-            />
-          </div>
-          <div className={`tab-content${activeTool === "demo" ? " active" : ""}`}>
-            <DemoTab
-              onLoading={onLoading}
-              onResult={makeOnResult("demo")}
-              resolveAccount={resolveAccount}
-            />
-          </div>
-          <div className={`tab-content${activeTool === "gong" ? " active" : ""}`}>
-            <GongTab onLoading={onLoading} onResult={makeOnResult("gong")} />
-          </div>
-          <div className={`tab-content${activeTool === "poc" ? " active" : ""}`}>
-            <PocTab onLoading={onLoading} resolveAccount={resolveAccount} />
-          </div>
-          <div className={`tab-content${activeTool === "prospect" ? " active" : ""}`}>
-            <ProspectTab
-              onLoading={onLoading}
-              onResult={makeOnResult("prospect")}
-              resolveAccount={resolveAccount}
-            />
-          </div>
-          <div className={`tab-content${activeTool === "transition" ? " active" : ""}`}>
-            <TransitionTab
-              onLoading={onLoading}
-              resolveAccount={resolveAccount}
-            />
+          <div className="tab-content-wrapper">
+            <div className={`tab-content${activeTab === "hypothesis" ? " active" : ""}`}>
+              <HypothesisTab
+                onLoading={onLoading}
+                onResult={makeOnResult("hypothesis")}
+                resolveAccount={resolveAccount}
+                urlQuery={shareQuery}
+                onShareHintsChange={(h) => mergeShareHints(h)}
+              />
+            </div>
+            <div className={`tab-content${activeTab === "prospect" ? " active" : ""}`}>
+              <ProspectTab
+                onLoading={onLoading}
+                onResult={makeOnResult("prospect")}
+                resolveAccount={resolveAccount}
+                urlQuery={shareQuery}
+                onShareHintsChange={onProspectShareHints}
+              />
+            </div>
+            <div className={`tab-content${activeTab === "demo" ? " active" : ""}`}>
+              <DemoTab
+                onLoading={onLoading}
+                onResult={makeOnResult("demo")}
+                resolveAccount={resolveAccount}
+                urlQuery={shareQuery}
+                onShareHintsChange={(h) => mergeShareHints(h)}
+              />
+            </div>
+            <div className={`tab-content${activeTab === "gong" ? " active" : ""}`}>
+              <GongTab onLoading={onLoading} onResult={makeOnResult("gong")} />
+            </div>
+            <div className={`tab-content${activeTab === "pocpot" ? " active" : ""}`}>
+              <PocTab onLoading={onLoading} resolveAccount={resolveAccount} />
+            </div>
+            <div className={`tab-content${activeTab === "transition" ? " active" : ""}`}>
+              <TransitionTab onLoading={onLoading} resolveAccount={resolveAccount} />
+            </div>
           </div>
         </div>
       </div>
@@ -449,7 +287,15 @@ function HomeContent() {
 export default function Home() {
   return (
     <AchievementProvider>
-      <HomeContent />
+      <Suspense
+        fallback={
+          <div className="container" style={{ padding: 32 }}>
+            Loading…
+          </div>
+        }
+      >
+        <HomeContent />
+      </Suspense>
     </AchievementProvider>
   );
 }

@@ -1,7 +1,7 @@
 # Stillness Local Development Makefile
 # Run `make help` to see all available commands
 
-.PHONY: help dev dev-docker dev-api dev-web setup install clean logs stop
+.PHONY: help dev dev-docker dev-api dev-web setup install clean logs stop ci ci-doc-links ci-web ci-api-import
 
 # Default target
 help:
@@ -26,6 +26,7 @@ help:
 	@echo "  make install   - Install all dependencies"
 	@echo "  make clean     - Clean build artifacts and caches"
 	@echo "  make test      - Run tests"
+	@echo "  make ci        - Local CI: doc links + web lint/build + API import smoke"
 	@echo ""
 	@echo "Environment:"
 	@echo "  Copy .env.example to .env and configure required variables"
@@ -116,6 +117,25 @@ test:
 
 test-api:
 	cd apps/api && uv run pytest
+
+# ============================================================================
+# CI (mirrors GitHub Actions where possible — use uv for API like `make install-api`)
+# ============================================================================
+
+ci-doc-links:
+	@echo "📎 Checking canonical docs.arize.com URLs..."
+	cd apps/api && uv run python scripts/check_doc_links.py
+
+ci-web:
+	@echo "🌐 Web lint + production build..."
+	cd apps/web && npm run lint && npm run build
+
+ci-api-import:
+	@echo "🐍 API import smoke (FastAPI app loads)..."
+	cd apps/api && uv run python -c "import main; assert main.app is not None; print('import ok')"
+
+ci: ci-doc-links ci-web ci-api-import
+	@echo "✅ CI checks passed locally"
 
 # ============================================================================
 # Cleanup

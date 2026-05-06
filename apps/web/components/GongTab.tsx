@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { apiPost, apiPostBlob } from "@/lib/api";
 import { escapeHtml, downloadBlob } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -141,12 +142,13 @@ function displayResults(data: any): string {
 }
 
 export default function GongTab({ onLoading, onResult }: { onLoading: (msg: string) => void; onResult: (html: string) => void }) {
+  const toast = useToast();
   const [gongUrl, setGongUrl] = useState("");
   const [model, setModel] = useState("gpt-4o-mini");
   const recapRef = useRef<any>(null);
 
   async function submit() {
-    if (!gongUrl.trim()) { alert("Please paste a Gong URL first"); return; }
+    if (!gongUrl.trim()) { toast.warning("Please paste a Gong URL first"); return; }
     onLoading("Fetching transcript from Gong API...");
     try {
       const data = await apiPost<any>("/api/analyze", { sa_name: null, model, gong_url: gongUrl.trim() }, { timeout: 240000 });
@@ -155,7 +157,7 @@ export default function GongTab({ onLoading, onResult }: { onLoading: (msg: stri
       setTimeout(() => {
         const btn = document.getElementById("generateRecapBtn");
         if (btn) btn.onclick = async () => {
-          if (!recapRef.current) { alert("No recap data"); return; }
+          if (!recapRef.current) { toast.warning("No recap data available"); return; }
           btn.textContent = "Generating...";
           (btn as HTMLButtonElement).disabled = true;
           const status = document.getElementById("recapStatus");
@@ -178,7 +180,7 @@ export default function GongTab({ onLoading, onResult }: { onLoading: (msg: stri
       }, 100);
     } catch (err: any) {
       const msg = err.name === "AbortError" ? "Request timed out after 4 minutes." : (err.message ?? String(err));
-      alert("Error: " + msg);
+      toast.error("Error: " + msg);
       onResult("");
     }
   }
