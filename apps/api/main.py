@@ -1807,6 +1807,51 @@ async def hypothesis_research(request: HypothesisResearchRequest):
                 company_domain=request.company_domain.strip() if request.company_domain else None,
             )
 
+            # Convert pydantic model to dict for JSON response
+            result_dict = result.model_dump() if hasattr(result, 'model_dump') else result
+
+            # Add clean output summary to root span for visibility in Arize
+            research = result_dict.get("research", {})
+            quality = result_dict.get("research_quality", "unknown")
+            hypotheses_count = len(result_dict.get("hypotheses", []))
+            signals_count = len(research.get("ai_ml_signals", []))
+            industry = research.get("industry", "Unknown")
+            confidence = research.get("ai_ml_confidence", "unknown")
+            
+            # Build clean human-readable output
+            hypotheses_list = result_dict.get("hypotheses", [])
+            hypothesis_texts = []
+            for h in hypotheses_list[:3]:
+                text = h.get("hypothesis", h.get("title", "Untitled"))
+                if text and len(text) > 100:
+                    text = text[:100] + "..."
+                hypothesis_texts.append(text)
+            
+            output_lines = [
+                f"Company: {result_dict.get('company_name')}",
+                f"Quality: {quality.upper()}",
+                f"Industry: {industry}",
+                f"AI/ML Confidence: {confidence}",
+                f"Signals Found: {signals_count}",
+                f"Hypotheses Generated: {hypotheses_count}",
+            ]
+            if hypothesis_texts:
+                output_lines.append("Top Hypotheses:")
+                for i, text in enumerate(hypothesis_texts, 1):
+                    output_lines.append(f"  {i}. {text}")
+            
+            warnings = result_dict.get("warnings", [])
+            errors = result_dict.get("errors", [])
+            if warnings:
+                output_lines.append(f"Warnings: {len(warnings)}")
+            if errors:
+                output_lines.append(f"Errors: {len(errors)}")
+            
+            span.set_attribute("output.value", "\n".join(output_lines))
+            span.set_attribute("research.quality", quality)
+            span.set_attribute("research.hypotheses_count", hypotheses_count)
+            span.set_attribute("research.signals_count", signals_count)
+
             # Flush hypothesis provider so traces are exported before response (same pattern as demo)
             hyp_provider = get_provider_for_component(COMPONENT_HYPOTHESIS)
             if hyp_provider is not None and hasattr(hyp_provider, "force_flush"):
@@ -1815,8 +1860,6 @@ async def hypothesis_research(request: HypothesisResearchRequest):
                 except Exception:
                     pass
 
-            # Convert pydantic model to dict for JSON response
-            result_dict = result.model_dump() if hasattr(result, 'model_dump') else result
             return {
                 "result": result_dict,
                 "agent_reasoning": reasoning,
