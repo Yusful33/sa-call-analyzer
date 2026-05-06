@@ -60,7 +60,7 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: Pull Vercel project settings
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }}
 
       - name: Build for Vercel
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
@@ -69,7 +69,7 @@ jobs:
         id: deploy
         run: |
           set -euo pipefail
-          deployment_url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          deployment_url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
           echo "Deployed: $deployment_url"
 
@@ -78,6 +78,7 @@ jobs:
           vercel alias set \
             "${{ steps.deploy.outputs.deployment_url }}" \
             "${PUBLIC_ALIAS}" \
+            --scope=${{ env.VERCEL_ORG_ID }} \
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Smoke-test public URL
