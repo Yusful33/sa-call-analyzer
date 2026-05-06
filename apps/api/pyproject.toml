@@ -70,6 +70,10 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+slack = [
+    "slack-bolt>=1.18.0",
+    "slack-sdk>=3.27.0",
+]
 
 [project.scripts]
 # Tells Vercel where to load the FastAPI `app` (see deploy docs — main.py is not a default entry name).

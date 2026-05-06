@@ -249,6 +249,21 @@ if _API_SERVICE_MODE in ("full", "light", "crew"):
 else:
     logger.info("API_SERVICE_MODE=%s - call analysis routes not loaded", _API_SERVICE_MODE)
 
+# Register Slack bot routes if configured
+if os.getenv("SLACK_BOT_TOKEN"):
+    try:
+        from slack_bot import SlackBot
+        from routes.slack import configure_slack_routes
+
+        _slack_bot = SlackBot(bq_client=bq_client, gong_client=gong_client)
+        slack_router = configure_slack_routes(_slack_bot)
+        app.include_router(slack_router)
+        logger.info("Slack bot routes registered")
+    except ImportError as e:
+        logger.warning("Slack dependencies not installed, skipping Slack routes: %s", e)
+else:
+    logger.info("SLACK_BOT_TOKEN not set, Slack routes not loaded")
+
 
 @app.get("/")
 async def root():
