@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { apiPostBlob } from "@/lib/api";
 import { buildPocDocDownloadFilename, downloadBlob } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
 
 type DocumentTemplateId = "pot" | "poc_saas" | "poc_vpc";
@@ -32,6 +33,7 @@ export default function PocTab({
   onLoading: (msg: string) => void;
   resolveAccount: ResolveAccountFn;
 }) {
+  const toast = useToast();
   const [accountName, setAccountName] = useState("");
   const [template, setTemplate] = useState<DocumentTemplateId>("poc_saas");
   const [manualNotes, setManualNotes] = useState("");
@@ -40,7 +42,7 @@ export default function PocTab({
   async function submit() {
     const an = accountName.trim();
     if (!an) {
-      alert("Please enter a company / account name.");
+      toast.warning("Please enter a company / account name.");
       return;
     }
 
@@ -76,7 +78,7 @@ export default function PocTab({
       downloadBlob(blob, filename);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      alert("Document generation failed: " + message);
+      toast.error("Document generation failed: " + message);
     } finally {
       setSubmitting(false);
       onLoading("");

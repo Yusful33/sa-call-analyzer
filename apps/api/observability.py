@@ -328,7 +328,16 @@ def get_component_for_path(path: str) -> str:
     """Map request path to component so middleware can set the right Arize project."""
     if path.startswith("/api/hypothesis-research"):
         return COMPONENT_HYPOTHESIS  # Hypothesis Generator
-    if path.startswith("/api/analyze-prospect") or path.startswith("/api/prospect-overview"):
+    if (
+        path.startswith("/api/analyze-prospect")
+        or path.startswith("/api/prospect-overview")
+        or path.startswith("/api/prefetch-prospect")
+        or path.startswith("/api/prospect-intelligence-bundle")
+        or path.startswith("/api/account-suggestions")
+        or path.startswith("/api/doc-links")
+        or path.startswith("/api/generate-poc-document")
+        or path.startswith("/api/transition-to-cs")
+    ):
         return COMPONENT_PROSPECT  # Prospect Overview
     # Custom Demo Builder
     if (

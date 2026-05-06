@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { apiPost } from "@/lib/api";
 import { escapeHtml } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
 
 type TransitionResponse = {
@@ -109,6 +110,7 @@ export default function TransitionTab({
   onLoading: (msg: string) => void;
   resolveAccount: ResolveAccountFn;
 }) {
+  const toast = useToast();
   const [accountName, setAccountName] = useState("");
   const [manualNotes, setManualNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -124,7 +126,7 @@ export default function TransitionTab({
   async function submit() {
     const an = accountName.trim();
     if (!an) {
-      alert("Please enter a customer / account name.");
+      toast.warning("Please enter a customer / account name.");
       return;
     }
 
@@ -151,7 +153,7 @@ export default function TransitionTab({
       setResult(data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      alert("Knowledge Transfer generation failed: " + message);
+      toast.error("Knowledge Transfer generation failed: " + message);
     } finally {
       setSubmitting(false);
       onLoading("");
@@ -174,10 +176,11 @@ export default function TransitionTab({
         ta.remove();
       }
       setCopied(true);
+      toast.success("Markdown copied to clipboard");
       setTimeout(() => setCopied(false), 1600);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      alert("Could not copy markdown: " + message);
+      toast.error("Could not copy markdown: " + message);
     }
   }
 

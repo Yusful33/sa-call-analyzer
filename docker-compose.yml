@@ -27,8 +27,9 @@ services:
       - USE_LITELLM=false
       - GONG_MCP_URL=https://id-pain-gong-mcp.vercel.app
       - CREWAI_TRACING_ENABLED=false
-    volumes:
-      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - GCP_CREDENTIALS_BASE64=${GCP_CREDENTIALS_BASE64:-}
+      # Browser redirect from API :8080/ to Next (host port matches WEB_PORT)
+      - STILLNESS_WEB_URL=http://localhost:${WEB_PORT:-3000}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

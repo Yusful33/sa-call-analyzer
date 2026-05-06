@@ -3,8 +3,17 @@ import json
 import time
 import base64
 import asyncio
+import logging
 import contextvars
 from pathlib import Path
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("sa-call-analyzer")
 
 # Get the directory where this file is located (apps/api/)
 BASE_DIR = Path(__file__).resolve().parent
@@ -19,8 +28,7 @@ def setup_gcp_credentials():
     """Decode GCP credentials from base64 environment variable."""
     gcp_creds_b64 = os.getenv("GCP_CREDENTIALS_BASE64")
     
-    print(f"\n🔐 GCP Credentials Setup:")
-    print(f"   GCP_CREDENTIALS_BASE64: {'SET' if gcp_creds_b64 else 'NOT SET'} ({len(gcp_creds_b64) if gcp_creds_b64 else 0} chars)")
+    logger.info("GCP Credentials Setup: %s", "SET" if gcp_creds_b64 else "NOT SET")
     
     if gcp_creds_b64:
         try:
@@ -39,25 +47,22 @@ def setup_gcp_credentials():
             # Set the environment variable to point to the file
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
             
-            print(f"   ✅ Credentials decoded and written to {creds_path}")
-            print(f"   GOOGLE_APPLICATION_CREDENTIALS={os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-            
             # Verify the JSON is valid
             creds_dict = json.loads(creds_json)
-            print(f"   Credential type: {creds_dict.get('type', 'unknown')}")
+            logger.info("GCP credentials decoded (type: %s)", creds_dict.get('type', 'unknown'))
             
             return True
         except Exception as e:
-            print(f"   ❌ Failed to decode credentials: {e}")
+            logger.error("Failed to decode GCP credentials: %s", e)
             return False
     else:
         # Check if GOOGLE_APPLICATION_CREDENTIALS is already set
         existing_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         if existing_creds and Path(existing_creds).exists():
-            print(f"   Using existing credentials: {existing_creds}")
+            logger.info("Using existing GCP credentials")
             return True
         else:
-            print(f"   ⚠️  No GCP credentials available")
+            logger.warning("No GCP credentials available")
             return False
 
 # Run credential setup before anything else
@@ -67,35 +72,13 @@ setup_gcp_credentials()
 # This allows uv/venv to manage environment variables
 # The .env file is kept for reference/documentation only
 
-# DEBUG: Verify environment variables are set and optionally check .env file matches
-env_path = REPO_ROOT / ".env"
+# Verify environment variables are set
 arize_space_id_env = os.getenv("ARIZE_SPACE_ID")
 arize_api_key_env = os.getenv("ARIZE_API_KEY")
 
-print(f"\n🔍 Environment Variable Check:")
-print(f"   ARIZE_API_KEY: {'SET' if arize_api_key_env else 'NOT SET'} ({len(arize_api_key_env) if arize_api_key_env else 0} chars)")
-print(f"   ARIZE_SPACE_ID: {'SET' if arize_space_id_env else 'NOT SET'} ({len(arize_space_id_env) if arize_space_id_env else 0} chars)")
-
-if arize_space_id_env:
-    print(f"   Space ID value (first 20 chars): {arize_space_id_env[:20]}...")
-
-# Optional: Verify .env file matches environment variables (for documentation)
-if env_path.exists() and arize_space_id_env:
-    try:
-        with open(env_path, 'r') as f:
-            for line in f:
-                if line.startswith('ARIZE_SPACE_ID='):
-                    env_file_value = line.split('=', 1)[1].strip()
-                    if env_file_value != arize_space_id_env:
-                        print(f"   ⚠️  WARNING: .env file Space ID doesn't match environment variable!")
-                        print(f"      .env file: {env_file_value[:20]}...")
-                        print(f"      env var:   {arize_space_id_env[:20]}...")
-                        print(f"      Consider updating .env file to match your environment variables")
-                    else:
-                        print(f"   ✅ .env file matches environment variable")
-                    break
-    except Exception as e:
-        print(f"   ⚠️  Could not verify .env file: {e}")
+logger.info("Environment check: ARIZE_API_KEY=%s, ARIZE_SPACE_ID=%s",
+            "SET" if arize_api_key_env else "NOT SET",
+            "SET" if arize_space_id_env else "NOT SET")
 
 # Initialize observability before importing analysis modules
 from observability import (
@@ -122,11 +105,16 @@ from models import (
     ProspectOverviewRequest,
     ProspectOverview,
     GeneratePocDocumentRequest,
+    TransitionToCSRequest,
+    TransitionToCSResponse,
     AccountSuggestionsRequest,
     AccountSuggestionsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
+from transition_document_generator import build_transition_document
 from gong_mcp_client import GongMCPClient
+from arize_doc_links import validate_doc_links_sync
+from prospect_intel import build_prospect_intelligence_bundle
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel
@@ -200,18 +188,6 @@ app.add_middleware(
 )
 
 
-# #region agent log
-def _agent_log(location: str, message: str, data: dict, hypothesis_id: str = "H4"):
-    import json
-    from datetime import datetime
-    try:
-        with open("/Users/yusufcattaneo/Projects/.cursor/debug-24e5e3.log", "a") as f:
-            f.write(json.dumps({"sessionId": "24e5e3", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": datetime.utcnow().isoformat() + "Z"}) + "\n")
-    except Exception:
-        pass
-# #endregion
-
-
 @app.middleware("http")
 async def arize_project_middleware(request, call_next):
     """Set the active Arize tracer provider by component so each of the 4 components writes to its own project."""
@@ -219,8 +195,7 @@ async def arize_project_middleware(request, call_next):
         component = get_component_for_path(request.url.path)
         provider = get_provider_for_component(component)
         if provider is not None:
-            set_request_tracer_provider(provider)  # update proxy's current provider (instrumentors use the proxy)
-        _agent_log("main.py:arize_project_middleware", "path and component", {"path": request.url.path, "component": component}, "H4")
+            set_request_tracer_provider(provider)
     return await call_next(request)
 
 
@@ -229,20 +204,19 @@ tracer = trace.get_tracer("sa-call-analyzer-api")
 
 # Verify tracer provider after core imports
 current_provider = trace.get_tracer_provider()
-print(f"🔍 Tracer provider after imports: {type(current_provider).__name__}")
+logger.debug("Tracer provider: %s", type(current_provider).__name__)
 if tracer_provider:
-    if current_provider == tracer_provider:
-        print("   ✅ Arize tracer provider is still active")
-    else:
-        print(f"   ⚠️  WARNING: Tracer provider was overridden! Expected {type(tracer_provider).__name__}, got {type(current_provider).__name__}")
+    if current_provider != tracer_provider:
+        logger.warning("Tracer provider was overridden: expected %s, got %s",
+                       type(tracer_provider).__name__, type(current_provider).__name__)
 
 # Initialize Gong MCP client
 try:
     gong_client = GongMCPClient()
-    print("✅ Gong MCP client initialized")
+    logger.info("Gong MCP client initialized")
 except Exception as e:
     gong_client = None
-    print(f"⚠️  Gong MCP client not available: {e}")
+    logger.warning("Gong MCP client not available: %s", e)
 
 _API_SERVICE_MODE = os.environ.get("API_SERVICE_MODE", "full").lower()
 
@@ -253,12 +227,12 @@ if _API_SERVICE_MODE in ("full", "light"):
         from bigquery_client import BigQueryClient
 
         bq_client = BigQueryClient()
-        print("✅ BigQuery client initialized")
+        logger.info("BigQuery client initialized")
     except Exception as e:
         bq_client = None
-        print(f"⚠️  BigQuery client not available: {e}")
+        logger.warning("BigQuery client not available: %s", e)
 else:
-    print("ℹ️  Skipping BigQuery init (API_SERVICE_MODE=crew)")
+    logger.info("Skipping BigQuery init (API_SERVICE_MODE=crew)")
 
 
 def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOverview:
@@ -272,13 +246,9 @@ if _API_SERVICE_MODE in ("full", "light", "crew"):
     from routes_crew import register_crew_routes
 
     register_crew_routes(app, gong_client=gong_client, tracer=tracer)
-    print("🤖 Call analysis routes registered (analyze, recap, prospect timeline)")
-    print("   1. 🔍 Call Classifier")
-    print("   2. 🛠️ Technical Evaluator")
-    print("   3. 💡 Sales Methodology & Discovery Expert")
-    print("   4. 📝 Report Compiler")
+    logger.info("Call analysis routes registered")
 else:
-    print(f"ℹ️  API_SERVICE_MODE={_API_SERVICE_MODE!r} — call analysis routes not loaded on this worker")
+    logger.info("API_SERVICE_MODE=%s - call analysis routes not loaded", _API_SERVICE_MODE)
 
 
 @app.get("/")
@@ -701,6 +671,86 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
             )
 
 
+@app.get("/api/doc-links/check")
+async def doc_links_check():
+    """
+    Validate canonical docs.arize.com URLs used in PoC/PoT templates (HEAD with redirect follow).
+    Intended for ops dashboards; can be slow (~seconds) when run cold.
+    """
+    return await asyncio.to_thread(validate_doc_links_sync)
+
+
+@app.post("/api/prospect-intelligence-bundle")
+async def prospect_intelligence_bundle(request: ProspectOverviewRequest):
+    """
+    One round-trip for deal health score, competitive mention rollup, and meeting prep bullets.
+    Reuses the same in-memory cache as /api/prospect-overview when possible.
+    """
+    with tracer.start_as_current_span(
+        f"{SPAN_PREFIX}.prospect_intelligence_bundle",
+        attributes={
+            "lookup.account_name": request.account_name or "",
+            "lookup.domain": request.domain or "",
+            "lookup.sfdc_id": request.sfdc_account_id or "",
+            "openinference.span.kind": "chain",
+        },
+    ) as span:
+        try:
+            if not bq_client:
+                span.set_status(Status(StatusCode.ERROR, "BigQuery client not available"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login",
+                )
+
+            overview = _prospect_cache.get(
+                request.account_name,
+                request.domain,
+                request.sfdc_account_id,
+            )
+            if overview is None:
+
+                def _fetch():
+                    o = bq_client.get_prospect_overview(
+                        account_name=request.account_name,
+                        domain=request.domain,
+                        sfdc_account_id=request.sfdc_account_id,
+                        manual_competitors=request.manual_competitors,
+                    )
+                    return _with_optional_gong_mcp_enrichment(o)
+
+                overview = await asyncio.wait_for(asyncio.to_thread(_fetch), timeout=60.0)
+                _prospect_cache.set(
+                    request.account_name,
+                    request.domain,
+                    request.sfdc_account_id,
+                    overview,
+                )
+
+            bundle = build_prospect_intelligence_bundle(overview)
+            span.set_attribute("intel.competitive_rows", len(bundle.get("competitive_mentions", [])))
+            span.set_status(Status(StatusCode.OK))
+            return bundle
+
+        except HTTPException:
+            raise
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Timed out fetching prospect intelligence. Try again.",
+            )
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to build intelligence bundle: {str(e)[:500]}",
+            ) from e
+
+
 # ============================================================
 # Custom Demo Builder
 # ============================================================
@@ -1044,7 +1094,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
         return None, None, None
 
     except Exception as e:
-        print(f"⚠️ LLM use-case classification failed: {e}")
+        logger.warning("LLM use-case classification failed: %s", e)
         return None, None, None
 
 
@@ -1461,7 +1511,7 @@ Return only valid JSON, no markdown formatting or code blocks."""
         }
 
     except Exception as e:
-        print(f"⚠️ LLM demo insights extraction failed: {e}")
+        logger.warning("LLM demo insights extraction failed: %s", e)
         return {
             "industry_or_use_case": None,
             "suggested_framework": "langgraph",
@@ -1501,7 +1551,7 @@ async def get_demo_insights(request: DemoInsightsRequest):
             overview = await asyncio.wait_for(asyncio.to_thread(_bq_lookup), timeout=30.0)
             overview = _with_optional_gong_mcp_enrichment(overview)
         except (asyncio.TimeoutError, Exception) as e:
-            print(f"⚠️ Demo insights BQ lookup failed: {e}")
+            logger.warning("Demo insights BQ lookup failed: %s", e)
             overview = None
 
         if overview:
@@ -1607,12 +1657,12 @@ def _get_hypothesis_agent():
             f"Missing Python module {missing!r} required for hypothesis research. "
             "Add it to apps/api pyproject dependencies and regenerate requirements.txt."
         )
-        print(f"❌ Hypothesis research import failed (missing module): {e}")
+        logger.error("Hypothesis research import failed (missing module): %s", e)
         _hypothesis_agent = None
         return None
     except ImportError as e:
         _hypothesis_init_failure = f"Hypothesis research import failed: {e}"
-        print(f"❌ Hypothesis research import failed: {e}")
+        logger.error("Hypothesis research import failed: %s", e)
         _hypothesis_agent = None
         return None
 
@@ -1622,12 +1672,12 @@ def _get_hypothesis_agent():
         try:
             bq = HypBQClient(project_id=settings.bq_project_id)
         except Exception as e:
-            print(f"⚠️ Hypothesis BQ client failed: {e}")
+            logger.warning("Hypothesis BQ client failed: %s", e)
         _hypothesis_agent = ResearchAgent(bq_client=bq)
-        print("✅ Hypothesis Research Agent initialized")
+        logger.info("Hypothesis Research Agent initialized")
     except Exception as e:
         _hypothesis_init_failure = f"Hypothesis agent setup failed after imports: {e}"
-        print(f"❌ Hypothesis agent setup failed: {e}")
+        logger.error("Hypothesis agent setup failed: %s", e)
         _hypothesis_agent = None
     return _hypothesis_agent
 
@@ -1661,17 +1711,16 @@ async def hypothesis_research(request: HypothesisResearchRequest):
         raise
     except Exception as e:
         import traceback
-        print(f"Hypothesis research init error: {traceback.format_exc()}")
+        logger.error("Hypothesis research init error: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Research service unavailable: {str(e)[:200]}")
 
     # Ensure this request's traces go to the Arize "hypothesis-generator" project (explicit connection).
     hyp_provider = get_provider_for_component(COMPONENT_HYPOTHESIS)
-    space_id_used = os.getenv("ARIZE_SPACE_ID", "")
     if hyp_provider is not None:
         set_request_tracer_provider(hyp_provider)
-        print(f"[Arize] Hypothesis research → project: {PROJECT_HYPOTHESIS!r}, space_id: {space_id_used!r}")
+        logger.debug("Hypothesis research using project: %s", PROJECT_HYPOTHESIS)
     else:
-        print("[Arize] WARNING: Hypothesis tracer provider not available (observability may be disabled).")
+        logger.warning("Hypothesis tracer provider not available (observability may be disabled)")
 
     # Use api_span so the root span is created with the current provider's tracer (set above).
     # That way root and all LangGraph/LLM child spans share the same trace_id and the Traces tab shows the tree.
@@ -1683,11 +1732,10 @@ async def hypothesis_research(request: HypothesisResearchRequest):
         },
     ) as span:
         project_at_start = get_current_project_name()
-        _agent_log("main.py:hypothesis_research", "entry project", {"project": project_at_start}, "H1")
         if os.environ.get("ARIZE_TRACE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
             ctx = span.get_span_context() if hasattr(span, "get_span_context") else None
             trace_id = format(ctx.trace_id, "032x") if ctx and hasattr(ctx, "trace_id") else None
-            print(f"[ARIZE_TRACE_DEBUG] hypothesis_research → project={project_at_start!r} trace_id={trace_id}")
+            logger.debug("hypothesis_research: project=%s trace_id=%s", project_at_start, trace_id)
         try:
             result, reasoning = await agent.research(
                 company_name=request.company_name.strip(),
@@ -1699,9 +1747,8 @@ async def hypothesis_research(request: HypothesisResearchRequest):
             if hyp_provider is not None and hasattr(hyp_provider, "force_flush"):
                 try:
                     hyp_provider.force_flush(timeout_millis=15000)
-                    _agent_log("main.py:hypothesis_research", "after flush", {"flushed": True}, "H2")
-                except Exception as e:
-                    _agent_log("main.py:hypothesis_research", "after flush", {"flushed": False, "error": str(e)}, "H2")
+                except Exception:
+                    pass
 
             # Convert pydantic model to dict for JSON response
             result_dict = result.model_dump() if hasattr(result, 'model_dump') else result
@@ -1721,7 +1768,7 @@ async def hypothesis_research(request: HypothesisResearchRequest):
                 SearchAPIError,
             )
 
-            print(f"Hypothesis research error: {traceback.format_exc()}")
+            logger.error("Hypothesis research error: %s", traceback.format_exc())
             if isinstance(e, SearchAPIError):
                 raise HTTPException(status_code=503, detail="Web search service unavailable.") from e
             if isinstance(e, LLMError):
@@ -1817,6 +1864,72 @@ async def generate_poc_document_deliverable(request: GeneratePocDocumentRequest)
             )
 
 
+# ============================================================
+# Transition to CS (Knowledge Transfer markdown)
+# ============================================================
+
+
+@app.post("/api/transition-to-cs")
+async def transition_to_cs_deliverable(request: TransitionToCSRequest) -> TransitionToCSResponse:
+    """
+    Fetch ProspectOverview from BigQuery (with optional Gong MCP enrichment),
+    then run the LLM to produce an internal Knowledge Transfer markdown document.
+    """
+    with tracer.start_as_current_span(
+        f"{SPAN_PREFIX}.transition_to_cs",
+        attributes={
+            "transition.account_name": request.account_name.strip(),
+            "openinference.span.kind": "chain",
+        },
+    ) as span:
+        try:
+            if not bq_client:
+                span.set_status(Status(StatusCode.ERROR, "BigQuery unavailable"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login",
+                )
+
+            span.add_event(
+                "fetch_prospect_overview",
+                {"account_name": request.account_name.strip()},
+            )
+            overview = bq_client.get_prospect_overview(
+                account_name=request.account_name.strip(),
+                domain=None,
+                sfdc_account_id=None,
+                manual_competitors=None,
+            )
+            overview = _with_optional_gong_mcp_enrichment(overview)
+
+            payload = build_transition_document(
+                overview=overview,
+                manual_notes=request.manual_notes,
+                llm_model=None,
+            )
+            span.set_attribute("transition.model", payload.get("model", ""))
+            span.set_status(Status(StatusCode.OK))
+            return TransitionToCSResponse.model_validate(payload)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except RuntimeError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(
+                status_code=502,
+                detail=f"Transition document generation failed: {str(e)[:400]}",
+            ) from e
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate transition document: {str(e)[:500]}",
+            ) from e
+
+
 _static_dir = BASE_DIR / "frontend" / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -1827,13 +1940,9 @@ if __name__ == "__main__":
 
     # Check if API key is configured
     if not os.getenv("ANTHROPIC_API_KEY"):
-        print("⚠️  WARNING: ANTHROPIC_API_KEY not found in environment variables")
-        print("   Please create a .env file with your API key")
-        print("   See .env.example for reference")
+        logger.warning("ANTHROPIC_API_KEY not found - see .env.example for reference")
 
     port = int(os.getenv("PORT", 8080))
-    print("🚀 Starting Call Analyzer...")
-    print(f"📝 Open http://localhost:{port} in your browser")
-    print(f"📚 API docs available at http://localhost:{port}/docs")
+    logger.info("Starting Call Analyzer on http://localhost:%d (docs at /docs)", port)
 
     uvicorn.run(app, host="0.0.0.0", port=port)

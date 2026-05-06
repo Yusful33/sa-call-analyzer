@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiPost } from "@/lib/api";
 import { escapeHtml } from "@/lib/helpers";
+import { useToast } from "@/components/Toast";
 import type { ResolveAccountFn } from "@/lib/accountResolve";
+import type { ShareQuery } from "@/lib/shareableUrl";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -143,16 +145,36 @@ export default function HypothesisTab({
   onLoading,
   onResult,
   resolveAccount,
+  urlQuery,
+  onShareHintsChange,
 }: {
   onLoading: (msg: string) => void;
   onResult: (html: string) => void;
   resolveAccount: ResolveAccountFn;
+  urlQuery?: ShareQuery | null;
+  onShareHintsChange?: (hints: Pick<ShareQuery, "company_name" | "company_domain">) => void;
 }) {
+  const toast = useToast();
   const [companyName, setCompanyName] = useState("");
   const [domain, setDomain] = useState("");
+  const urlHydrated = useRef(false);
+
+  useEffect(() => {
+    if (!urlQuery || urlHydrated.current) return;
+    urlHydrated.current = true;
+    if (urlQuery.company_name) setCompanyName(urlQuery.company_name);
+    if (urlQuery.company_domain) setDomain(urlQuery.company_domain);
+  }, [urlQuery]);
+
+  useEffect(() => {
+    onShareHintsChange?.({
+      company_name: companyName.trim() || undefined,
+      company_domain: domain.trim() || undefined,
+    });
+  }, [companyName, domain, onShareHintsChange]);
 
   async function submit() {
-    if (!companyName.trim()) { alert("Please enter a company name"); return; }
+    if (!companyName.trim()) { toast.warning("Please enter a company name"); return; }
     const resolved = await resolveAccount({
       accountName: companyName.trim(),
       accountDomain: domain.trim(),
@@ -168,7 +190,7 @@ export default function HypothesisTab({
       const data = await apiPost("/api/hypothesis-research", body);
       onResult(renderHypothesisResults(data));
     } catch (err: any) {
-      alert("Error: " + (err.message ?? String(err)));
+      toast.error("Error: " + (err.message ?? String(err)));
       onResult("");
     }
   }
