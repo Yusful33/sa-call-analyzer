@@ -10,6 +10,7 @@ This agent autonomously:
 
 import json
 import operator
+import sys
 import contextvars
 import asyncio
 from datetime import datetime
@@ -1774,8 +1775,14 @@ CRITICAL: If there are NO signals found or the company summary is empty/generic,
                 "company.name": company_name,
             },
         ):
-            task = asyncio.create_task(self.graph.ainvoke(initial_state), context=ctx)
-            final_state = await task
+            # asyncio.create_task(..., context=...) requires Python 3.11+. On 3.10
+            # child tasks inherit the current contextvars context implicitly, so a
+            # plain `await` preserves the OTel parent-span context just fine.
+            if sys.version_info >= (3, 11):
+                task = asyncio.create_task(self.graph.ainvoke(initial_state), context=ctx)
+                final_state = await task
+            else:
+                final_state = await self.graph.ainvoke(initial_state)
 
         return final_state["final_result"], final_state.get("agent_reasoning", [])
 
