@@ -99,8 +99,7 @@ tracer_provider = setup_observability(project_name="sa-call-analyzer")
 # Now import everything else
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from models import (
     ProspectOverviewRequest,
     ProspectOverview,
@@ -253,26 +252,25 @@ else:
 
 @app.get("/")
 async def root():
-    """Serve the legacy HTML UI, or redirect to the Next.js app when configured."""
-    # Send users who open the API host (e.g. id-pain-api.*.vercel.app) to the canonical Stillness UI.
+    """No bundled UI on the API — redirect to Stillness (Next) when configured."""
     web_app_url = (os.getenv("STILLNESS_WEB_URL") or os.getenv("PUBLIC_WEB_APP_URL") or "").strip().rstrip("/")
     if web_app_url:
         return RedirectResponse(web_app_url, status_code=302)
-    try:
-        response = FileResponse(str(BASE_DIR / "frontend" / "index.html"))
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        return response
-    except FileNotFoundError:
-        return HTMLResponse("""
-        <html>
-            <body>
-                <h1>Call Analyzer API</h1>
-                <p>Frontend not found. API is running at <a href="/docs">/docs</a></p>
-            </body>
-        </html>
-        """)
+    return HTMLResponse(
+        content="""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Stillness API</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:42rem;margin:2.5rem auto;padding:0 1.25rem;line-height:1.5;color:#1a1d29">
+<h1 style="font-weight:600;font-size:1.5rem">Stillness API</h1>
+<p>This host runs the <strong>FastAPI</strong> backend only. The unified web UI lives in <code>apps/web</code> (for example <code>http://localhost:3000</code> when developing).</p>
+<ul>
+<li><a href="/docs">OpenAPI docs</a> (<code>/docs</code>)</li>
+<li><a href="/health">Health check</a> (<code>/health</code>)</li>
+</ul>
+<p style="font-size:0.95rem;color:#5a5f6e">Set <code>STILLNESS_WEB_URL</code> or <code>PUBLIC_WEB_APP_URL</code> to redirect this page to your deployed Next.js app.</p>
+</body></html>""",
+        status_code=200,
+    )
 
 
 @app.get("/health")
@@ -1928,11 +1926,6 @@ async def transition_to_cs_deliverable(request: TransitionToCSRequest) -> Transi
                 status_code=500,
                 detail=f"Failed to generate transition document: {str(e)[:500]}",
             ) from e
-
-
-_static_dir = BASE_DIR / "frontend" / "static"
-if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 if __name__ == "__main__":

@@ -83,7 +83,6 @@ build-backend = "hatchling.build"
 packages = ["."]
 only-include = [
     "*.py",
-    "frontend/*",
     "prompts/*",
 ]
 
