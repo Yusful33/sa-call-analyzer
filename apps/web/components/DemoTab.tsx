@@ -771,27 +771,64 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoScenarios">scenarios (SKILL.md — optional)</label>
+        <div id="demoScenariosHeading" style={{ fontWeight: 600, marginBottom: 8, color: "#333" }}>
+          scenarios (SKILL.md — optional)
+        </div>
         <p className="help-text" style={{ marginTop: 4, marginBottom: 6 }}>
-          Hold Cmd/Ctrl for multiple; empty uses skill defaults for the architecture.
+          Select any combination; leave all unchecked to use skill defaults for the architecture.
         </p>
-        <select
-          id="demoScenarios"
-          multiple
-          size={6}
-          style={{ width: "100%", marginTop: 4 }}
-          value={skillForm.scenarios}
-          onChange={(e) => {
-            const next = Array.from(e.target.selectedOptions, (o) => o.value);
-            setSkillForm((s) => ({ ...s, scenarios: next }));
+        <div
+          role="group"
+          aria-labelledby="demoScenariosHeading"
+          style={{
+            width: "100%",
+            marginTop: 4,
+            padding: "8px 12px",
+            border: "2px solid #e0e0e0",
+            borderRadius: 8,
+            background: "white",
+            maxHeight: 220,
+            overflowY: "auto",
           }}
         >
-          {SCENARIO_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          {SCENARIO_OPTIONS.map((o) => {
+            const checked = skillForm.scenarios.includes(o.value);
+            return (
+              <label
+                key={o.value}
+                htmlFor={`demoScenario-${o.value}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "6px 2px",
+                  cursor: "pointer",
+                  fontWeight: 400,
+                  fontFamily: "monospace",
+                  fontSize: 14,
+                  marginBottom: 0,
+                }}
+              >
+                <input
+                  id={`demoScenario-${o.value}`}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    setSkillForm((s) => ({
+                      ...s,
+                      scenarios: e.target.checked
+                        ? s.scenarios.includes(o.value)
+                          ? s.scenarios
+                          : [...s.scenarios, o.value]
+                        : s.scenarios.filter((v) => v !== o.value),
+                    }));
+                  }}
+                />
+                <span>{o.label}</span>
+              </label>
+            );
+          })}
+        </div>
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
