@@ -58,7 +58,7 @@ jobs:
         # avoids the prebuilt-artifact path issues we hit with the api workflow.
         run: |
           set -euo pipefail
-          deployment_url=$(vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }})
+          deployment_url=$(vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
           echo "Deployed: $deployment_url"
 
@@ -67,6 +67,7 @@ jobs:
           vercel alias set \
             "${{ steps.deploy.outputs.deployment_url }}" \
             "${PUBLIC_ALIAS}" \
+            --scope=${{ env.VERCEL_ORG_ID }} \
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Smoke-test public URL
