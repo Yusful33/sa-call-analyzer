@@ -271,12 +271,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .recommendations-section li::before { content: "\2192"; position: absolute; left: 0; color: #27ae60; }
 
 /* Evidence / missed opportunity */
-.evidence-item { background: var(--arize-teal-soft); border-left: 3px solid var(--arize-teal); padding: 12px; margin: 8px 0; border-radius: 0 6px 6px 0; font-size: 0.9em; }
+.evidence-item { background: var(--arize-teal-soft); border-left: 3px solid var(--arize-teal); padding: 12px; margin: 8px 0; border-radius: 0 6px 6px 0; font-size: 0.9em; color: #1a1a2e; }
 .evidence-item .timestamp-badge { background: var(--arize-teal); color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 8px; }
-.evidence-item .snippet { background: rgba(255,255,255,0.6); padding: 8px; margin-top: 8px; border-radius: 4px; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; }
-.missed-opportunity-item { background: rgba(231,76,60,0.15); border-left: 3px solid #e74c3c; padding: 12px; margin: 8px 0; border-radius: 0 6px 6px 0; font-size: 0.9em; }
+.evidence-item .snippet { background: rgba(255,255,255,0.6); padding: 8px; margin-top: 8px; border-radius: 4px; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; color: #2c3e50; }
+.missed-opportunity-item { background: rgba(231,76,60,0.15); border-left: 3px solid #e74c3c; padding: 12px; margin: 8px 0; border-radius: 0 6px 6px 0; font-size: 0.9em; color: #1a1a2e; }
 .missed-opportunity-item .timestamp-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 8px; }
-.missed-opportunity-item .suggested-question { background: rgba(255,255,255,0.2); padding: 10px; margin-top: 8px; border-radius: 4px; font-style: italic; border-left: 2px solid #f39c12; }
+.missed-opportunity-item .suggested-question { background: rgba(255,255,255,0.2); padding: 10px; margin-top: 8px; border-radius: 4px; font-style: italic; border-left: 2px solid #f39c12; color: #1a1a2e; }
 .missed-opportunity-item .why-important { margin-top: 6px; font-size: 0.85em; opacity: 0.9; }
 
 /* Criteria section header */
