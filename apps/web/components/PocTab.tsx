@@ -44,16 +44,22 @@ export default function PocTab({
       return;
     }
 
+    setSubmitting(true);
+    onLoading(`Resolving account "${an}"...`);
+
     const resolved = await resolveAccount({
       accountName: an,
       accountDomain: "",
       sfdcAccountId: "",
     });
-    if (!resolved.proceed) return;
+    if (!resolved.proceed) {
+      setSubmitting(false);
+      onLoading("");
+      return;
+    }
     const resolvedAccount = (resolved.accountName || an).trim();
     if (resolvedAccount !== an) setAccountName(resolvedAccount);
 
-    setSubmitting(true);
     onLoading(
       `Pulling Salesforce, Gong, and Pendo data and filling the ${template.toUpperCase()} template for ${resolvedAccount}...`,
     );
