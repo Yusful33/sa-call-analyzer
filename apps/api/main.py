@@ -124,8 +124,11 @@ from models import (
     GeneratePocDocumentRequest,
     AccountSuggestionsRequest,
     AccountSuggestionsResponse,
+    TransitionToCsRequest,
+    TransitionToCsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
+from transition_document_generator import build_transition_document
 from gong_mcp_client import GongMCPClient
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -216,6 +219,20 @@ def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOv
     from gong_mcp_enrichment import maybe_enrich_overview_with_gong_mcp
 
     return maybe_enrich_overview_with_gong_mcp(overview, gong_client, bq_client)
+
+
+def _with_transition_gong_enrichment(overview: ProspectOverview) -> ProspectOverview:
+    """Force Gong MCP enrichment for the Transition-to-CS use case.
+
+    Bypasses the sparse-context heuristic and uses the larger
+    ``TRANSITION_GONG_MCP_*`` caps so the LLM gets transcripts for the
+    closed/won deal regardless of how much survived in BigQuery.
+    """
+    from gong_mcp_enrichment import maybe_enrich_overview_with_gong_mcp
+
+    return maybe_enrich_overview_with_gong_mcp(
+        overview, gong_client, bq_client, force=True
+    )
 
 
 if _API_SERVICE_MODE in ("full", "light", "crew"):
@@ -1645,6 +1662,138 @@ async def generate_poc_document_deliverable(request: GeneratePocDocumentRequest)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to generate document: {str(e)[:500]}",
+            )
+
+
+# ============================================================
+# Transition-to-CS document (markdown) from BigQuery + LLM
+# ============================================================
+
+
+@app.post("/api/transition-to-cs", response_model=TransitionToCsResponse)
+async def generate_transition_to_cs(request: TransitionToCsRequest):
+    """
+    Generate a pre-sales -> post-sales Knowledge Transfer document for a
+    closed-won account.
+
+    Pulls the same ProspectOverview the Prospect Overview tab uses
+    (Salesforce account + opportunities, Gong analytics, Pendo, FullStory),
+    optionally enriches via the Gong MCP, then asks an LLM to fill in the
+    standard Arize KT template. Returns markdown text.
+    """
+    with tracer.start_as_current_span(
+        f"{SPAN_PREFIX}.generate_transition_to_cs",
+        attributes={
+            "transition.account_name": request.account_name.strip(),
+            "transition.has_manual_notes": bool((request.manual_notes or "").strip()),
+            "openinference.span.kind": "chain",
+        },
+    ) as span:
+        try:
+            if not bq_client:
+                span.set_status(Status(StatusCode.ERROR, "BigQuery unavailable"))
+                raise HTTPException(
+                    status_code=503,
+                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login",
+                )
+
+            domain = (request.domain or "").strip() or None
+            sfdc_id = (request.sfdc_account_id or "").strip() or None
+            span.add_event(
+                "fetch_prospect_overview",
+                {
+                    "account_name": request.account_name.strip(),
+                    "domain": domain or "",
+                    "sfdc_id": sfdc_id or "",
+                },
+            )
+            overview = bq_client.get_prospect_overview(
+                account_name=request.account_name.strip(),
+                domain=domain,
+                sfdc_account_id=sfdc_id,
+                manual_competitors=None,
+            )
+            # Always pull Gong MCP transcripts for the KT use case — the CSE
+            # needs stakeholder names + use-case quotes that only live in calls.
+            overview = _with_transition_gong_enrichment(overview)
+
+            opps = overview.all_opportunities or []
+            won_opp_count = sum(1 for o in opps if o.is_won)
+            open_opp_count = sum(1 for o in opps if not o.is_closed)
+            gs = overview.gong_summary
+            gong_calls = list((gs.recent_calls if gs else None) or [])
+            gong_with_tx = sum(
+                1 for c in gong_calls if (c.transcript_snippet or "").strip()
+            )
+            ext_stakeholders = {
+                (p.email or p.name or "").strip().lower()
+                for c in gong_calls
+                for p in (c.participants or [])
+                if (p.affiliation or "").lower() == "external"
+                and (p.email or p.name)
+            }
+            ext_stakeholders.discard("")
+
+            span.set_attribute(
+                "transition.data_sources",
+                ", ".join(overview.data_sources_available or []),
+            )
+            span.set_attribute("transition.opportunity_count", len(opps))
+            span.set_attribute("transition.won_opportunity_count", won_opp_count)
+            span.set_attribute("transition.open_opportunity_count", open_opp_count)
+            span.set_attribute("transition.gong_call_count", len(gong_calls))
+            span.set_attribute("transition.gong_calls_with_transcripts", gong_with_tx)
+            span.set_attribute(
+                "transition.external_stakeholder_count", len(ext_stakeholders)
+            )
+            span.set_attribute(
+                "transition.has_salesforce", overview.salesforce is not None
+            )
+            if overview.salesforce and overview.salesforce.total_active_arr is not None:
+                span.set_attribute(
+                    "transition.total_active_arr",
+                    float(overview.salesforce.total_active_arr),
+                )
+
+            result = build_transition_document(
+                overview=overview,
+                manual_notes=request.manual_notes,
+                llm_model=request.llm_model,
+            )
+
+            stats = result.get("stats") or {}
+            for k, v in stats.items():
+                if isinstance(v, (int, float, str, bool)):
+                    span.set_attribute(f"transition.stats.{k}", v)
+            span.set_attribute("transition.model", result.get("model", ""))
+            span.set_attribute(
+                "transition.markdown_length", len(result.get("markdown", "") or "")
+            )
+            span.set_status(Status(StatusCode.OK))
+
+            return TransitionToCsResponse(
+                account_name=result.get("account_name") or request.account_name.strip(),
+                markdown=result.get("markdown") or "",
+                model=result.get("model") or "",
+                data_sources=result.get("data_sources") or [],
+            )
+        except HTTPException:
+            raise
+        except ValueError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(status_code=400, detail=str(e))
+        except RuntimeError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise HTTPException(
+                status_code=502,
+                detail=f"Transition document generation failed: {str(e)[:400]}",
+            )
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate transition document: {str(e)[:500]}",
             )
 
 

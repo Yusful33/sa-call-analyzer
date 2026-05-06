@@ -150,26 +150,48 @@ def maybe_enrich_overview_with_gong_mcp(
     overview: ProspectOverview,
     gong_client: Optional[GongMCPClient],
     bq_client: Optional["BigQueryClient"] = None,
+    *,
+    force: bool = False,
 ) -> ProspectOverview:
     """
     When Gong warehouse context looks thin, match calls via Gong MCP and merge
     transcripts plus MCP-only calls into gong_summary, then refresh sales engagement.
+
+    When ``force=True`` the sparse heuristic and global ``POC_GONG_MCP_ENRICH``
+    toggle are bypassed (used by the Transition-to-CS flow, which always needs
+    transcript-rich Gong context regardless of how much made it into BigQuery).
+    Force mode also uses larger lookback / transcript caps configured via the
+    ``TRANSITION_GONG_MCP_*`` env vars.
     """
-    if not _enrich_enabled() or not gong_client or not prospect_gong_context_is_sparse(overview):
+    if not gong_client:
+        return overview
+    if not force and (not _enrich_enabled() or not prospect_gong_context_is_sparse(overview)):
         return overview
 
     search_name = _resolve_account_search_name(overview)
     if not search_name:
         return overview
 
-    lookback = int(os.environ.get("POC_GONG_MCP_LOOKBACK_DAYS", "45"))
-    # Caps Gong MCP /calls work. Lower default to avoid hitting Gong API rate limits
-    # (400 calls = 8+ API calls for extensive metadata + transcript fetches).
-    # Default 50 calls = 1-2 extensive batches, staying well under rate limits.
-    max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "50"))
-    # Reduce transcript fetches to avoid rate limits (each is an API call)
-    max_tx = int(os.environ.get("POC_GONG_MCP_MAX_TRANSCRIPTS", "3"))
-    snippet_limit = int(os.environ.get("POC_GONG_MCP_TRANSCRIPT_SNIPPET_CHARS", "8000"))
+    if force:
+        # Transition-to-CS: pull a wider window and more transcripts so the LLM
+        # has actual call content to ground stakeholder / use-case / risk bullets.
+        lookback = int(os.environ.get("TRANSITION_GONG_MCP_LOOKBACK_DAYS", "180"))
+        max_scan = int(os.environ.get("TRANSITION_GONG_MCP_MAX_CALLS_SCAN", "120"))
+        max_tx = int(os.environ.get("TRANSITION_GONG_MCP_MAX_TRANSCRIPTS", "8"))
+        snippet_limit = int(
+            os.environ.get("TRANSITION_GONG_MCP_TRANSCRIPT_SNIPPET_CHARS", "12000")
+        )
+    else:
+        lookback = int(os.environ.get("POC_GONG_MCP_LOOKBACK_DAYS", "45"))
+        # Caps Gong MCP /calls work. Lower default to avoid hitting Gong API rate limits
+        # (400 calls = 8+ API calls for extensive metadata + transcript fetches).
+        # Default 50 calls = 1-2 extensive batches, staying well under rate limits.
+        max_scan = int(os.environ.get("POC_GONG_MCP_MAX_CALLS_SCAN", "50"))
+        # Reduce transcript fetches to avoid rate limits (each is an API call)
+        max_tx = int(os.environ.get("POC_GONG_MCP_MAX_TRANSCRIPTS", "3"))
+        snippet_limit = int(
+            os.environ.get("POC_GONG_MCP_TRANSCRIPT_SNIPPET_CHARS", "8000")
+        )
 
     now = datetime.now(timezone.utc)
     from_dt = (now - timedelta(days=lookback)).strftime("%Y-%m-%dT%H:%M:%SZ")
