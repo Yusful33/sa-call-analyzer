@@ -300,6 +300,7 @@ async def health_check():
     poc_ready = bool(bq_client) and all(poc_templates.values()) and bool(
         api_key or os.getenv("OPENAI_API_KEY")
     )
+    brave_key = (os.getenv("BRAVE_API_KEY") or "").strip()
     return {
         "status": "healthy",
         "api_key_configured": bool(api_key),
@@ -312,7 +313,58 @@ async def health_check():
             "word_templates_present": poc_templates,
             "llm_configured": bool(api_key or os.getenv("OPENAI_API_KEY")),
         },
+        "hypothesis_research": {
+            "brave_api_key_configured": bool(brave_key),
+            "brave_api_key_length": len(brave_key),
+        },
     }
+
+
+@app.get("/api/debug/brave-search")
+async def debug_brave_search(q: str = "Atlassian"):
+    """One-shot Brave search probe for diagnosing deployment env issues.
+    Returns the raw HTTP status and a snippet of the response body so we can
+    see what Brave is actually responding with from the deployed environment.
+    Does NOT leak the key — only reports its length."""
+    import httpx
+    brave_key = (os.getenv("BRAVE_API_KEY") or "").strip()
+    if not brave_key:
+        return {
+            "key_present": False,
+            "key_length": 0,
+            "error": "BRAVE_API_KEY env var is empty or unset on this deployment",
+        }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": brave_key,
+                },
+                params={"q": q, "count": 3},
+            )
+        body_text = resp.text[:600]
+        result_count = 0
+        try:
+            data = resp.json()
+            result_count = len(((data or {}).get("web") or {}).get("results") or [])
+        except Exception:
+            pass
+        return {
+            "key_present": True,
+            "key_length": len(brave_key),
+            "key_prefix": brave_key[:4],
+            "http_status": resp.status_code,
+            "result_count": result_count,
+            "body_preview": body_text,
+        }
+    except Exception as e:
+        return {
+            "key_present": True,
+            "key_length": len(brave_key),
+            "error": f"{type(e).__name__}: {e}",
+        }
 
 
 @app.get("/api/example")
