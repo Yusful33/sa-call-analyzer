@@ -53,6 +53,14 @@ jobs:
     name: API import smoke (requirements.txt)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # GitHub Actions does not read Vercel project env. `import main` constructs
+    # LangChain clients (e.g. ChatAnthropic) at import time — placeholders satisfy
+    # pydantic without making network calls during this smoke step.
+    env:
+      ANTHROPIC_API_KEY: sk-ant-api03-CI00000000000000000000000000000000000000000000000000000000
+      OPENAI_API_KEY: sk-ci-openai-placeholder0000000000000000000000000000
+      ARIZE_API_KEY: ci-placeholder-not-sent
+      ARIZE_SPACE_ID: ci-placeholder-space
     defaults:
       run:
         working-directory: apps/api
