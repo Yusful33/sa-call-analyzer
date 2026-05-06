@@ -37,9 +37,10 @@ jobs:
     name: Deploy apps/web -> production
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: apps/web
+    # NOTE: Do NOT set working-directory here. The Vercel project has Root Directory
+    # set to "apps/web" in its settings, so running from repo root lets Vercel resolve
+    # paths correctly. Setting working-directory: apps/web would cause path doubling
+    # (apps/web/apps/web).
     steps:
       - uses: actions/checkout@v4
 
