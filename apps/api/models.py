@@ -557,6 +557,11 @@ class OpportunityData(BaseModel):
     lead_source: Optional[str] = None
     type: Optional[str] = None
     owner_name: Optional[str] = None
+    # Pre-sales team assignments (Salesforce custom fields on Opportunity).
+    # ``assigned_sa`` resolves ``opportunity.assigned_sa_c`` -> user.name.
+    # ``assigned_ai_se`` resolves ``opportunity.assigned_solutions_c`` -> user.name.
+    assigned_sa: Optional[str] = None
+    assigned_ai_se: Optional[str] = None
 
 
 class SalesforceTaskData(BaseModel):
@@ -950,3 +955,36 @@ class GeneratePocDocumentRequest(BaseModel):
     def model_post_init(self, __context):
         if not (self.account_name or "").strip():
             raise ValueError("'account_name' must be non-empty")
+
+
+class TransitionToCsRequest(BaseModel):
+    """Build a pre-sales -> post-sales (CS) Knowledge Transfer markdown document."""
+
+    account_name: str = Field(
+        ...,
+        min_length=1,
+        description="Company / account name for BigQuery lookup",
+    )
+    domain: Optional[str] = None
+    sfdc_account_id: Optional[str] = None
+    manual_notes: Optional[str] = Field(
+        default=None,
+        description="Optional free-text context to merge into the generated document (e.g. SA color, politics, sticking points).",
+    )
+    llm_model: Optional[str] = Field(
+        default=None,
+        description="Override the LLM used for the synthesis. Defaults to TRANSITION_DOC_MODEL or MODEL_NAME.",
+    )
+
+    def model_post_init(self, __context):
+        if not (self.account_name or "").strip():
+            raise ValueError("'account_name' must be non-empty")
+
+
+class TransitionToCsResponse(BaseModel):
+    """Generated CS transition document, in markdown."""
+
+    account_name: str
+    markdown: str
+    model: str
+    data_sources: List[str] = Field(default_factory=list)

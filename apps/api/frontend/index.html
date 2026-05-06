@@ -862,6 +862,163 @@
             padding-top: 8px;
         }
 
+        /* ==============================================================
+         * Sales-stage rail (top-of-page funnel navigation)
+         * ============================================================== */
+
+        .stage-rail-wrapper { margin: 24px 0 18px; }
+        .stage-rail-eyebrow {
+            font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--arize-text-muted);
+            margin-bottom: 10px; padding-left: 4px;
+        }
+        .stage-rail {
+            list-style: none; margin: 0; padding: 0;
+            display: grid; grid-template-columns: repeat(5, 1fr);
+            gap: 12px; align-items: stretch;
+        }
+        @media (max-width: 1100px) {
+            .stage-rail { grid-template-columns: repeat(2, 1fr); }
+            .stage-rail-arrow { display: none; }
+        }
+        @media (max-width: 600px) {
+            .stage-rail { grid-template-columns: 1fr; }
+        }
+        .stage-rail-item { position: relative; display: flex; align-items: stretch; }
+        .stage-rail-arrow {
+            position: absolute; right: -12px; top: 50%;
+            transform: translate(50%, -50%);
+            font-size: 18px; color: var(--arize-border);
+            line-height: 1; pointer-events: none; z-index: 1;
+        }
+        .stage-card {
+            position: relative; flex: 1;
+            display: flex; flex-direction: column; align-items: stretch;
+            gap: 10px; padding: 14px 16px 14px;
+            border: 1px solid var(--arize-border); border-radius: 14px;
+            background: var(--arize-surface); color: var(--arize-text);
+            text-align: left; font: inherit;
+            box-shadow: 0 1px 2px rgba(15, 17, 23, 0.04);
+            transition: transform 0.15s ease, border-color 0.15s ease,
+                        box-shadow 0.15s ease, background 0.15s ease;
+        }
+        .stage-card.stage-card-single { cursor: pointer; }
+        .stage-card.stage-card-single:hover {
+            border-color: var(--arize-magenta-soft);
+            background: var(--arize-magenta-tint);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(229, 17, 127, 0.14);
+        }
+        .stage-card.active {
+            border-color: transparent;
+            background: var(--grad-brand); color: #fff;
+            box-shadow: 0 12px 30px rgba(142, 91, 211, 0.28);
+        }
+        .stage-card.active .stage-card-blurb,
+        .stage-card.active .stage-card-eyebrow { color: rgba(255, 255, 255, 0.86); }
+
+        .stage-card-eyebrow {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--arize-text-muted);
+            white-space: nowrap;
+        }
+        .stage-card-number, .stage-card-name {
+            font-size: inherit; font-weight: inherit; letter-spacing: inherit;
+        }
+        .stage-card-divider { opacity: 0.55; font-size: 11px; }
+
+        /* Tool name (single-tool stages) — the new visual headline. */
+        .stage-card-tool-name {
+            font-size: 19px; font-weight: 700; line-height: 1.2;
+            letter-spacing: -0.005em; color: inherit;
+        }
+
+        .stage-card-blurb {
+            font-size: 12.5px; line-height: 1.4;
+            color: var(--arize-text-muted);
+            margin-top: auto; padding-top: 6px;
+        }
+
+        /* Multi-tool stage: each tool is its own clickable row. */
+        .stage-card-tool-list {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .stage-tool-button {
+            appearance: none;
+            border: 1px solid var(--arize-border);
+            background: var(--arize-surface-alt);
+            color: var(--arize-text);
+            font: inherit; font-size: 16px; font-weight: 700;
+            line-height: 1.25; text-align: left;
+            padding: 10px 12px; border-radius: 10px; cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease,
+                        color 0.15s ease, transform 0.1s ease;
+        }
+        .stage-tool-button:hover {
+            border-color: var(--arize-magenta-soft);
+            background: var(--arize-magenta-tint);
+            color: var(--arize-magenta-strong);
+        }
+        .stage-tool-button.active {
+            background: var(--arize-surface);
+            color: var(--arize-magenta-strong);
+            border-color: var(--arize-magenta);
+            box-shadow: 0 4px 14px rgba(229, 17, 127, 0.18);
+        }
+        .stage-card.active .stage-tool-button {
+            border-color: rgba(255, 255, 255, 0.22);
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.92);
+        }
+        .stage-card.active .stage-tool-button:hover {
+            background: rgba(255, 255, 255, 0.18); color: #fff;
+        }
+        .stage-card.active .stage-tool-button.active {
+            background: #fff;
+            color: var(--arize-magenta-strong);
+            border-color: #fff;
+            box-shadow: 0 6px 18px rgba(15, 17, 23, 0.22);
+        }
+
+        /* Stage body: card containing the active tool */
+        .stage-body-header {
+            display: flex; flex-wrap: wrap; gap: 12px;
+            align-items: flex-end; justify-content: space-between;
+            padding-bottom: 14px; margin-bottom: 18px;
+            border-bottom: 1px solid var(--arize-border);
+        }
+        .stage-body-eyebrow {
+            font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--arize-magenta);
+        }
+        .stage-body-tool-name {
+            font-size: 22px; font-weight: 700; color: var(--arize-ink);
+            margin-top: 2px; line-height: 1.2;
+        }
+
+        /* Inline tool pills (only rendered when the active stage has >1 tool) */
+        .tool-pills {
+            display: inline-flex; flex-wrap: wrap; gap: 6px;
+            padding: 4px;
+            background: var(--arize-surface-alt);
+            border: 1px solid var(--arize-border);
+            border-radius: 999px;
+        }
+        .tool-pills.hidden { display: none; }
+        .tool-pill {
+            appearance: none; border: none; background: transparent;
+            color: var(--arize-text-muted); font: inherit;
+            font-weight: 600; font-size: 13px;
+            padding: 7px 14px; border-radius: 999px; cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .tool-pill:hover { color: var(--arize-magenta); background: var(--arize-magenta-tint); }
+        .tool-pill.active {
+            background: var(--arize-surface); color: var(--arize-ink);
+            box-shadow: 0 1px 4px rgba(15, 17, 23, 0.1);
+        }
+
         .pocpot-reference {
             margin-bottom: 24px;
             padding-bottom: 20px;
@@ -991,6 +1148,212 @@
             line-height: 1.5;
         }
 
+        .trans-result {
+            margin-top: 24px;
+            border: 1px solid var(--arize-border);
+            border-radius: 14px;
+            background: var(--arize-surface);
+            box-shadow: 0 8px 24px rgba(15, 17, 23, 0.06);
+            overflow: hidden;
+        }
+
+        .trans-result-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            background: linear-gradient(135deg, var(--arize-magenta-tint) 0%, var(--arize-purple-soft) 100%);
+            border-bottom: 1px solid var(--arize-border);
+        }
+
+        .trans-result-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .trans-meta-label {
+            font-weight: 600;
+            color: var(--arize-text);
+            font-size: 0.98em;
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .trans-meta-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: var(--arize-surface);
+            border: 1px solid var(--arize-border);
+            color: var(--arize-text-muted);
+            font-size: 0.8em;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .trans-result-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .trans-action-btn {
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--arize-border);
+            background: var(--arize-surface);
+            color: var(--arize-text);
+            font-family: var(--font-sans);
+            font-size: 0.88em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            flex: 0 0 auto;
+        }
+
+        .trans-action-btn:hover:not(:disabled) {
+            border-color: var(--arize-magenta);
+            color: var(--arize-magenta);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(229, 17, 127, 0.16);
+        }
+
+        .trans-action-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .trans-action-btn.copied {
+            background: var(--arize-teal);
+            border-color: var(--arize-teal);
+            color: #FFFFFF;
+        }
+
+        .trans-result-rendered {
+            padding: 22px 26px 26px;
+            color: var(--arize-text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            font-size: 0.96em;
+        }
+
+        .trans-result-rendered h1,
+        .trans-result-rendered h2,
+        .trans-result-rendered h3 {
+            font-family: var(--font-sans);
+            color: var(--arize-text);
+            line-height: 1.25;
+            letter-spacing: -0.01em;
+        }
+
+        .trans-result-rendered h1 {
+            font-size: 1.65em;
+            font-weight: 500;
+            margin: 0 0 14px 0;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--arize-magenta);
+        }
+
+        .trans-result-rendered h2 {
+            font-size: 1.25em;
+            font-weight: 500;
+            margin: 26px 0 10px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--arize-border);
+        }
+
+        .trans-result-rendered h3 {
+            font-size: 1.05em;
+            font-weight: 600;
+            margin: 18px 0 6px 0;
+            color: var(--arize-magenta-strong);
+        }
+
+        .trans-result-rendered p {
+            margin: 0 0 10px 0;
+        }
+
+        .trans-result-rendered ul,
+        .trans-result-rendered ol {
+            margin: 0 0 12px 22px;
+            padding: 0;
+        }
+
+        .trans-result-rendered li {
+            margin: 4px 0;
+        }
+
+        .trans-result-rendered strong {
+            font-weight: 600;
+            color: var(--arize-text);
+        }
+
+        .trans-result-rendered em {
+            font-style: italic;
+            color: var(--arize-text-muted);
+        }
+
+        .trans-result-rendered code {
+            font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.9em;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: var(--arize-magenta-tint);
+            color: var(--arize-magenta-strong);
+        }
+
+        .trans-result-rendered a {
+            color: var(--arize-magenta);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .trans-result-rendered .trans-tag {
+            display: inline-block;
+            padding: 1px 8px;
+            margin-right: 6px;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            background: var(--arize-magenta-tint);
+            color: var(--arize-magenta-strong);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .trans-result-rendered .trans-tag.public {
+            background: var(--arize-teal-soft);
+            color: #0E7C73;
+        }
+
+        .trans-result-rendered .trans-tag.inferred {
+            background: var(--arize-coral-soft);
+            color: #B14935;
+        }
+
+        .trans-result-raw {
+            margin: 0;
+            padding: 22px 26px;
+            background: #0F1117;
+            color: #E5E7EB;
+            font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.85em;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border-top: 1px solid var(--arize-border);
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
         .tab-content {
             display: none;
         }
@@ -1023,14 +1386,92 @@
             </p>
         </div>
 
+        <div class="stage-rail-wrapper">
+            <div class="stage-rail-eyebrow">Sales Stage</div>
+            <ol class="stage-rail" role="tablist" aria-label="Sales Stage">
+                <li class="stage-rail-item">
+                    <button type="button" role="tab" class="stage-card stage-card-single" data-stage="stage1" data-default-tool="hypothesis" onclick="switchTab('hypothesis', event)">
+                        <div class="stage-card-eyebrow">
+                            <span class="stage-card-number">Stage 1</span>
+                            <span class="stage-card-divider" aria-hidden="true">&bull;</span>
+                            <span class="stage-card-name">Engaged</span>
+                        </div>
+                        <div class="stage-card-tool-name">🔬 Hypothesis Research</div>
+                        <div class="stage-card-blurb">First touch. Pull AI/ML signals before the first call.</div>
+                    </button>
+                    <span class="stage-rail-arrow" aria-hidden="true">&rarr;</span>
+                </li>
+                <li class="stage-rail-item">
+                    <div class="stage-card stage-card-multi" data-stage="stage2" data-default-tool="demo">
+                        <div class="stage-card-eyebrow">
+                            <span class="stage-card-number">Stage 2</span>
+                            <span class="stage-card-divider" aria-hidden="true">&bull;</span>
+                            <span class="stage-card-name">Qualification</span>
+                        </div>
+                        <div class="stage-card-tool-list" role="tablist" aria-label="Qualification tools">
+                            <button type="button" role="tab" class="stage-tool-button" data-tab="demo" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
+                            <button type="button" role="tab" class="stage-tool-button" data-tab="gong" onclick="switchTab('gong', event)">📞 Single Call Analysis</button>
+                        </div>
+                        <div class="stage-card-blurb">Validate fit. Build a tailored demo and dissect the discovery call.</div>
+                    </div>
+                    <span class="stage-rail-arrow" aria-hidden="true">&rarr;</span>
+                </li>
+                <li class="stage-rail-item">
+                    <button type="button" role="tab" class="stage-card stage-card-single" data-stage="stage3" data-default-tool="pocpot" onclick="switchTab('pocpot', event)">
+                        <div class="stage-card-eyebrow">
+                            <span class="stage-card-number">Stage 3</span>
+                            <span class="stage-card-divider" aria-hidden="true">&bull;</span>
+                            <span class="stage-card-name">Pre-PoC</span>
+                        </div>
+                        <div class="stage-card-tool-name">📝 PoC / PoT Document</div>
+                        <div class="stage-card-blurb">Stand up the PoC scope. Draft the PoT / PoC doc and align on success criteria.</div>
+                    </button>
+                    <span class="stage-rail-arrow" aria-hidden="true">&rarr;</span>
+                </li>
+                <li class="stage-rail-item">
+                    <button type="button" role="tab" class="stage-card stage-card-single" data-stage="stage4" data-default-tool="prospect" onclick="switchTab('prospect', event)">
+                        <div class="stage-card-eyebrow">
+                            <span class="stage-card-number">Stage 4</span>
+                            <span class="stage-card-divider" aria-hidden="true">&bull;</span>
+                            <span class="stage-card-name">PoC</span>
+                        </div>
+                        <div class="stage-card-tool-name">📊 Prospect Overview</div>
+                        <div class="stage-card-blurb">PoC in flight. 360&deg; view of the buyer and the deal as you push to close.</div>
+                    </button>
+                    <span class="stage-rail-arrow" aria-hidden="true">&rarr;</span>
+                </li>
+                <li class="stage-rail-item">
+                    <button type="button" role="tab" class="stage-card stage-card-single" data-stage="stage5" data-default-tool="transition" onclick="switchTab('transition', event)">
+                        <div class="stage-card-eyebrow">
+                            <span class="stage-card-number">Stage 5</span>
+                            <span class="stage-card-divider" aria-hidden="true">&bull;</span>
+                            <span class="stage-card-name">Closed Won</span>
+                        </div>
+                        <div class="stage-card-tool-name">🔁 Transition to CS</div>
+                        <div class="stage-card-blurb">Ship a clean Knowledge Transfer doc into Customer Success.</div>
+                    </button>
+                </li>
+            </ol>
+        </div>
+
         <div class="card">
             <div class="tabs-container">
-                <div class="tabs">
-                    <button class="tab" data-tab="hypothesis" onclick="switchTab('hypothesis', event)">🔬 Hypothesis Research</button>
-                    <button class="tab active" data-tab="prospect" onclick="switchTab('prospect', event)">📊 Prospect Overview</button>
-                    <button class="tab" data-tab="demo" onclick="switchTab('demo', event)">🎯 Custom Demo Builder</button>
-                    <button class="tab" data-tab="gong" onclick="switchTab('gong', event)">Single Call Analysis</button>
-                    <button class="tab" data-tab="pocpot" onclick="switchTab('pocpot', event)">📄 PoC / PoT Document</button>
+                <div class="stage-body-header">
+                    <div>
+                        <div class="stage-body-eyebrow" id="stageBodyEyebrow">Stage 4 &bull; PoC</div>
+                        <div class="stage-body-tool-name" id="stageBodyToolName">📊 Prospect Overview</div>
+                    </div>
+                </div>
+
+                <!-- Hidden legacy tab buttons. switchTab() still queries `.tab` so we keep
+                     these around as data anchors, but they're not visible in the new rail UI. -->
+                <div class="tabs" hidden aria-hidden="true" style="display: none;">
+                    <button class="tab" data-tab="hypothesis"></button>
+                    <button class="tab active" data-tab="prospect"></button>
+                    <button class="tab" data-tab="demo"></button>
+                    <button class="tab" data-tab="gong"></button>
+                    <button class="tab" data-tab="pocpot"></button>
+                    <button class="tab" data-tab="transition"></button>
                 </div>
 
                 <div class="tab-content-wrapper">
@@ -1257,6 +1698,40 @@
                 </div>
             </div>
 
+            <div id="transition-tab" class="tab-content">
+                <div class="input-section">
+                    <label for="transAccountName">Customer / Account name</label>
+                    <input type="text" id="transAccountName" placeholder="e.g., Acme Corp, Stripe" autocomplete="off">
+                    <p class="help-text">Closed-won (or about-to-close) account. Same BigQuery resolution as the Prospect Overview tab.</p>
+                </div>
+                <div class="input-section" style="margin-top: 15px;">
+                    <label for="transManualNotes">SA color / sticking points (optional)</label>
+                    <textarea id="transManualNotes" rows="4" placeholder="Politics, champions, things that aren't in Gong / Salesforce yet, asks the CSE should know about, links (POC scoping doc, product feature ticket), etc." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                </div>
+                <p class="help-text" style="margin-top: 15px; padding: 12px; background: var(--arize-magenta-tint); border-left: 4px solid var(--arize-magenta); border-radius: 8px;">
+                    🔁 <strong>Transition to CS</strong> pulls Salesforce, Gong, Pendo, and FullStory from BigQuery, then asks the LLM to draft a Pre-Sales &rarr; Post-Sales <em>Internal Knowledge Transfer</em> document following the standard Arize KT template (Executive Summary, Stakeholders, Contract, Use Cases, Expansion, POC, Tech Stack, Asks, Risks).
+                </p>
+                <div class="button-group" style="margin-top: 20px;">
+                    <button type="button" class="btn-primary" onclick="generateTransitionDocument()" id="transGenerateBtn">Generate Knowledge Transfer</button>
+                </div>
+                <div id="transResult" class="trans-result" hidden>
+                    <div class="trans-result-toolbar">
+                        <div class="trans-result-meta">
+                            <span class="trans-meta-label" id="transResultAccount">&mdash;</span>
+                            <span class="trans-meta-pill" id="transResultModel">&mdash;</span>
+                            <span class="trans-meta-pill" id="transResultSources">&mdash;</span>
+                        </div>
+                        <div class="trans-result-actions">
+                            <button type="button" class="trans-action-btn" onclick="copyTransitionMarkdown()" id="transCopyBtn">Copy markdown</button>
+                            <button type="button" class="trans-action-btn" onclick="downloadTransitionMarkdown()" id="transDownloadBtn">Download .md</button>
+                            <button type="button" class="trans-action-btn" onclick="toggleTransitionRawMarkdown()" id="transRawBtn">View raw</button>
+                        </div>
+                    </div>
+                    <div id="transResultRendered" class="trans-result-rendered"></div>
+                    <pre id="transResultRaw" class="trans-result-raw" hidden></pre>
+                </div>
+            </div>
+
             <div id="sharedAnalyzeControls">
             <div class="input-section" style="margin-bottom: 20px;">
                 <label for="modelSelect">AI Model</label>
@@ -1444,7 +1919,42 @@
             if (analyzeBtn) analyzeBtn.textContent = 'Get Prospect Overview';
             if (modelSection) modelSection.style.display = 'none';
             syncResultsPanelForTab('prospect');
+
+            // Light up the Stage 4 / Prospect Overview card on first paint
+            const stage4 = document.querySelector('.stage-card[data-stage="stage4"]');
+            if (stage4) stage4.classList.add('active');
         });
+
+        // Stage <-> tool mapping mirrors apps/web/app/page.tsx. Keep these in sync.
+        const STAGE_FOR_TOOL = {
+            hypothesis: 'stage1',
+            demo: 'stage2',
+            gong: 'stage2',
+            pocpot: 'stage3',
+            prospect: 'stage4',
+            transition: 'stage5',
+        };
+        const STAGE_META = {
+            stage1: { number: 1, name: 'Engaged' },
+            stage2: { number: 2, name: 'Qualification' },
+            stage3: { number: 3, name: 'Pre-PoC' },
+            stage4: { number: 4, name: 'PoC' },
+            stage5: { number: 5, name: 'Closed Won' },
+        };
+        const TOOL_LABEL = {
+            hypothesis: '🔬 Hypothesis Research',
+            demo: '🎯 Custom Demo Builder',
+            gong: '📞 Single Call Analysis',
+            pocpot: '📄 PoC / PoT Document',
+            prospect: '📊 Prospect Overview',
+            transition: '🔁 Transition to CS',
+        };
+
+        function switchStage(stageId) {
+            const card = document.querySelector(`.stage-card[data-stage="${stageId}"]`);
+            const defaultTool = card && card.getAttribute('data-default-tool');
+            if (defaultTool) switchTab(defaultTool);
+        }
 
         function switchTab(tab, evt) {
             currentTab = tab;
@@ -1452,9 +1962,25 @@
             // Update tab buttons (use currentTarget so we get the button, not a child node like text)
             const tabButtons = document.querySelectorAll('.tab');
             tabButtons.forEach(btn => btn.classList.remove('active'));
-            const tabOrder = ['hypothesis', 'prospect', 'demo', 'gong', 'pocpot'];
+            const tabOrder = ['hypothesis', 'prospect', 'demo', 'gong', 'pocpot', 'transition'];
             const target = (evt && evt.currentTarget) || Array.from(tabButtons).find(btn => btn.getAttribute('data-tab') === tab) || tabButtons[tabOrder.indexOf(tab)];
             if (target && target.classList) target.classList.add('active');
+
+            // Update stage-rail card highlighting + body header
+            const stageId = STAGE_FOR_TOOL[tab];
+            document.querySelectorAll('.stage-card').forEach(c => {
+                c.classList.toggle('active', c.getAttribute('data-stage') === stageId);
+            });
+            const meta = STAGE_META[stageId] || { number: '', name: '' };
+            const eyebrow = document.getElementById('stageBodyEyebrow');
+            const toolName = document.getElementById('stageBodyToolName');
+            if (eyebrow) eyebrow.textContent = `Stage ${meta.number} • ${meta.name}`;
+            if (toolName) toolName.textContent = TOOL_LABEL[tab] || '';
+
+            // Highlight the active tool button inside any multi-tool stage card
+            document.querySelectorAll('.stage-tool-button').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
+            });
 
             // Update tab content
             document.getElementById('gong-tab').classList.toggle('active', tab === 'gong');
@@ -1463,10 +1989,13 @@
             document.getElementById('hypothesis-tab').classList.toggle('active', tab === 'hypothesis');
             const pocpotEl = document.getElementById('pocpot-tab');
             if (pocpotEl) pocpotEl.classList.toggle('active', tab === 'pocpot');
+            const transitionEl = document.getElementById('transition-tab');
+            if (transitionEl) transitionEl.classList.toggle('active', tab === 'transition');
 
             const sharedControls = document.getElementById('sharedAnalyzeControls');
             if (sharedControls) {
-                sharedControls.style.display = tab === 'pocpot' ? 'none' : 'block';
+                const hideShared = tab === 'pocpot' || tab === 'transition';
+                sharedControls.style.display = hideShared ? 'none' : 'block';
             }
 
             // Update button text and hide model selector for prospect overview / demo / hypothesis
@@ -1501,6 +2030,8 @@
             } else if (currentTab === 'hypothesis') {
                 researchHypothesis();
             } else if (currentTab === 'pocpot') {
+                return;
+            } else if (currentTab === 'transition') {
                 return;
             } else {
                 analyzeTranscript();
@@ -1566,6 +2097,239 @@
                 alert('Document generation failed: ' + (e.message || String(e)));
             } finally {
                 loading.style.display = 'none';
+            }
+        }
+
+        // ============================================================
+        // Transition to CS — generate Knowledge Transfer markdown doc
+        // ============================================================
+
+        let _transitionLastMarkdown = '';
+        let _transitionLastAccount = '';
+
+        function _escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function _renderInlineMd(text) {
+            // Escape first, then turn whitelisted markdown back into HTML.
+            let s = _escHtml(text);
+            // links: [label](url)
+            s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_, label, url) {
+                const safeUrl = url.replace(/"/g, '%22');
+                return '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + label + '</a>';
+            });
+            // inline code: `code`
+            s = s.replace(/`([^`]+)`/g, function (_, c) { return '<code>' + c + '</code>'; });
+            // bold: **text**
+            s = s.replace(/\*\*([^*]+)\*\*/g, function (_, c) { return '<strong>' + c + '</strong>'; });
+            // italic: _text_ (avoid colliding with snake_case in escaped text)
+            s = s.replace(/(^|[^a-zA-Z0-9_])_([^_]{1,200})_(?=$|[^a-zA-Z0-9_])/g,
+                function (_, lead, c) { return lead + '<em>' + c + '</em>'; });
+            // soft tags: (public knowledge), (inferred), (TBD)
+            s = s.replace(/\(public knowledge\)/gi, '<span class="trans-tag public">public</span>');
+            s = s.replace(/\(inferred\)/gi, '<span class="trans-tag inferred">inferred</span>');
+            return s;
+        }
+
+        function renderMarkdownToHtml(md) {
+            if (!md) return '';
+            const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+            const out = [];
+            let listType = null;
+            const closeList = () => {
+                if (listType) {
+                    out.push('</' + listType + '>');
+                    listType = null;
+                }
+            };
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.trim()) {
+                    closeList();
+                    continue;
+                }
+                let m;
+                if ((m = line.match(/^###\s+(.+)$/))) {
+                    closeList();
+                    out.push('<h3>' + _renderInlineMd(m[1].trim()) + '</h3>');
+                    continue;
+                }
+                if ((m = line.match(/^##\s+(.+)$/))) {
+                    closeList();
+                    out.push('<h2>' + _renderInlineMd(m[1].trim()) + '</h2>');
+                    continue;
+                }
+                if ((m = line.match(/^#\s+(.+)$/))) {
+                    closeList();
+                    out.push('<h1>' + _renderInlineMd(m[1].trim()) + '</h1>');
+                    continue;
+                }
+                if ((m = line.match(/^\s*[-*]\s+(.+)$/))) {
+                    if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; }
+                    out.push('<li>' + _renderInlineMd(m[1].trim()) + '</li>');
+                    continue;
+                }
+                if ((m = line.match(/^\s*\d+\.\s+(.+)$/))) {
+                    if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; }
+                    out.push('<li>' + _renderInlineMd(m[1].trim()) + '</li>');
+                    continue;
+                }
+                closeList();
+                out.push('<p>' + _renderInlineMd(line.trim()) + '</p>');
+            }
+            closeList();
+            return out.join('\n');
+        }
+
+        async function generateTransitionDocument() {
+            let accountName = (document.getElementById('transAccountName').value || '').trim();
+            if (!accountName) {
+                alert('Please enter a customer / account name.');
+                return;
+            }
+            const notesRaw = (document.getElementById('transManualNotes').value || '').trim();
+            const manual_notes = notesRaw.length ? notesRaw : null;
+
+            // Always run the fuzzy-match disambiguator so we hit the right Salesforce account.
+            const r0 = await resolveSalesforceAccountLabel(accountName, '');
+            if (!r0.ok) return;
+            accountName = (r0.account_name || accountName).trim();
+            document.getElementById('transAccountName').value = accountName;
+
+            const btn = document.getElementById('transGenerateBtn');
+            const resultEl = document.getElementById('transResult');
+            const loading = document.getElementById('loading');
+            const loadingMsg = document.getElementById('loading-message');
+            const setBusy = (busy, label) => {
+                if (btn) btn.disabled = busy;
+                if (loadingMsg) loadingMsg.textContent = label || '';
+                if (loading) loading.style.display = busy ? 'block' : 'none';
+            };
+
+            try {
+                resultEl && resultEl.setAttribute('hidden', '');
+                setBusy(true, 'Pulling BigQuery + Gong + Pendo data and asking the LLM to draft the KT doc...');
+                const res = await fetch('/api/transition-to-cs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_name: accountName,
+                        manual_notes: manual_notes,
+                    }),
+                });
+                if (!res.ok) {
+                    let detail = res.statusText;
+                    try {
+                        const j = await res.json();
+                        if (j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+                    } catch (_) {}
+                    throw new Error(detail);
+                }
+                const data = await res.json();
+                const md = data.markdown || '';
+                _transitionLastMarkdown = md;
+                _transitionLastAccount = data.account_name || accountName;
+
+                const renderedEl = document.getElementById('transResultRendered');
+                const rawEl = document.getElementById('transResultRaw');
+                const acctEl = document.getElementById('transResultAccount');
+                const modelEl = document.getElementById('transResultModel');
+                const sourcesEl = document.getElementById('transResultSources');
+                const rawBtn = document.getElementById('transRawBtn');
+
+                if (renderedEl) renderedEl.innerHTML = renderMarkdownToHtml(md);
+                if (rawEl) {
+                    rawEl.textContent = md;
+                    rawEl.hidden = true;
+                }
+                if (rawBtn) rawBtn.textContent = 'View raw';
+                if (acctEl) acctEl.textContent = _transitionLastAccount;
+                if (modelEl) modelEl.textContent = data.model ? 'model: ' + data.model : 'model: unknown';
+                if (sourcesEl) {
+                    const sources = Array.isArray(data.data_sources) ? data.data_sources : [];
+                    sourcesEl.textContent = sources.length
+                        ? 'sources: ' + sources.join(', ')
+                        : 'sources: none';
+                }
+                if (resultEl) resultEl.removeAttribute('hidden');
+                resultEl && resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {
+                alert('Knowledge Transfer generation failed: ' + (e.message || String(e)));
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        function _slugify(s) {
+            return String(s || 'transition')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .slice(0, 60) || 'transition';
+        }
+
+        async function copyTransitionMarkdown() {
+            const btn = document.getElementById('transCopyBtn');
+            if (!_transitionLastMarkdown) return;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(_transitionLastMarkdown);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = _transitionLastMarkdown;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                }
+                if (btn) {
+                    btn.classList.add('copied');
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        btn.textContent = 'Copy markdown';
+                    }, 1600);
+                }
+            } catch (e) {
+                alert('Could not copy markdown: ' + (e.message || String(e)));
+            }
+        }
+
+        function downloadTransitionMarkdown() {
+            if (!_transitionLastMarkdown) return;
+            const blob = new Blob([_transitionLastMarkdown], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = _slugify(_transitionLastAccount) + '_kt.md';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function toggleTransitionRawMarkdown() {
+            const renderedEl = document.getElementById('transResultRendered');
+            const rawEl = document.getElementById('transResultRaw');
+            const btn = document.getElementById('transRawBtn');
+            if (!renderedEl || !rawEl) return;
+            const showingRaw = rawEl.hidden === false;
+            if (showingRaw) {
+                rawEl.hidden = true;
+                renderedEl.style.display = '';
+                if (btn) btn.textContent = 'View raw';
+            } else {
+                rawEl.hidden = false;
+                renderedEl.style.display = 'none';
+                if (btn) btn.textContent = 'View rendered';
             }
         }
 

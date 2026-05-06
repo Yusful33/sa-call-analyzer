@@ -674,9 +674,13 @@ class BigQueryClient:
             op.description,
             op.lead_source,
             op.type,
-            u.name as owner_name
+            u.name as owner_name,
+            sa_user.name as assigned_sa,
+            ai_user.name as assigned_ai_se
         FROM `{self.PROJECT_ID}.salesforce.opportunity` op
         LEFT JOIN `{self.PROJECT_ID}.salesforce.user` u ON op.owner_id = u.id
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` sa_user ON op.assigned_sa_c = sa_user.id
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` ai_user ON op.assigned_solutions_c = ai_user.id
         WHERE op.account_id = @account_id
           AND op.is_deleted = FALSE
         ORDER BY 
@@ -712,7 +716,9 @@ class BigQueryClient:
                 description=row.description,
                 lead_source=row.lead_source,
                 type=row.type,
-                owner_name=row.owner_name
+                owner_name=row.owner_name,
+                assigned_sa=row.assigned_sa,
+                assigned_ai_se=row.assigned_ai_se,
             ))
         
         return opportunities
