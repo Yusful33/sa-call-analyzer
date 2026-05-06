@@ -46,7 +46,17 @@ def _verify_slack_signature(
         logger.warning("SLACK_SIGNING_SECRET not configured, skipping verification")
         return True
 
-    if abs(time.time() - int(timestamp)) > 60 * 5:
+    if not timestamp or not signature:
+        logger.warning("Missing Slack signature headers")
+        return False
+
+    try:
+        ts_int = int(timestamp)
+    except ValueError:
+        logger.warning("Invalid Slack timestamp: %s", timestamp)
+        return False
+
+    if abs(time.time() - ts_int) > 60 * 5:
         logger.warning("Slack request timestamp too old")
         return False
 
