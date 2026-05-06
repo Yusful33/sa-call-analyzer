@@ -124,16 +124,63 @@ from models import (
     GeneratePocDocumentRequest,
     AccountSuggestionsRequest,
     AccountSuggestionsResponse,
-    TransitionToCsRequest,
-    TransitionToCsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
-from transition_document_generator import build_transition_document
 from gong_mcp_client import GongMCPClient
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel
 from typing import Optional
+from threading import Lock
+
+# ============================================================
+# Prospect Overview Cache (TTL-based in-memory cache)
+# Reduces redundant BigQuery calls when users click multiple
+# capabilities for the same account.
+# ============================================================
+_PROSPECT_CACHE_TTL = int(os.getenv("PROSPECT_CACHE_TTL_SECONDS", "900"))  # 15 min default
+_PROSPECT_CACHE_MAX_SIZE = int(os.getenv("PROSPECT_CACHE_MAX_SIZE", "100"))
+
+class _ProspectCache:
+    """Simple TTL cache for ProspectOverview objects."""
+    
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 900):
+        self._cache: dict[str, tuple[float, "ProspectOverview"]] = {}
+        self._lock = Lock()
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+    
+    def _make_key(self, account_name: str | None, domain: str | None, sfdc_id: str | None) -> str:
+        return f"{(account_name or '').lower().strip()}|{(domain or '').lower().strip()}|{(sfdc_id or '').strip()}"
+    
+    def get(self, account_name: str | None, domain: str | None, sfdc_id: str | None) -> Optional["ProspectOverview"]:
+        key = self._make_key(account_name, domain, sfdc_id)
+        with self._lock:
+            if key in self._cache:
+                ts, overview = self._cache[key]
+                if time.time() - ts < self._ttl:
+                    return overview
+                del self._cache[key]
+        return None
+    
+    def set(self, account_name: str | None, domain: str | None, sfdc_id: str | None, overview: "ProspectOverview") -> None:
+        key = self._make_key(account_name, domain, sfdc_id)
+        with self._lock:
+            if len(self._cache) >= self._max_size:
+                oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
+                del self._cache[oldest_key]
+            self._cache[key] = (time.time(), overview)
+    
+    def invalidate(self, account_name: str | None = None, domain: str | None = None, sfdc_id: str | None = None) -> None:
+        if account_name or domain or sfdc_id:
+            key = self._make_key(account_name, domain, sfdc_id)
+            with self._lock:
+                self._cache.pop(key, None)
+        else:
+            with self._lock:
+                self._cache.clear()
+
+_prospect_cache = _ProspectCache(max_size=_PROSPECT_CACHE_MAX_SIZE, ttl_seconds=_PROSPECT_CACHE_TTL)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -221,20 +268,6 @@ def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOv
     return maybe_enrich_overview_with_gong_mcp(overview, gong_client, bq_client)
 
 
-def _with_transition_gong_enrichment(overview: ProspectOverview) -> ProspectOverview:
-    """Force Gong MCP enrichment for the Transition-to-CS use case.
-
-    Bypasses the sparse-context heuristic and uses the larger
-    ``TRANSITION_GONG_MCP_*`` caps so the LLM gets transcripts for the
-    closed/won deal regardless of how much survived in BigQuery.
-    """
-    from gong_mcp_enrichment import maybe_enrich_overview_with_gong_mcp
-
-    return maybe_enrich_overview_with_gong_mcp(
-        overview, gong_client, bq_client, force=True
-    )
-
-
 if _API_SERVICE_MODE in ("full", "light", "crew"):
     from routes_crew import register_crew_routes
 
@@ -276,10 +309,11 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    poc_dir = BASE_DIR / "templates" / "poc_pot"
-    poc_templates = {
-        name: (poc_dir / f"{name}.docx").is_file() for name in ("poc_saas", "poc_vpc", "pot")
-    }
+    # Check both locations for templates (api/ folder for Vercel, root for local)
+    poc_dirs = [BASE_DIR / "api" / "templates" / "poc_pot", BASE_DIR / "templates" / "poc_pot"]
+    poc_templates = {}
+    for name in ("poc_saas", "poc_vpc", "pot"):
+        poc_templates[name] = any((d / f"{name}.docx").is_file() for d in poc_dirs)
     poc_ready = bool(bq_client) and all(poc_templates.values()) and bool(
         api_key or os.getenv("OPENAI_API_KEY")
     )
@@ -468,6 +502,98 @@ async def account_suggestions(request: AccountSuggestionsRequest):
     return AccountSuggestionsResponse.model_validate(data)
 
 
+class PrefetchProspectRequest(BaseModel):
+    """Request to prefetch/warm the prospect cache."""
+    account_name: Optional[str] = None
+    domain: Optional[str] = None
+    sfdc_account_id: Optional[str] = None
+
+
+class PrefetchProspectResponse(BaseModel):
+    """Response indicating prefetch status."""
+    status: str
+    cached: bool
+    account_name: Optional[str] = None
+    message: Optional[str] = None
+
+
+@app.post("/api/prefetch-prospect", response_model=PrefetchProspectResponse)
+async def prefetch_prospect(request: PrefetchProspectRequest):
+    """
+    Prefetch prospect overview data and warm the cache.
+    
+    Call this endpoint when the user starts typing an account name to
+    pre-load data before they click "Generate PoC" or other capabilities.
+    Returns immediately if data is already cached.
+    
+    This is a fire-and-forget optimization - errors are logged but don't
+    fail the request.
+    """
+    if not bq_client:
+        return PrefetchProspectResponse(
+            status="skipped",
+            cached=False,
+            message="BigQuery client not available"
+        )
+    
+    if not (request.account_name or request.domain or request.sfdc_account_id):
+        return PrefetchProspectResponse(
+            status="skipped",
+            cached=False,
+            message="No lookup criteria provided"
+        )
+    
+    cached = _prospect_cache.get(
+        request.account_name,
+        request.domain,
+        request.sfdc_account_id
+    )
+    if cached:
+        return PrefetchProspectResponse(
+            status="already_cached",
+            cached=True,
+            account_name=cached.salesforce.name if cached.salesforce else None
+        )
+    
+    try:
+        def _do_prefetch():
+            overview = bq_client.get_prospect_overview(
+                account_name=request.account_name,
+                domain=request.domain,
+                sfdc_account_id=request.sfdc_account_id,
+            )
+            overview = _with_optional_gong_mcp_enrichment(overview)
+            _prospect_cache.set(
+                request.account_name,
+                request.domain,
+                request.sfdc_account_id,
+                overview
+            )
+            return overview
+        
+        overview = await asyncio.wait_for(
+            asyncio.to_thread(_do_prefetch),
+            timeout=60.0
+        )
+        return PrefetchProspectResponse(
+            status="prefetched",
+            cached=True,
+            account_name=overview.salesforce.name if overview.salesforce else None
+        )
+    except asyncio.TimeoutError:
+        return PrefetchProspectResponse(
+            status="timeout",
+            cached=False,
+            message="Prefetch timed out (data may still be loading)"
+        )
+    except Exception as e:
+        return PrefetchProspectResponse(
+            status="error",
+            cached=False,
+            message=f"Prefetch failed: {str(e)[:200]}"
+        )
+
+
 @app.post("/api/prospect-overview", response_model=ProspectOverview)
 async def get_prospect_overview(request: ProspectOverviewRequest):
     """
@@ -484,6 +610,9 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
     - account_name: Fuzzy match on account name
     - domain: Match on email/website domain
     - sfdc_account_id: Exact match on Salesforce Account ID
+    
+    Uses in-memory caching (15 min TTL) to speed up repeated requests.
+    Call /api/prefetch-prospect to warm the cache proactively.
     """
     with tracer.start_as_current_span(
         f"{SPAN_PREFIX}.get_prospect_overview",
@@ -502,13 +631,28 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
                     detail="BigQuery client not available. For local development, run: gcloud auth application-default login"
                 )
             
+            # Check cache first (fast path)
+            cached = _prospect_cache.get(
+                request.account_name,
+                request.domain,
+                request.sfdc_account_id
+            )
+            if cached:
+                span.set_attribute("cache.hit", True)
+                span.add_event("cache_hit", {
+                    "account_name": request.account_name or "",
+                })
+                span.set_status(Status(StatusCode.OK))
+                return cached
+            
+            span.set_attribute("cache.hit", False)
             span.add_event("fetching_prospect_overview", {
                 "account_name": request.account_name or "",
                 "domain": request.domain or "",
                 "sfdc_id": request.sfdc_account_id or ""
             })
             
-            # Fetch prospect overview from BigQuery
+            # Fetch prospect overview from BigQuery (parallelized queries)
             overview = bq_client.get_prospect_overview(
                 account_name=request.account_name,
                 domain=request.domain,
@@ -516,6 +660,14 @@ async def get_prospect_overview(request: ProspectOverviewRequest):
                 manual_competitors=request.manual_competitors
             )
             overview = _with_optional_gong_mcp_enrichment(overview)
+            
+            # Populate cache for subsequent requests
+            _prospect_cache.set(
+                request.account_name,
+                request.domain,
+                request.sfdc_account_id,
+                overview
+            )
 
             # Log results
             span.set_attribute("result.data_sources", ", ".join(overview.data_sources_available))
@@ -1662,138 +1814,6 @@ async def generate_poc_document_deliverable(request: GeneratePocDocumentRequest)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to generate document: {str(e)[:500]}",
-            )
-
-
-# ============================================================
-# Transition-to-CS document (markdown) from BigQuery + LLM
-# ============================================================
-
-
-@app.post("/api/transition-to-cs", response_model=TransitionToCsResponse)
-async def generate_transition_to_cs(request: TransitionToCsRequest):
-    """
-    Generate a pre-sales -> post-sales Knowledge Transfer document for a
-    closed-won account.
-
-    Pulls the same ProspectOverview the Prospect Overview tab uses
-    (Salesforce account + opportunities, Gong analytics, Pendo, FullStory),
-    optionally enriches via the Gong MCP, then asks an LLM to fill in the
-    standard Arize KT template. Returns markdown text.
-    """
-    with tracer.start_as_current_span(
-        f"{SPAN_PREFIX}.generate_transition_to_cs",
-        attributes={
-            "transition.account_name": request.account_name.strip(),
-            "transition.has_manual_notes": bool((request.manual_notes or "").strip()),
-            "openinference.span.kind": "chain",
-        },
-    ) as span:
-        try:
-            if not bq_client:
-                span.set_status(Status(StatusCode.ERROR, "BigQuery unavailable"))
-                raise HTTPException(
-                    status_code=503,
-                    detail="BigQuery client not available. For local development, run: gcloud auth application-default login",
-                )
-
-            domain = (request.domain or "").strip() or None
-            sfdc_id = (request.sfdc_account_id or "").strip() or None
-            span.add_event(
-                "fetch_prospect_overview",
-                {
-                    "account_name": request.account_name.strip(),
-                    "domain": domain or "",
-                    "sfdc_id": sfdc_id or "",
-                },
-            )
-            overview = bq_client.get_prospect_overview(
-                account_name=request.account_name.strip(),
-                domain=domain,
-                sfdc_account_id=sfdc_id,
-                manual_competitors=None,
-            )
-            # Always pull Gong MCP transcripts for the KT use case — the CSE
-            # needs stakeholder names + use-case quotes that only live in calls.
-            overview = _with_transition_gong_enrichment(overview)
-
-            opps = overview.all_opportunities or []
-            won_opp_count = sum(1 for o in opps if o.is_won)
-            open_opp_count = sum(1 for o in opps if not o.is_closed)
-            gs = overview.gong_summary
-            gong_calls = list((gs.recent_calls if gs else None) or [])
-            gong_with_tx = sum(
-                1 for c in gong_calls if (c.transcript_snippet or "").strip()
-            )
-            ext_stakeholders = {
-                (p.email or p.name or "").strip().lower()
-                for c in gong_calls
-                for p in (c.participants or [])
-                if (p.affiliation or "").lower() == "external"
-                and (p.email or p.name)
-            }
-            ext_stakeholders.discard("")
-
-            span.set_attribute(
-                "transition.data_sources",
-                ", ".join(overview.data_sources_available or []),
-            )
-            span.set_attribute("transition.opportunity_count", len(opps))
-            span.set_attribute("transition.won_opportunity_count", won_opp_count)
-            span.set_attribute("transition.open_opportunity_count", open_opp_count)
-            span.set_attribute("transition.gong_call_count", len(gong_calls))
-            span.set_attribute("transition.gong_calls_with_transcripts", gong_with_tx)
-            span.set_attribute(
-                "transition.external_stakeholder_count", len(ext_stakeholders)
-            )
-            span.set_attribute(
-                "transition.has_salesforce", overview.salesforce is not None
-            )
-            if overview.salesforce and overview.salesforce.total_active_arr is not None:
-                span.set_attribute(
-                    "transition.total_active_arr",
-                    float(overview.salesforce.total_active_arr),
-                )
-
-            result = build_transition_document(
-                overview=overview,
-                manual_notes=request.manual_notes,
-                llm_model=request.llm_model,
-            )
-
-            stats = result.get("stats") or {}
-            for k, v in stats.items():
-                if isinstance(v, (int, float, str, bool)):
-                    span.set_attribute(f"transition.stats.{k}", v)
-            span.set_attribute("transition.model", result.get("model", ""))
-            span.set_attribute(
-                "transition.markdown_length", len(result.get("markdown", "") or "")
-            )
-            span.set_status(Status(StatusCode.OK))
-
-            return TransitionToCsResponse(
-                account_name=result.get("account_name") or request.account_name.strip(),
-                markdown=result.get("markdown") or "",
-                model=result.get("model") or "",
-                data_sources=result.get("data_sources") or [],
-            )
-        except HTTPException:
-            raise
-        except ValueError as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            raise HTTPException(status_code=400, detail=str(e))
-        except RuntimeError as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            raise HTTPException(
-                status_code=502,
-                detail=f"Transition document generation failed: {str(e)[:400]}",
-            )
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            span.record_exception(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to generate transition document: {str(e)[:500]}",
             )
 
 

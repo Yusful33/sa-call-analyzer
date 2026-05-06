@@ -30,7 +30,19 @@ class AppendixGenerationError(Exception):
 
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_DIR = BASE_DIR / "templates" / "poc_pot"
+
+def _find_template_dir() -> Path:
+    """Find template directory - check api/ folder first (Vercel bundle), then root."""
+    candidates = [
+        BASE_DIR / "api" / "templates" / "poc_pot",  # Vercel bundles api/ folder
+        BASE_DIR / "templates" / "poc_pot",          # Local dev / original location
+    ]
+    for candidate in candidates:
+        if candidate.is_dir() and any(candidate.glob("*.docx")):
+            return candidate
+    return candidates[-1]  # Default to original location
+
+TEMPLATE_DIR = _find_template_dir()
 
 TEMPLATES: dict[str, Path] = {
     "poc_saas": TEMPLATE_DIR / "poc_saas.docx",
