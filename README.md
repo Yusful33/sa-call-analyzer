@@ -77,7 +77,7 @@ For detailed setup, troubleshooting, and Docker configuration, see **[LOCAL_DEV.
 
 | Path | Contents | Vercel project |
 |------|-----------|----------------|
-| **`apps/api/`** | FastAPI app (`main.py`), Python modules, legacy **`frontend/`**, **`hypothesis_tool/`**, **`pyproject.toml`** + **`requirements.txt`** | `id-pain-api` — **light** bundle (`API_SERVICE_MODE=light`, no CrewAI in `requirements.txt`) |
+| **`apps/api/`** | FastAPI app (`main.py`), Python modules, **`hypothesis_tool/`**, **`pyproject.toml`** + **`requirements.txt`** (no bundled UI — use **`apps/web`**) | `id-pain-api` — **light** bundle (`API_SERVICE_MODE=light`, no CrewAI in `requirements.txt`) |
 | **`apps/api-crew/`** | Vercel-only shim: **`vercel.json`**, **`api/index.py`**, crew **`requirements.txt`**; copies **`../api`** into **`_api_src/`** at install | `id-pain-api-crew` — CrewAI-heavy routes (`/api/analyze`, recap, prospect timeline) |
 | **`apps/web/`** | Next.js 15 UI | `id-pain-web` |
 | **`apps/gong-mcp/`** | Vercel **Node Functions** that call Gong directly (replaces the old MCP HTTP server) | `id-pain-gong-mcp` |
