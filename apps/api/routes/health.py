@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from fastapi import APIRouter
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 
 router = APIRouter()
 
@@ -37,25 +37,19 @@ def get_health_status(bq_client, api_service_mode: str) -> dict:
 
 @router.get("/")
 async def root():
-    """Serve the legacy HTML UI, or redirect to the Next.js app when configured."""
+    """API-only root; redirect to Next when configured (matches main.py)."""
     web_app_url = (os.getenv("STILLNESS_WEB_URL") or os.getenv("PUBLIC_WEB_APP_URL") or "").strip().rstrip("/")
     if web_app_url:
         return RedirectResponse(web_app_url, status_code=302)
-    try:
-        response = FileResponse(str(BASE_DIR / "frontend" / "index.html"))
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        return response
-    except FileNotFoundError:
-        return HTMLResponse("""
-        <html>
-            <body>
-                <h1>Call Analyzer API</h1>
-                <p>Frontend not found. API is running at <a href="/docs">/docs</a></p>
-            </body>
-        </html>
-        """)
+    return HTMLResponse(
+        content="""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>Stillness API</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:42rem;margin:2.5rem auto;padding:0 1.25rem">
+<h1>Stillness API</h1>
+<p>Backend only — open the Next.js app for the UI, or <a href="/docs">/docs</a> for OpenAPI.</p>
+<p style="font-size:0.95rem;color:#555">Set <code>STILLNESS_WEB_URL</code> to redirect here to the web app.</p>
+</body></html>""",
+        status_code=200,
+    )
 
 
 @router.get("/api/example")
