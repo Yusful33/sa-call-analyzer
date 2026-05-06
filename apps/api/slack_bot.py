@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("stillness.slack")
 
-STILLNESS_ANALYSIS_API_URL = os.getenv("STILLNESS_ANALYSIS_API_URL", "").rstrip("/")
-
 
 class CommandType(Enum):
     """Supported Slack bot commands."""
@@ -380,20 +378,15 @@ class SlackBot:
         """Handle call analysis command."""
         input_text = cmd.args.get("input", "")
 
-        if not STILLNESS_ANALYSIS_API_URL:
-            return format_error(
-                "Analysis API not configured. Set STILLNESS_ANALYSIS_API_URL.",
-                cmd.raw_text,
-            )
-
         http = await self.get_http_client()
+        api_base = os.getenv("API_BASE_URL", "http://localhost:8080")
 
         is_gong_url = "gong.io" in input_text.lower()
         payload = {"gong_url": input_text} if is_gong_url else {"transcript": input_text}
 
         try:
             resp = await http.post(
-                f"{STILLNESS_ANALYSIS_API_URL}/api/analyze",
+                f"{api_base}/api/analyze",
                 json=payload,
                 timeout=600.0,
             )
@@ -430,18 +423,13 @@ class SlackBot:
         """Handle prospect timeline command."""
         account_input = cmd.args.get("account", "")
 
-        if not STILLNESS_ANALYSIS_API_URL:
-            return format_error(
-                "Analysis API not configured. Set STILLNESS_ANALYSIS_API_URL.",
-                cmd.raw_text,
-            )
-
         resolved = await resolve_account(account_input, self.bq_client)
         http = await self.get_http_client()
+        api_base = os.getenv("API_BASE_URL", "http://localhost:8080")
 
         try:
             resp = await http.post(
-                f"{STILLNESS_ANALYSIS_API_URL}/api/analyze-prospect",
+                f"{api_base}/api/analyze-prospect",
                 json={"account_name": resolved.get("account_name")},
                 timeout=300.0,
             )
