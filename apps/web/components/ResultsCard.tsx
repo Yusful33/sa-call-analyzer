@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useMemo } from "react";
 import { useAchievements, ResultsEndMessage } from "./UsageAchievements";
 
 export default function ResultsCard({
@@ -33,11 +33,19 @@ export default function ResultsCard({
     return () => container.removeEventListener("scroll", handleScroll);
   }, [visible, handleScroll]);
 
+  // React 19 regression (facebook/react#31660): dangerouslySetInnerHTML uses
+  // object identity instead of string equality, so the inner <div>'s innerHTML
+  // is reassigned on every parent rerender. That clobbers any DOM mutation a
+  // user just made — most visibly, native <details>/<summary> toggles inside
+  // the rendered HTML get reset the instant the user clicks. Memoizing the
+  // object keeps the same reference across renders when html is unchanged.
+  const innerHtml = useMemo(() => ({ __html: html }), [html]);
+
   if (!visible || !html) return null;
 
   return (
     <div ref={containerRef} className="card results show results-scrollable">
-      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <div dangerouslySetInnerHTML={innerHtml} />
       <ResultsEndMessage />
     </div>
   );

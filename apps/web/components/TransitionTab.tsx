@@ -122,6 +122,14 @@ export default function TransitionTab({
     () => (result?.markdown ? renderMarkdownToHtml(result.markdown) : ""),
     [result?.markdown],
   );
+  // React 19 regression (facebook/react#31660): dangerouslySetInnerHTML uses
+  // object identity not string equality, so without memoizing the object the
+  // div's innerHTML is reassigned on every parent rerender — clobbering any
+  // user-driven DOM state (e.g. native <details>/<summary> toggles).
+  const renderedInnerHtml = useMemo(
+    () => ({ __html: renderedHtml }),
+    [renderedHtml],
+  );
 
   async function submit() {
     const an = accountName.trim();
@@ -302,7 +310,7 @@ export default function TransitionTab({
           ) : (
             <div
               className="trans-result-rendered"
-              dangerouslySetInnerHTML={{ __html: renderedHtml }}
+              dangerouslySetInnerHTML={renderedInnerHtml}
             />
           )}
         </div>
