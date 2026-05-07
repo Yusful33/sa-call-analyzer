@@ -183,7 +183,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # So browsers can read Content-Disposition on cross-origin blob downloads (e.g. Next :3000 → API :8080)
-    expose_headers=["Content-Disposition"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Demo-Arize-Push",
+        "X-Demo-Arize-Push-Detail",
+    ],
 )
 
 
@@ -1347,7 +1351,7 @@ class GenerateDemoRequest(BaseModel):
     industry_or_use_case: str
     skill_framework: str
     agent_architecture: str
-    num_traces: Optional[int] = 500
+    num_traces: Optional[int] = 50
     with_evals: Optional[bool] = True
     with_dataset_and_experiments: Optional[bool] = True
     scenarios: Optional[list[str]] = None
@@ -1373,12 +1377,19 @@ class GenerateDemoResponse(BaseModel):
 @app.post("/api/generate-demo")
 async def generate_demo(request: GenerateDemoRequest):
     """
-    Generate a synthetic demo by executing the arize-synthetic-demo skill logic.
-    
-    Uses an LLM to generate domain-specific content (queries, tools, prompts),
-    fills in the generator skeleton template, and returns a downloadable ZIP file.
+    Generate a synthetic demo package (arize-synthetic-demo style).
+
+    Uses an LLM to generate domain-specific content, fills ``generator_skeleton.py``,
+    and returns a ZIP. When ``DEMO_AUTO_PUSH_TO_ARIZE=1`` and Arize credentials exist
+    on the server, also runs ``generator.py --count N`` so traces are sent (see response headers).
     """
-    from demo_generator import generate_demo_files, SKILL_PATH
+    from demo_generator import (
+        DEFAULT_DEMO_TRACE_COUNT,
+        SKILL_PATH,
+        generate_demo_files,
+        push_synthetic_demo_traces,
+        should_auto_push_demo_traces_to_arize,
+    )
     from synthetic_demo_skill import (
         SKILL_AGENT_ARCHITECTURE_VALUES,
         SKILL_FRAMEWORK_VALUES,
@@ -1419,12 +1430,12 @@ async def generate_demo(request: GenerateDemoRequest):
         tools_parsed = _parse_demo_tools_text(request.tools_text)
 
         try:
-            zip_bytes, metadata = generate_demo_files(
+            zip_bytes, metadata, generator_py = generate_demo_files(
                 company_name=request.account_name.strip(),
                 industry_or_use_case=request.industry_or_use_case.strip(),
                 framework=sf,
                 agent_architecture=aa,
-                num_traces=request.num_traces or 500,
+                num_traces=request.num_traces or DEFAULT_DEMO_TRACE_COUNT,
                 tools=tools_parsed or None,
                 additional_context=request.additional_context,
                 with_evals=request.with_evals if request.with_evals is not None else True,
@@ -1449,10 +1460,40 @@ async def generate_demo(request: GenerateDemoRequest):
 
         filename = f"{metadata['folder_name']}.zip"
 
+        push_headers: dict[str, str] = {}
+        if should_auto_push_demo_traces_to_arize():
+            space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
+            api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
+            if not space_id or not api_key:
+                push_headers["X-Demo-Arize-Push"] = "skipped"
+                push_headers["X-Demo-Arize-Push-Detail"] = (
+                    "DEMO_AUTO_PUSH_TO_ARIZE is enabled but ARIZE_SPACE_ID or ARIZE_API_KEY is missing on the server."
+                )
+            else:
+                n_push = int(request.num_traces or DEFAULT_DEMO_TRACE_COUNT)
+                ok, detail = push_synthetic_demo_traces(
+                    generator_py,
+                    count=n_push,
+                    project_name=str(metadata["project_name"]),
+                )
+                push_headers["X-Demo-Arize-Push"] = "success" if ok else "failed"
+                safe = (detail or "").replace("\r", " ").replace("\n", " ")
+                safe = safe.encode("ascii", "replace").decode("ascii")[:500]
+                push_headers["X-Demo-Arize-Push-Detail"] = safe
+        else:
+            push_headers["X-Demo-Arize-Push"] = "disabled"
+            push_headers["X-Demo-Arize-Push-Detail"] = (
+                "Set DEMO_AUTO_PUSH_TO_ARIZE=1 and ARIZE_SPACE_ID + ARIZE_API_KEY on the API "
+                "to send traces when generating; otherwise run generator.py from the ZIP locally."
+            )
+
         return Response(
             content=zip_bytes,
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                **push_headers,
+            },
         )
 
 

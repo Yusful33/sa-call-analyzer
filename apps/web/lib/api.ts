@@ -93,12 +93,18 @@ export async function apiPost<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+export type DemoArizePushStatus = "success" | "failed" | "skipped" | "disabled";
+
 export async function apiPostBlob(
   path: string,
   body: Record<string, unknown>,
   /** Used when the browser cannot see Content-Disposition (CORS) or the header is missing. */
   filenameFallback?: string
-): Promise<{ blob: Blob; filename: string }> {
+): Promise<{
+  blob: Blob;
+  filename: string;
+  demoArizePush?: { status: DemoArizePushStatus; detail?: string };
+}> {
   const res = await fetch(`${baseUrlForPath(path)}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -135,7 +141,19 @@ export async function apiPostBlob(
   } else if (!/\.(docx|pptx)$/i.test(filename)) {
     filename += path.includes("recap") ? ".pptx" : ".docx";
   }
-  return { blob, filename };
+
+  let demoArizePush: { status: DemoArizePushStatus; detail?: string } | undefined;
+  if (path.includes("generate-demo")) {
+    const raw = (res.headers.get("X-Demo-Arize-Push") || "disabled").toLowerCase();
+    const status: DemoArizePushStatus =
+      raw === "success" || raw === "failed" || raw === "skipped" ? raw : "disabled";
+    demoArizePush = {
+      status,
+      detail: res.headers.get("X-Demo-Arize-Push-Detail") || undefined,
+    };
+  }
+
+  return { blob, filename, ...(demoArizePush ? { demoArizePush } : {}) };
 }
 
 export function apiStreamPost(

@@ -9,11 +9,20 @@ This module implements the skill's workflow:
 
 import io
 import json
+import logging
 import os
 import re
+import subprocess
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("demo_generator")
+
+# Default trace count for Custom Demo Builder (UI + API + packaged README).
+DEFAULT_DEMO_TRACE_COUNT = 50
 
 # Path to the skill templates - check local bundled templates first, then user's home directory
 _API_DIR = Path(__file__).parent
@@ -36,6 +45,68 @@ def slugify(text: str) -> str:
     """Convert text to a URL-safe slug."""
     s = re.sub(r"[^a-zA-Z0-9]+", "_", (text or "").strip().lower()).strip("_")
     return s or "demo"
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def push_synthetic_demo_traces(
+    generator_py: str,
+    *,
+    count: int,
+    project_name: str,
+) -> tuple[bool, str]:
+    """
+    Run the generated ``generator.py`` in a temp directory so spans are sent to Arize.
+
+    Uses the current process's environment for ``ARIZE_SPACE_ID`` and ``ARIZE_API_KEY``.
+    Does **not** pass ``--with-evals``: eval logging needs the standalone ``arize`` SDK + pandas
+    from the ZIP's ``requirements.txt``; the API image only ships ``arize-otel`` for traces.
+
+    Returns:
+        (success, message) where message is short human-readable detail or tail of logs.
+    """
+    space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
+    api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
+    if not space_id or not api_key:
+        return False, "ARIZE_SPACE_ID and ARIZE_API_KEY must be set in the API environment."
+
+    env = os.environ.copy()
+    env["ARIZE_SPACE_ID"] = space_id
+    env["ARIZE_API_KEY"] = api_key
+    env["ARIZE_PROJECT_NAME"] = project_name
+
+    timeout_sec = min(max(120, count * 2), 900)
+
+    with tempfile.TemporaryDirectory(prefix="id_pain_demo_push_") as tmp:
+        gpath = Path(tmp) / "generator.py"
+        gpath.write_text(generator_py, encoding="utf-8")
+        cmd = [sys.executable, str(gpath), "--count", str(max(1, count))]
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"generator.py exceeded timeout ({timeout_sec}s)."
+
+        combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        tail = combined[-1200:] if len(combined) > 1200 else combined
+        if proc.returncode != 0:
+            logger.warning("demo push failed rc=%s: %s", proc.returncode, tail[:2000])
+            return False, tail or f"exit code {proc.returncode}"
+        return True, tail or "Traces flushed to Arize."
+
+
+def should_auto_push_demo_traces_to_arize() -> bool:
+    """When True, ``/api/generate-demo`` runs ``generator.py`` after building the ZIP (if creds exist)."""
+    return _env_truthy("DEMO_AUTO_PUSH_TO_ARIZE")
 
 
 # Framework to LLM metadata mapping (from references/frameworks.md)
@@ -233,10 +304,7 @@ def generate_domain_content(
     
     Includes retry logic for JSON parsing failures.
     """
-    import logging
     from openai_compat_completion import completion as llm_completion
-    
-    logger = logging.getLogger("demo_generator")
 
     prompt = _generate_domain_content_prompt(
         company_name=company_name,
@@ -247,7 +315,7 @@ def generate_domain_content(
         additional_context=additional_context,
     )
 
-    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-haiku-4-5")
+    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-opus-4-5-20251101")
     last_error = None
     
     for attempt in range(max_retries + 1):
@@ -401,18 +469,19 @@ def generate_demo_files(
     industry_or_use_case: str,
     framework: str,
     agent_architecture: str,
-    num_traces: int = 500,
+    num_traces: int = DEFAULT_DEMO_TRACE_COUNT,
     tools: Optional[list[dict[str, str]]] = None,
     additional_context: Optional[str] = None,
     with_evals: bool = True,
     with_dataset_and_experiments: bool = True,
     scenarios: Optional[list[str]] = None,
-) -> tuple[bytes, dict[str, Any]]:
+) -> tuple[bytes, dict[str, Any], str]:
     """
     Generate all demo files and return as a ZIP archive.
-    
+
     Returns:
-        Tuple of (zip_bytes, metadata) where metadata includes file list and generation info.
+        Tuple of (zip_bytes, metadata, generator_py) where ``generator_py`` is the same script
+        packaged in the ZIP (used for optional server-side ingest).
     """
     # Generate domain content using LLM
     domain_content = generate_domain_content(
@@ -580,7 +649,7 @@ python generator.py --full --count {num_traces}
 python generator.py --count 1000 --seed 42
 
 # Different project name
-python generator.py --count 500 --project-name {company_slug}_v2
+python generator.py --count {num_traces} --project-name {company_slug}_v2
 ```
 
 ## Files
@@ -639,4 +708,4 @@ python generator.py --count 500 --project-name {company_slug}_v2
         },
     }
     
-    return zip_bytes, metadata
+    return zip_bytes, metadata, generator_py

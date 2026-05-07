@@ -32,7 +32,7 @@ const AGENT_ARCHITECTURE_OPTIONS: { value: string; label: string }[] = [
   { value: "guarded_rag", label: "guarded_rag" },
 ];
 
-const NUM_TRACE_OPTIONS = [100, 250, 500, 1000, 2000] as const;
+const NUM_TRACE_OPTIONS = [50, 100, 250, 500, 1000, 2000] as const;
 
 /** SKILL.md optional `scenarios` subset. */
 const SCENARIO_OPTIONS: { value: string; label: string }[] = [
@@ -90,7 +90,7 @@ const defaultSkillForm = (): SkillFormState => ({
   outputDir: "",
   skillFramework: "langgraph",
   agentArchitecture: "single_agent",
-  numTraces: 500,
+  numTraces: 50,
   withEvals: true,
   withDatasetAndExperiments: true,
   scenarios: [],
@@ -318,7 +318,11 @@ export default function DemoTab({
         additional_context: additionalContext.trim() || undefined,
       };
 
-      const { blob, filename } = await apiPostBlob("/api/generate-demo", body, `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`);
+      const { blob, filename, demoArizePush } = await apiPostBlob(
+        "/api/generate-demo",
+        body,
+        `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`
+      );
 
       // Download the file
       const url = URL.createObjectURL(blob);
@@ -332,6 +336,20 @@ export default function DemoTab({
 
       setDemoGenerated(true);
       onLoading("");
+
+      if (demoArizePush?.status === "success") {
+        toast.success("Demo ZIP downloaded; synthetic traces were sent to Arize from the server.");
+      } else if (demoArizePush?.status === "failed") {
+        toast.warning(
+          "ZIP downloaded, but server-side Arize upload failed. Run README steps locally or check API logs. " +
+            (demoArizePush.detail ? demoArizePush.detail.slice(0, 280) : "")
+        );
+      } else if (demoArizePush?.status === "skipped") {
+        toast.warning(
+          "ZIP downloaded. Server push is enabled but Arize credentials are missing on the API. " +
+            (demoArizePush.detail || "")
+        );
+      }
     } catch (err: any) {
       toast.error("Error generating demo: " + (err.message ?? String(err)));
       onLoading("");
@@ -361,7 +379,7 @@ export default function DemoTab({
           </h4>
           <p style={{ color: "#555", fontSize: "0.9em", margin: "0 0 12px 0" }}>
             {demoGenerated
-              ? "Your demo has been downloaded. Extract the ZIP and follow the README to run the generator."
+              ? "Your demo ZIP was downloaded. If the API is configured with DEMO_AUTO_PUSH_TO_ARIZE and Arize keys, traces may already be in your space; otherwise extract the ZIP and follow the README to run generator.py locally."
               : "Click below to generate a complete demo package including generator.py, requirements.txt, and documentation."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -710,7 +728,7 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoNumTraces">num_traces (SKILL.md — default 500)</label>
+        <label htmlFor="demoNumTraces">num_traces (SKILL.md — default 50 in this app)</label>
         <select
           id="demoNumTraces"
           style={{ width: "100%", marginTop: 6 }}

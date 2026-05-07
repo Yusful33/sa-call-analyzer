@@ -164,7 +164,7 @@ def build_synthetic_demo_skill_hints(
     if isinstance(num_traces, int) and num_traces > 0:
         n_traces = min(max(num_traces, 50), 10_000)
     else:
-        n_traces = 500
+        n_traces = 50
     we = True if with_evals is None else bool(with_evals)
     wde = True if with_dataset_and_experiments is None else bool(with_dataset_and_experiments)
     scen_list: list[str] = []
@@ -251,17 +251,24 @@ def static_skill_info() -> dict[str, Any]:
     return {
         **SYNTHETIC_DEMO_SKILL,
         "summary": (
-            "Custom synthetic trace demos are generated offline via the **arize-synthetic-demo** Claude skill "
-            "(generator.py + notebooks), not by this HTTP API."
+            "Custom synthetic trace demos are primarily run from **generator.py** in the downloaded ZIP "
+            "(or via the **arize-synthetic-demo** Claude skill). The Call Analyzer API can also build the ZIP "
+            "and optionally execute ``generator.py`` server-side when ``DEMO_AUTO_PUSH_TO_ARIZE=1`` and "
+            "Arize credentials are configured."
         ),
         "required_skill_inputs_checklist": [
             "company_name",
             "industry_or_use_case",
             "framework (openai|anthropic|bedrock|vertex|adk|langchain|langgraph|crewai|generic)",
             "agent_architecture (single_agent|multi_agent_coordinator|retrieval_pipeline|rag_rerank|guarded_rag)",
-            "num_traces (default 500)",
+            "num_traces (default 50 in the app; higher counts in SKILL.md)",
             "output_dir (explicit path)",
         ],
-        "optional_credentials_for_auto_run": ["ARIZE_SPACE_ID", "ARIZE_API_KEY", "ARIZE_PROJECT_NAME or project slug"],
+        "optional_credentials_for_auto_run": [
+            "ARIZE_SPACE_ID",
+            "ARIZE_API_KEY",
+            "DEMO_AUTO_PUSH_TO_ARIZE=1 (API runs generator.py after ZIP build)",
+            "ARIZE_PROJECT_NAME (optional; demo uses generated project slug when unset)",
+        ],
         "references": "SKILL.md in the repo above lists scenarios, evaluations, datasets/experiments, and AX CLI flows.",
     }
