@@ -291,6 +291,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    POC_VERSION = "2026-05-07-v2"  # roster fix: no call counts
     api_key = os.getenv("ANTHROPIC_API_KEY")
     # Check both locations for templates (api/ folder for Vercel, root for local)
     poc_dirs = [BASE_DIR / "api" / "templates" / "poc_pot", BASE_DIR / "templates" / "poc_pot"]
@@ -303,6 +304,7 @@ async def health_check():
     brave_key = (os.getenv("BRAVE_API_KEY") or "").strip()
     return {
         "status": "healthy",
+        "poc_version": POC_VERSION,
         "api_key_configured": bool(api_key),
         "service_mode": _API_SERVICE_MODE,
         "canonical_web_url": (os.getenv("STILLNESS_WEB_URL") or os.getenv("PUBLIC_WEB_APP_URL") or "").strip()

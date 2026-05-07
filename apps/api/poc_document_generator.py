@@ -1,6 +1,8 @@
 """
 Generate populated PoC / PoT Word documents from BigQuery-backed ProspectOverview.
 
+VERSION: 2026-05-07-v2 (roster fix: no call counts)
+
 Templates under templates/poc_pot/ use bracket placeholders like [Company Name] and
 fixed boilerplate lines (trial dates, success examples). We discover those strings in
 the document (body, tables, headers), extract structured facts via LLM from Gong + SFDC,
