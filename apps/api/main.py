@@ -277,8 +277,8 @@ def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
 @app.get("/api/pipeline-user-options", response_model=PipelineUserOptionsResponse)
 async def get_pipeline_user_options():
     """
-    Distinct Salesforce users who appear as an **Assigned SA** on any account and/or as an **Opportunity owner**
-    (warehouse mirror). Used to populate the My Pipeline person picker.
+    Distinct Salesforce User Ids from BigQuery: all non-null **``assigned_sa_c``** on accounts and **``owner_id``**
+    on opportunities (union, no ``salesforce.user`` join). Used for the My Pipeline picklist.
     """
     if not bq_client:
         return PipelineUserOptionsResponse(

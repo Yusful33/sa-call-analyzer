@@ -889,16 +889,13 @@ class MyOpportunitiesResponse(BaseModel):
 
 
 class PipelineUserOption(BaseModel):
-    """One Salesforce user who appears as an Assigned SA and/or an Opportunity owner (warehouse-derived)."""
+    """Salesforce User Id from warehouse ``assigned_sa_c`` or ``opportunity.owner_id`` (picklist value)."""
 
     id: str
-    name: str
-    is_assigned_sa: bool = False
-    is_opportunity_owner: bool = False
 
 
 class PipelineUserOptionsResponse(BaseModel):
-    """Distinct users for the My Pipeline picker (Assigned SA ∪ Opportunity owners)."""
+    """Distinct User Ids for the My Pipeline picker (``assigned_sa_c`` ∪ ``owner_id`` from BigQuery)."""
 
     users: List[PipelineUserOption] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)

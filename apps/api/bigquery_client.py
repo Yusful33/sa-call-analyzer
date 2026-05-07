@@ -856,42 +856,26 @@ class BigQueryClient:
         return getattr(rows[0], "id", None)
 
     def get_pipeline_user_options(self) -> List[Dict[str, Any]]:
-        """Distinct users who are Assigned SA on any account and/or own any opportunity (warehouse)."""
+        """Distinct Salesforce User Ids from ``assigned_sa_c`` and ``owner_id`` only (no user table join)."""
         query = f"""
-        WITH flags AS (
-          SELECT assigned_sa_c AS user_id, 1 AS is_sa, 0 AS is_ow
-          FROM `{self.PROJECT_ID}.salesforce.account`
-          WHERE COALESCE(is_deleted, FALSE) = FALSE
-            AND assigned_sa_c IS NOT NULL
-          UNION ALL
-          SELECT owner_id, 0, 1
-          FROM `{self.PROJECT_ID}.salesforce.opportunity`
-          WHERE COALESCE(is_deleted, FALSE) = FALSE
-            AND owner_id IS NOT NULL
-        )
-        SELECT
-          u.id AS id,
-          u.name AS name,
-          SUM(f.is_sa) > 0 AS is_assigned_sa,
-          SUM(f.is_ow) > 0 AS is_opportunity_owner
-        FROM flags f
-        JOIN `{self.PROJECT_ID}.salesforce.user` u ON u.id = f.user_id
-        GROUP BY u.id, u.name
-        HAVING SUM(f.is_sa) > 0 OR SUM(f.is_ow) > 0
-        ORDER BY u.name
+        SELECT assigned_sa_c AS id
+        FROM `{self.PROJECT_ID}.salesforce.account`
+        WHERE COALESCE(is_deleted, FALSE) = FALSE
+          AND assigned_sa_c IS NOT NULL
+          AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
+        UNION DISTINCT
+        SELECT owner_id AS id
+        FROM `{self.PROJECT_ID}.salesforce.opportunity`
+        WHERE COALESCE(is_deleted, FALSE) = FALSE
+          AND owner_id IS NOT NULL
+          AND TRIM(CAST(owner_id AS STRING)) != ''
+        ORDER BY id
         """
         out: List[Dict[str, Any]] = []
         for row in self.client.query(query).result():
-            nm = (getattr(row, "name", None) or "").strip()
-            uid = getattr(row, "id", None) or ""
-            out.append(
-                {
-                    "id": uid,
-                    "name": nm or uid,
-                    "is_assigned_sa": bool(row.is_assigned_sa),
-                    "is_opportunity_owner": bool(row.is_opportunity_owner),
-                }
-            )
+            uid = (getattr(row, "id", None) or "").strip()
+            if uid:
+                out.append({"id": uid})
         return out
 
     def get_pipeline_opportunities_for_user(self, user_id: str) -> List[Dict[str, Any]]:

@@ -7,9 +7,6 @@ type PipelineSource = "bigquery" | "salesforce";
 
 type PipelineUserOption = {
   id: string;
-  name: string;
-  is_assigned_sa: boolean;
-  is_opportunity_owner: boolean;
 };
 
 type MyPipelineOpportunity = {
@@ -49,14 +46,6 @@ function formatDate(s: string | null | undefined): string {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString();
-}
-
-function userOptionLabel(u: PipelineUserOption): string {
-  const roles: string[] = [];
-  if (u.is_assigned_sa) roles.push("Assigned SA");
-  if (u.is_opportunity_owner) roles.push("Opportunity owner");
-  const suffix = roles.length ? ` — ${roles.join(" · ")}` : "";
-  return `${u.name}${suffix}`;
 }
 
 export default function PipelineTab() {
@@ -123,9 +112,10 @@ export default function PipelineTab() {
   return (
     <div className="pipeline-tab">
       <p style={{ margin: "0 0 16px", color: "#5a5f6e", lineHeight: 1.5 }}>
-        Pick your name, then load <strong>open</strong> opportunities where you are the account&apos;s{" "}
-        <strong>Assigned SA</strong> or the <strong>Opportunity owner</strong>. Salesforce credentials on the API are
-        only used to run queries when you choose the live source.
+        Pick your <strong>Salesforce User Id</strong> from the warehouse list (every distinct{" "}
+        <strong>assigned_sa_c</strong> or <strong>owner_id</strong>), then load <strong>open</strong> opportunities
+        where that Id is the account&apos;s Assigned SA or the Opportunity owner. Salesforce credentials on the API are
+        only used when you choose the live source.
       </p>
 
       <div
@@ -138,7 +128,7 @@ export default function PipelineTab() {
         }}
       >
         <label htmlFor="pipeline-user-select" style={{ fontSize: 14, fontWeight: 600, color: "#1a1d29" }}>
-          Person (Assigned SA or Opportunity owner)
+          User Id (assigned_sa_c or owner_id)
         </label>
         <select
           id="pipeline-user-select"
@@ -155,20 +145,20 @@ export default function PipelineTab() {
             color: "#1a1d29",
           }}
         >
-          <option value="">{usersLoading ? "Loading people…" : "Select your name…"}</option>
+          <option value="">{usersLoading ? "Loading User Ids…" : "Select your User Id…"}</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {userOptionLabel(u)}
+              {u.id}
             </option>
           ))}
         </select>
         {usersError ? (
           <div role="alert" style={{ fontSize: 13, color: "#842029" }}>
-            Could not load people list: {usersError}
+            Could not load User Id list: {usersError}
           </div>
         ) : null}
         {users.length === 0 && !usersLoading && !usersError ? (
-          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No users returned from the warehouse for this filter.</p>
+          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No User Ids returned from the warehouse.</p>
         ) : null}
       </div>
 
