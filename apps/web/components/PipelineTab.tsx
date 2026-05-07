@@ -5,6 +5,13 @@ import { apiGet } from "@/lib/api";
 
 type PipelineSource = "bigquery" | "salesforce";
 
+type PipelineUserOption = {
+  id: string;
+  name: string;
+  is_assigned_sa: boolean;
+  is_opportunity_owner: boolean;
+};
+
 type MyPipelineOpportunity = {
   id: string;
   name: string;
@@ -14,10 +21,11 @@ type MyPipelineOpportunity = {
   next_step?: string | null;
   account_id?: string | null;
   account_name?: string | null;
+  owner_name?: string | null;
 };
 
 type MyOpportunitiesResponse = {
-  sa_user_id: string;
+  user_id: string;
   source: string;
   opportunities: MyPipelineOpportunity[];
   notes?: string[];
@@ -43,38 +51,126 @@ function formatDate(s: string | null | undefined): string {
   return d.toLocaleDateString();
 }
 
+function userOptionLabel(u: PipelineUserOption): string {
+  const roles: string[] = [];
+  if (u.is_assigned_sa) roles.push("Assigned SA");
+  if (u.is_opportunity_owner) roles.push("Opportunity owner");
+  const suffix = roles.length ? ` — ${roles.join(" · ")}` : "";
+  return `${u.name}${suffix}`;
+}
+
 export default function PipelineTab() {
   const [source, setSource] = useState<PipelineSource>("bigquery");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<PipelineUserOption[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState("");
+
+  const [oppsLoading, setOppsLoading] = useState(false);
+  const [oppsError, setOppsError] = useState<string | null>(null);
   const [data, setData] = useState<MyOpportunitiesResponse | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setUsersLoading(true);
+      setUsersError(null);
+      try {
+        const r = await apiGet<{ users: PipelineUserOption[]; notes?: string[] }>("/api/pipeline-user-options");
+        if (!cancelled) {
+          setUsers(r.users || []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setUsers([]);
+          setUsersError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setUsersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadOpportunities = useCallback(async () => {
+    const uid = selectedUserId.trim();
+    if (!uid) {
+      setData(null);
+      setOppsError(null);
+      return;
+    }
+    setOppsLoading(true);
+    setOppsError(null);
     try {
       const r = await apiGet<MyOpportunitiesResponse>("/api/my-opportunities", {
-        searchParams: { source },
+        searchParams: { user_id: uid, source },
       });
       setData(r);
     } catch (e) {
       setData(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setOppsError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setOppsLoading(false);
     }
-  }, [source]);
+  }, [selectedUserId, source]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadOpportunities();
+  }, [loadOpportunities]);
 
   return (
     <div className="pipeline-tab">
       <p style={{ margin: "0 0 16px", color: "#5a5f6e", lineHeight: 1.5 }}>
-        Open opportunities on accounts where you are the assigned Solution Architect. Data loads fresh each time you open
-        this tab or switch source.
+        Pick your name, then load <strong>open</strong> opportunities where you are the account&apos;s{" "}
+        <strong>Assigned SA</strong> or the <strong>Opportunity owner</strong>. Salesforce credentials on the API are
+        only used to run queries when you choose the live source.
       </p>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          marginBottom: 20,
+          maxWidth: "min(100%, 40rem)",
+        }}
+      >
+        <label htmlFor="pipeline-user-select" style={{ fontSize: 14, fontWeight: 600, color: "#1a1d29" }}>
+          Person (Assigned SA or Opportunity owner)
+        </label>
+        <select
+          id="pipeline-user-select"
+          className="pipeline-user-select"
+          value={selectedUserId}
+          onChange={(e) => setSelectedUserId(e.target.value)}
+          disabled={usersLoading}
+          style={{
+            fontSize: 15,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid var(--arize-border, #e0e0e8)",
+            background: "var(--arize-surface, #fff)",
+            color: "#1a1d29",
+          }}
+        >
+          <option value="">{usersLoading ? "Loading people…" : "Select your name…"}</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {userOptionLabel(u)}
+            </option>
+          ))}
+        </select>
+        {usersError ? (
+          <div role="alert" style={{ fontSize: 13, color: "#842029" }}>
+            Could not load people list: {usersError}
+          </div>
+        ) : null}
+        {users.length === 0 && !usersLoading && !usersError ? (
+          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No users returned from the warehouse for this filter.</p>
+        ) : null}
+      </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 16 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1d29" }}>Source</span>
@@ -86,12 +182,17 @@ export default function PipelineTab() {
           <input type="radio" name="pipe-src" checked={source === "salesforce"} onChange={() => setSource("salesforce")} />
           Salesforce (live)
         </label>
-        <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => void loadOpportunities()}
+          disabled={oppsLoading || !selectedUserId.trim()}
+        >
+          {oppsLoading ? "Loading…" : "Refresh"}
         </button>
       </div>
 
-      {error ? (
+      {oppsError ? (
         <div
           role="alert"
           style={{
@@ -103,7 +204,7 @@ export default function PipelineTab() {
             marginBottom: 12,
           }}
         >
-          {error}
+          {oppsError}
         </div>
       ) : null}
 
@@ -115,8 +216,8 @@ export default function PipelineTab() {
         </ul>
       ) : null}
 
-      {!loading && data && !data.opportunities.length ? (
-        <p style={{ color: "#5a5f6e" }}>No open opportunities found for your assigned accounts.</p>
+      {selectedUserId && !oppsLoading && data && !data.opportunities.length ? (
+        <p style={{ color: "#5a5f6e" }}>No open opportunities match this person as Assigned SA or Opportunity owner.</p>
       ) : null}
 
       {data && data.opportunities.length > 0 ? (
@@ -126,6 +227,7 @@ export default function PipelineTab() {
               <tr>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Account</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opportunity</th>
+                <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opp owner</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Stage</th>
                 <th style={{ textAlign: "right", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Amount</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Close</th>
@@ -142,6 +244,9 @@ export default function PipelineTab() {
                     <a href={oppUrl(o.id)} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600 }}>
                       {o.name}
                     </a>
+                  </td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
+                    {o.owner_name || "—"}
                   </td>
                   <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
                     {o.stage_name || "—"}
@@ -161,7 +266,7 @@ export default function PipelineTab() {
           </table>
           <p style={{ fontSize: 12, color: "#888", marginTop: 10 }}>
             Showing {data.opportunities.length} row{data.opportunities.length === 1 ? "" : "s"} via{" "}
-            <strong>{data.source}</strong> (User <code style={{ fontSize: 11 }}>{data.sa_user_id}</code>).
+            <strong>{data.source}</strong> for user <code style={{ fontSize: 11 }}>{data.user_id}</code>.
           </p>
         </div>
       ) : null}

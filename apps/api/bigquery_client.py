@@ -855,9 +855,48 @@ class BigQueryClient:
             return None
         return getattr(rows[0], "id", None)
 
-    def get_pipeline_opportunities_for_sa(self, sa_user_id: str) -> List[Dict[str, Any]]:
-        """Open opportunities on accounts where Assigned SA matches ``sa_user_id`` (warehouse)."""
-        uid = (sa_user_id or "").strip()
+    def get_pipeline_user_options(self) -> List[Dict[str, Any]]:
+        """Distinct users who are Assigned SA on any account and/or own any opportunity (warehouse)."""
+        query = f"""
+        WITH flags AS (
+          SELECT assigned_sa_c AS user_id, 1 AS is_sa, 0 AS is_ow
+          FROM `{self.PROJECT_ID}.salesforce.account`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_sa_c IS NOT NULL
+          UNION ALL
+          SELECT owner_id, 0, 1
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND owner_id IS NOT NULL
+        )
+        SELECT
+          u.id AS id,
+          u.name AS name,
+          SUM(f.is_sa) > 0 AS is_assigned_sa,
+          SUM(f.is_ow) > 0 AS is_opportunity_owner
+        FROM flags f
+        JOIN `{self.PROJECT_ID}.salesforce.user` u ON u.id = f.user_id
+        GROUP BY u.id, u.name
+        HAVING SUM(f.is_sa) > 0 OR SUM(f.is_ow) > 0
+        ORDER BY u.name
+        """
+        out: List[Dict[str, Any]] = []
+        for row in self.client.query(query).result():
+            nm = (getattr(row, "name", None) or "").strip()
+            uid = getattr(row, "id", None) or ""
+            out.append(
+                {
+                    "id": uid,
+                    "name": nm or uid,
+                    "is_assigned_sa": bool(row.is_assigned_sa),
+                    "is_opportunity_owner": bool(row.is_opportunity_owner),
+                }
+            )
+        return out
+
+    def get_pipeline_opportunities_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Open opportunities where ``user_id`` is the account Assigned SA or the Opportunity owner (warehouse)."""
+        uid = (user_id or "").strip()
         if not uid:
             return []
         query = f"""
@@ -869,16 +908,18 @@ class BigQueryClient:
             CAST(op.close_date AS STRING) AS close_date,
             op.next_step AS next_step,
             op.account_id AS account_id,
-            a.name AS account_name
+            a.name AS account_name,
+            owner_u.name AS owner_name
         FROM `{self.PROJECT_ID}.salesforce.opportunity` op
         JOIN `{self.PROJECT_ID}.salesforce.account` a ON op.account_id = a.id
-        WHERE a.assigned_sa_c = @sa_user_id
-          AND COALESCE(op.is_closed, FALSE) = FALSE
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` owner_u ON op.owner_id = owner_u.id
+        WHERE COALESCE(op.is_closed, FALSE) = FALSE
           AND COALESCE(op.is_deleted, FALSE) = FALSE
+          AND (a.assigned_sa_c = @user_id OR op.owner_id = @user_id)
         ORDER BY op.close_date ASC
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("sa_user_id", "STRING", uid)]
+            query_parameters=[bigquery.ScalarQueryParameter("user_id", "STRING", uid)]
         )
         out: List[Dict[str, Any]] = []
         for row in self.client.query(query, job_config=job_config).result():
@@ -892,6 +933,7 @@ class BigQueryClient:
                     "next_step": row.next_step,
                     "account_id": row.account_id,
                     "account_name": row.account_name,
+                    "owner_name": row.owner_name,
                 }
             )
         return out

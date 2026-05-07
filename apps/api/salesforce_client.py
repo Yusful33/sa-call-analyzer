@@ -194,15 +194,14 @@ class SalesforceClient:
 
         return out
 
-    def opportunities_for_assigned_sa(self, sa_user_id: str) -> list[dict[str, Any]]:
-        """Open opps whose Account.Assigned_SA__c matches the given User Id."""
-        # Escape single quotes in Id (defensive)
-        uid = sa_user_id.replace("'", "\\'")
+    def opportunities_for_pipeline_user(self, user_id: str) -> list[dict[str, Any]]:
+        """Open opps where the user is the account Assigned SA or the Opportunity owner."""
+        uid = user_id.replace("'", "\\'")
         soql = (
             "SELECT Id, Name, StageName, Amount, CloseDate, NextStep, AccountId, "
-            "Account.Name "
+            "Account.Name, Owner.Name "
             "FROM Opportunity "
-            f"WHERE IsClosed = false AND Account.Assigned_SA__c = '{uid}' "
+            f"WHERE IsClosed = false AND (Account.Assigned_SA__c = '{uid}' OR OwnerId = '{uid}') "
             "ORDER BY CloseDate ASC"
         )
         rows = self.query(soql)
@@ -211,6 +210,9 @@ class SalesforceClient:
             acct = r.get("Account") if isinstance(r.get("Account"), dict) else {}
             if isinstance(acct, dict):
                 acct.pop("attributes", None)
+            owner = r.get("Owner") if isinstance(r.get("Owner"), dict) else {}
+            if isinstance(owner, dict):
+                owner.pop("attributes", None)
             normalized.append(
                 {
                     "id": r.get("Id"),
@@ -221,6 +223,7 @@ class SalesforceClient:
                     "next_step": r.get("NextStep"),
                     "account_id": r.get("AccountId"),
                     "account_name": (acct or {}).get("Name") if isinstance(acct, dict) else None,
+                    "owner_name": (owner or {}).get("Name") if isinstance(owner, dict) else None,
                 }
             )
         return normalized

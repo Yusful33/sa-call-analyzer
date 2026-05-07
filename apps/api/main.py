@@ -5,8 +5,6 @@ import base64
 import asyncio
 import logging
 import contextvars
-import shutil
-import subprocess
 from pathlib import Path
 
 # Configure logging
@@ -112,6 +110,8 @@ from models import (
     AccountSuggestionsResponse,
     MyOpportunitiesResponse,
     MyPipelineOpportunity,
+    PipelineUserOption,
+    PipelineUserOptionsResponse,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
 from transition_document_generator import build_transition_document
@@ -242,66 +242,6 @@ else:
     logger.info("Skipping BigQuery init (API_SERVICE_MODE=crew)")
 
 
-def _is_likely_serverless_host() -> bool:
-    """True when this process is almost certainly not a developer laptop with sf CLI."""
-    if (os.getenv("VERCEL") or "").strip() == "1":
-        return True
-    if (os.getenv("AWS_LAMBDA_FUNCTION_NAME") or "").strip():
-        return True
-    if (os.getenv("K_SERVICE") or "").strip():  # Cloud Run
-        return True
-    return False
-
-
-def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
-    """Return (Salesforce User Id, notes) for the current SA context."""
-    notes: list[str] = []
-    uid = (os.getenv("SALESFORCE_USER_ID") or "").strip()
-    if uid:
-        return uid, notes
-
-    email = (os.getenv("SALESFORCE_USER_EMAIL") or "").strip()
-    if email:
-        if bq_client:
-            found = bq_client.get_salesforce_user_id_by_email(email)
-            if found:
-                return found, notes
-            notes.append(f"No Salesforce user row in BigQuery for email {email!r} (check sync or spelling).")
-        else:
-            notes.append("BigQuery unavailable; cannot resolve SALESFORCE_USER_EMAIL to a User Id.")
-
-    if shutil.which("sf") and os.getenv("SALESFORCE_USE_SF_CLI", "").strip().lower() not in ("0", "false", "no"):
-        alias = (os.getenv("SALESFORCE_SF_CLI_TARGET_ORG") or "arize-sfdc").strip()
-        try:
-            proc = subprocess.run(
-                ["sf", "org", "display", "user", "--target-org", alias, "--json"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-            if proc.returncode == 0 and proc.stdout:
-                data = json.loads(proc.stdout)
-                cli_id = ((data.get("result") or {}).get("id") or "").strip()
-                if cli_id:
-                    return cli_id, notes + ["Resolved SA User Id from Salesforce CLI."]
-        except (json.JSONDecodeError, subprocess.SubprocessError, KeyError, TypeError, OSError) as e:
-            logger.debug("SF CLI user resolution skipped: %s", e)
-
-    if not notes:
-        if _is_likely_serverless_host():
-            notes.append(
-                "On Vercel/serverless, set SALESFORCE_USER_ID (18-char Id) or SALESFORCE_USER_EMAIL "
-                "(requires BigQuery). The sf CLI is not used in production."
-            )
-        else:
-            notes.append(
-                "Set SALESFORCE_USER_ID or SALESFORCE_USER_EMAIL (+ BigQuery), install the Salesforce CLI "
-                "locally, or add SALESFORCE_USE_SF_CLI=0 to silence CLI hints."
-            )
-    return None, notes
-
-
 def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
     out: list[MyPipelineOpportunity] = []
     for r in rows:
@@ -325,40 +265,65 @@ def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
                 next_step=r.get("next_step") or r.get("NextStep"),
                 account_id=r.get("account_id") or r.get("AccountId"),
                 account_name=account_name,
+                owner_name=(
+                    r.get("owner_name")
+                    or ((r.get("Owner") or {}).get("Name") if isinstance(r.get("Owner"), dict) else None)
+                ),
             )
         )
     return out
 
 
+@app.get("/api/pipeline-user-options", response_model=PipelineUserOptionsResponse)
+async def get_pipeline_user_options():
+    """
+    Distinct Salesforce users who appear as an **Assigned SA** on any account and/or as an **Opportunity owner**
+    (warehouse mirror). Used to populate the My Pipeline person picker.
+    """
+    if not bq_client:
+        return PipelineUserOptionsResponse(
+            users=[],
+            notes=["BigQuery client not available; cannot load user list."],
+        )
+    rows = bq_client.get_pipeline_user_options()
+    users = [PipelineUserOption.model_validate(r) for r in rows]
+    return PipelineUserOptionsResponse(users=users, notes=[])
+
+
 @app.get("/api/my-opportunities", response_model=MyOpportunitiesResponse)
 async def get_my_opportunities(
+    user_id: str = Query(
+        ...,
+        min_length=15,
+        max_length=19,
+        description="Salesforce User Id (from the pipeline picker; 15 or 18 characters).",
+    ),
     source: str = Query(
         "bigquery",
-        description='Use "bigquery" (warehouse) or "salesforce" (live API; needs credentials or sf CLI).',
+        description='Use "bigquery" (warehouse) or "salesforce" (live API; needs SOAP credentials).',
     ),
 ):
     """
-    List open opportunities on accounts assigned to the configured SA (Account.Assigned_SA__c).
-
-    Identity resolution: ``SALESFORCE_USER_ID``, else email via BigQuery, else local ``sf`` CLI user.
+    List **open** opportunities where the selected user is either the account **Assigned SA** or the
+    **Opportunity owner** (union).
     """
     src = (source or "bigquery").strip().lower()
     if src not in ("bigquery", "salesforce"):
         raise HTTPException(status_code=400, detail='source must be "bigquery" or "salesforce"')
 
-    sa_id, notes = _resolve_sa_user_id()
-    if not sa_id:
-        raise HTTPException(status_code=503, detail="; ".join(notes) if notes else "SA user identity not configured.")
+    uid = (user_id or "").strip()
+    if len(uid) < 15:
+        raise HTTPException(status_code=400, detail="user_id must be a Salesforce User Id.")
 
     if src == "bigquery":
         if not bq_client:
             raise HTTPException(status_code=503, detail="BigQuery client not available.")
-        rows = bq_client.get_pipeline_opportunities_for_sa(sa_id)
+        rows = bq_client.get_pipeline_opportunities_for_user(uid)
         return MyOpportunitiesResponse(
-            sa_user_id=sa_id,
+            user_id=uid,
             source="bigquery",
             opportunities=_rows_to_pipeline_opps(rows),
-            notes=notes,
+            notes=[],
         )
 
     from salesforce_client import get_cached_salesforce_client
@@ -368,19 +333,19 @@ async def get_my_opportunities(
         raise HTTPException(
             status_code=503,
             detail="Salesforce API not configured. Set SALESFORCE_USERNAME + SALESFORCE_PASSWORD + "
-            "SALESFORCE_SECURITY_TOKEN (SOAP login), or run `sf org login` locally with sf CLI.",
+            "SALESFORCE_SECURITY_TOKEN (SOAP login), or authenticate with the Salesforce CLI on the API host.",
         )
     try:
-        rows = sf.opportunities_for_assigned_sa(sa_id)
+        rows = sf.opportunities_for_pipeline_user(uid)
     except Exception as e:
         logger.exception("Salesforce query failed")
         raise HTTPException(status_code=502, detail=f"Salesforce query failed: {str(e)[:500]}") from e
 
     return MyOpportunitiesResponse(
-        sa_user_id=sa_id,
+        user_id=uid,
         source="salesforce",
         opportunities=_rows_to_pipeline_opps(rows),
-        notes=notes,
+        notes=[],
     )
 
 
