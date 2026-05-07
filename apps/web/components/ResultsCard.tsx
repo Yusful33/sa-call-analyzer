@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useMemo } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { useAchievements, ResultsEndMessage } from "./UsageAchievements";
 
 export default function ResultsCard({
@@ -10,28 +10,25 @@ export default function ResultsCard({
   visible: boolean;
   html: string;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const { trackResultsScrolled } = useAchievements();
 
-  const handleScroll = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const scrolledToBottom =
-      container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
-
-    if (scrolledToBottom && html.length > 2000) {
-      trackResultsScrolled();
-    }
-  }, [html.length, trackResultsScrolled]);
-
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !visible) return;
+    if (!visible || !html || html.length <= 2000) return;
+    const el = sentinelRef.current;
+    if (!el) return;
 
-    container.addEventListener("scroll", handleScroll);
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [visible, handleScroll]);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          trackResultsScrolled();
+        }
+      },
+      { root: null, rootMargin: "0px 0px 80px 0px", threshold: 0 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible, html, html.length, trackResultsScrolled]);
 
   // React 19 regression (facebook/react#31660): dangerouslySetInnerHTML uses
   // object identity instead of string equality, so the inner <div>'s innerHTML
@@ -44,8 +41,9 @@ export default function ResultsCard({
   if (!visible || !html) return null;
 
   return (
-    <div ref={containerRef} className="card results show results-scrollable">
+    <div className="card results show results-scrollable">
       <div dangerouslySetInnerHTML={innerHtml} />
+      <div ref={sentinelRef} aria-hidden="true" style={{ height: 1, width: "100%", pointerEvents: "none" }} />
       <ResultsEndMessage />
     </div>
   );
