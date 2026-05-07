@@ -5,6 +5,7 @@ import base64
 import asyncio
 import logging
 import contextvars
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -241,6 +242,17 @@ else:
     logger.info("Skipping BigQuery init (API_SERVICE_MODE=crew)")
 
 
+def _is_likely_serverless_host() -> bool:
+    """True when this process is almost certainly not a developer laptop with sf CLI."""
+    if (os.getenv("VERCEL") or "").strip() == "1":
+        return True
+    if (os.getenv("AWS_LAMBDA_FUNCTION_NAME") or "").strip():
+        return True
+    if (os.getenv("K_SERVICE") or "").strip():  # Cloud Run
+        return True
+    return False
+
+
 def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
     """Return (Salesforce User Id, notes) for the current SA context."""
     notes: list[str] = []
@@ -254,11 +266,11 @@ def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
             found = bq_client.get_salesforce_user_id_by_email(email)
             if found:
                 return found, notes
-            notes.append(f"No active Salesforce user found in BigQuery for email {email!r}.")
+            notes.append(f"No Salesforce user row in BigQuery for email {email!r} (check sync or spelling).")
         else:
             notes.append("BigQuery unavailable; cannot resolve SALESFORCE_USER_EMAIL to a User Id.")
 
-    if os.getenv("VERCEL") != "1":
+    if shutil.which("sf") and os.getenv("SALESFORCE_USE_SF_CLI", "").strip().lower() not in ("0", "false", "no"):
         alias = (os.getenv("SALESFORCE_SF_CLI_TARGET_ORG") or "arize-sfdc").strip()
         try:
             proc = subprocess.run(
@@ -273,13 +285,20 @@ def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
                 cli_id = ((data.get("result") or {}).get("id") or "").strip()
                 if cli_id:
                     return cli_id, notes + ["Resolved SA User Id from Salesforce CLI."]
-        except FileNotFoundError:
-            notes.append("Salesforce CLI (sf) not found; set SALESFORCE_USER_ID or SALESFORCE_USER_EMAIL.")
-        except (json.JSONDecodeError, subprocess.SubprocessError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, subprocess.SubprocessError, KeyError, TypeError, OSError) as e:
             logger.debug("SF CLI user resolution skipped: %s", e)
 
     if not notes:
-        notes.append("Set SALESFORCE_USER_ID, SALESFORCE_USER_EMAIL (+ BigQuery), or authenticate sf CLI locally.")
+        if _is_likely_serverless_host():
+            notes.append(
+                "On Vercel/serverless, set SALESFORCE_USER_ID (18-char Id) or SALESFORCE_USER_EMAIL "
+                "(requires BigQuery). The sf CLI is not used in production."
+            )
+        else:
+            notes.append(
+                "Set SALESFORCE_USER_ID or SALESFORCE_USER_EMAIL (+ BigQuery), install the Salesforce CLI "
+                "locally, or add SALESFORCE_USE_SF_CLI=0 to silence CLI hints."
+            )
     return None, notes
 
 

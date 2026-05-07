@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
@@ -122,6 +123,8 @@ class SalesforceClient:
         if os.getenv("VERCEL") == "1":
             return None
         if os.getenv("SALESFORCE_USE_SF_CLI", "").strip().lower() in ("0", "false", "no"):
+            return None
+        if not shutil.which("sf"):
             return None
         alias = (target_org or os.getenv("SALESFORCE_SF_CLI_TARGET_ORG") or "arize-sfdc").strip()
         try:

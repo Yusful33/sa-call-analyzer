@@ -8,7 +8,6 @@ type StageRailProps = {
 };
 
 function stageClassForTab(tab: ShareableTab): string {
-  if (tab === "pipeline") return "stage0";
   if (tab === "hypothesis") return "stage1";
   if (tab === "demo" || tab === "gong") return "stage2";
   if (tab === "pocpot") return "stage3";
@@ -21,34 +20,35 @@ export default function SalesStageRail({ activeTab, onSelectTab }: StageRailProp
 
   return (
     <div className="stage-rail-wrapper">
-      <div className="stage-rail-eyebrow">Sales Stage</div>
-      <ol className="stage-rail" role="tablist" aria-label="Sales stage">
-        <li className="stage-rail-item">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "pipeline"}
-            className={`stage-card stage-card-single${activeStage === "stage0" ? " active" : ""}`}
-            data-stage="stage0"
-            onClick={() => onSelectTab("pipeline")}
-          >
+      <div className="pipeline-shelf">
+        <div className="pipeline-shelf-eyebrow">Overview</div>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "pipeline"}
+          className={`stage-card stage-card-single pipeline-shelf-card${activeTab === "pipeline" ? " active" : ""}`}
+          data-stage="pipeline-shelf"
+          onClick={() => onSelectTab("pipeline")}
+        >
+          <div>
             <div className="stage-card-eyebrow">
-              <span className="stage-card-number">Overview</span>
+              <span className="stage-card-number">My pipeline</span>
               <span className="stage-card-divider" aria-hidden="true">
                 &bull;
               </span>
-              <span className="stage-card-name">My pipeline</span>
+              <span className="stage-card-name">CRM</span>
             </div>
             <div className="stage-card-tool-name">{"\u{1F4CB} My Pipeline"}</div>
-            <div className="stage-card-blurb">
-              Open CRM opportunities on accounts where you are the assigned SA.
-            </div>
-          </button>
-          <span className="stage-rail-arrow" aria-hidden="true">
-            &rarr;
-          </span>
-        </li>
+          </div>
+          <div className="stage-card-blurb">
+            Open opportunities on accounts where you are the assigned Solution Architect. Uses BigQuery or live
+            Salesforce.
+          </div>
+        </button>
+      </div>
 
+      <div className="stage-rail-eyebrow">Sales Stage</div>
+      <ol className="stage-rail" role="tablist" aria-label="Sales stage">
         <li className="stage-rail-item">
           <button
             type="button"
