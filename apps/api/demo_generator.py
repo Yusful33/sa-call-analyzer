@@ -120,7 +120,7 @@ def _generate_domain_content_prompt(
         tools_lines = [f"- {t.get('name', 'unnamed')}: {t.get('description', '')}" for t in tools]
         tools_section = f"\n\nUser-specified tools to include:\n" + "\n".join(tools_lines)
 
-    return f"""Generate domain-specific content for a synthetic Arize demo for the following company and use case.
+    return f"""Generate domain-specific content for a synthetic Arize demo.
 
 Company: {company_name}
 Industry/Use Case: {industry_or_use_case}
@@ -129,39 +129,28 @@ Architecture: {agent_architecture}
 {f"Additional Context: {additional_context}" if additional_context else ""}
 {tools_section}
 
-Generate the following as a JSON object:
+Generate a JSON object with these fields (keep responses concise):
 
-1. "query_bank": An array of 10-15 realistic user queries with expected answers. Each entry should have:
-   - "question": The user's question/request
-   - "answer": The expected agent response
-   - "tool_calls": Array of tool calls this query would trigger, each with "name", "input" (object), and "output" (object)
+1. "query_bank": Array of 6-8 realistic user queries. Each entry:
+   - "question": User's question (1-2 sentences)
+   - "answer": Agent response (2-3 sentences max)
+   - "tool_calls": Array of 1-2 tool calls, each with "name" and brief "input"/"output" objects
    - "complexity": "simple" | "aggregation" | "multi_hop"
 
-2. "ambiguous_queries": Array of 2-3 ambiguous queries with:
-   - "question": The ambiguous question
-   - "clarification_question": What the agent would ask to clarify
-   - "clarified_question": The user's clarified question
-   - "ambiguity_reason": Why it was ambiguous
-   - "answer": The final answer
+2. "ambiguous_queries": Array of 2 ambiguous queries:
+   - "question", "clarification_question", "clarified_question", "ambiguity_reason", "answer"
 
-3. "no_llm_queries": Array of 2-3 trivial queries that don't need LLM processing:
-   - "question": The simple question
-   - "answer": The direct answer
+3. "no_llm_queries": Array of 2 simple queries: "question" and "answer"
 
-4. "tools": Array of 4-6 tools with:
-   - "name": Tool function name (snake_case)
-   - "description": One-line description
-   - "parameters": JSON schema for parameters
+4. "tools": Array of 4 tools with "name", "description" (one line), "parameters" (simple JSON schema)
 
-5. "prompt_templates": Object with 1-2 named prompt templates:
-   - Key is template name (e.g., "main_prompt", "synthesis_prompt")
-   - Value has "template", "system_message", "version"
+5. "prompt_templates": Object with 1 template: "main_prompt" with "template", "system_message", "version"
 
-6. "agent_name": A descriptive agent name in snake_case (e.g., "fraud_triage_agent", "claims_processor")
+6. "agent_name": Descriptive snake_case name (e.g., "fraud_triage_agent")
 
-Make the content realistic and specific to the {industry_or_use_case} domain. Use industry-specific terminology, realistic data formats, and believable scenarios.
+Use domain-specific terminology for {industry_or_use_case}. Keep all text fields concise.
 
-Return ONLY valid JSON, no markdown formatting or explanation."""
+Return ONLY valid JSON, no markdown or explanation."""
 
 
 def _parse_llm_json_response(response_text: str) -> dict:
@@ -185,7 +174,66 @@ def _parse_llm_json_response(response_text: str) -> dict:
                 break
         text = "\n".join(lines[start_idx:end_idx])
     
-    return json.loads(text)
+    # Try to parse directly first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        # If JSON is truncated (unterminated string), try to repair it
+        if "Unterminated string" in str(e):
+            # Try to close any open strings and structures
+            repaired = _try_repair_truncated_json(text)
+            if repaired:
+                return repaired
+        raise
+
+
+def _try_repair_truncated_json(text: str) -> dict | None:
+    """Attempt to repair truncated JSON by closing open structures."""
+    import logging
+    logger = logging.getLogger("demo_generator")
+    
+    # Common repair strategies for truncated JSON
+    # 1. Try adding closing brackets/braces
+    repair_suffixes = [
+        '"}]}',
+        '"]}',
+        '"}]',
+        '"}',
+        '"]',
+        '}}',
+        '}]',
+        ']',
+        '}',
+    ]
+    
+    for suffix in repair_suffixes:
+        try:
+            repaired_text = text + suffix
+            result = json.loads(repaired_text)
+            logger.warning("Repaired truncated JSON by appending: %s", repr(suffix))
+            return result
+        except json.JSONDecodeError:
+            continue
+    
+    # 2. Try to find the last valid JSON structure
+    # Look for the last complete array/object
+    for i in range(len(text) - 1, max(0, len(text) - 500), -1):
+        test_text = text[:i]
+        # Count brackets to find a balanced point
+        open_braces = test_text.count('{') - test_text.count('}')
+        open_brackets = test_text.count('[') - test_text.count(']')
+        
+        if open_braces > 0 or open_brackets > 0:
+            # Try to close with the right number of closers
+            closing = '}' * open_braces + ']' * open_brackets
+            try:
+                result = json.loads(test_text + closing)
+                logger.warning("Repaired truncated JSON by trimming and closing structures")
+                return result
+            except json.JSONDecodeError:
+                continue
+    
+    return None
 
 
 def generate_domain_content(
@@ -195,9 +243,16 @@ def generate_domain_content(
     agent_architecture: str,
     tools: Optional[list[dict[str, str]]] = None,
     additional_context: Optional[str] = None,
+    max_retries: int = 2,
 ) -> dict[str, Any]:
-    """Use an LLM to generate domain-specific content for the demo."""
+    """Use an LLM to generate domain-specific content for the demo.
+    
+    Includes retry logic for JSON parsing failures.
+    """
+    import logging
     from openai_compat_completion import completion as llm_completion
+    
+    logger = logging.getLogger("demo_generator")
 
     prompt = _generate_domain_content_prompt(
         company_name=company_name,
@@ -209,16 +264,30 @@ def generate_domain_content(
     )
 
     model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-sonnet-4-20250514")
+    last_error = None
     
-    response = llm_completion(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=4000,
-        temperature=0.7,
-    )
+    for attempt in range(max_retries + 1):
+        try:
+            response = llm_completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=16000,
+                temperature=0.7 if attempt == 0 else 0.5,
+            )
 
-    response_text = response.choices[0].message.content.strip()
-    return _parse_llm_json_response(response_text)
+            response_text = response.choices[0].message.content.strip()
+            return _parse_llm_json_response(response_text)
+        except json.JSONDecodeError as e:
+            last_error = e
+            logger.warning(
+                "JSON parsing failed on attempt %d/%d: %s",
+                attempt + 1, max_retries + 1, str(e)[:200]
+            )
+            if attempt < max_retries:
+                continue
+            raise
+    
+    raise last_error
 
 
 def _format_query_bank(query_bank: list[dict]) -> str:
