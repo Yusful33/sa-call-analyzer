@@ -974,3 +974,5 @@ def build_poc_document(
     type_safe = _export_type_filename_part(document_template)
     fname = f"Arize_AX_{account_safe}_{type_safe}_{date_part}.docx"
     return buf.getvalue(), fname
+
+# Force rebuild: 1778195056
