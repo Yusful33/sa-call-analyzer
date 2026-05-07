@@ -5,6 +5,7 @@ import base64
 import asyncio
 import logging
 import contextvars
+import subprocess
 from pathlib import Path
 
 # Configure logging
@@ -97,7 +98,7 @@ from observability import (
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
 # Now import everything else
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from models import (
@@ -108,6 +109,8 @@ from models import (
     TransitionToCSResponse,
     AccountSuggestionsRequest,
     AccountSuggestionsResponse,
+    MyOpportunitiesResponse,
+    MyPipelineOpportunity,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
 from transition_document_generator import build_transition_document
@@ -236,6 +239,130 @@ if _API_SERVICE_MODE in ("full", "light"):
         logger.warning("BigQuery client not available: %s", e)
 else:
     logger.info("Skipping BigQuery init (API_SERVICE_MODE=crew)")
+
+
+def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
+    """Return (Salesforce User Id, notes) for the current SA context."""
+    notes: list[str] = []
+    uid = (os.getenv("SALESFORCE_USER_ID") or "").strip()
+    if uid:
+        return uid, notes
+
+    email = (os.getenv("SALESFORCE_USER_EMAIL") or "").strip()
+    if email:
+        if bq_client:
+            found = bq_client.get_salesforce_user_id_by_email(email)
+            if found:
+                return found, notes
+            notes.append(f"No active Salesforce user found in BigQuery for email {email!r}.")
+        else:
+            notes.append("BigQuery unavailable; cannot resolve SALESFORCE_USER_EMAIL to a User Id.")
+
+    if os.getenv("VERCEL") != "1":
+        alias = (os.getenv("SALESFORCE_SF_CLI_TARGET_ORG") or "arize-sfdc").strip()
+        try:
+            proc = subprocess.run(
+                ["sf", "org", "display", "user", "--target-org", alias, "--json"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                data = json.loads(proc.stdout)
+                cli_id = ((data.get("result") or {}).get("id") or "").strip()
+                if cli_id:
+                    return cli_id, notes + ["Resolved SA User Id from Salesforce CLI."]
+        except FileNotFoundError:
+            notes.append("Salesforce CLI (sf) not found; set SALESFORCE_USER_ID or SALESFORCE_USER_EMAIL.")
+        except (json.JSONDecodeError, subprocess.SubprocessError, KeyError, TypeError) as e:
+            logger.debug("SF CLI user resolution skipped: %s", e)
+
+    if not notes:
+        notes.append("Set SALESFORCE_USER_ID, SALESFORCE_USER_EMAIL (+ BigQuery), or authenticate sf CLI locally.")
+    return None, notes
+
+
+def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
+    out: list[MyPipelineOpportunity] = []
+    for r in rows:
+        oid = (r.get("id") or r.get("Id") or "").strip()
+        name = (r.get("name") or r.get("Name") or "").strip()
+        if not oid or not name:
+            continue
+        acct = r.get("Account") if isinstance(r.get("Account"), dict) else None
+        if isinstance(acct, dict):
+            acct.pop("attributes", None)
+        account_name = r.get("account_name")
+        if not account_name and isinstance(acct, dict):
+            account_name = acct.get("Name")
+        out.append(
+            MyPipelineOpportunity(
+                id=oid,
+                name=name,
+                stage_name=r.get("stage_name") or r.get("StageName"),
+                amount=r.get("amount") if r.get("amount") is not None else None,
+                close_date=r.get("close_date") or r.get("CloseDate"),
+                next_step=r.get("next_step") or r.get("NextStep"),
+                account_id=r.get("account_id") or r.get("AccountId"),
+                account_name=account_name,
+            )
+        )
+    return out
+
+
+@app.get("/api/my-opportunities", response_model=MyOpportunitiesResponse)
+async def get_my_opportunities(
+    source: str = Query(
+        "bigquery",
+        description='Use "bigquery" (warehouse) or "salesforce" (live API; needs credentials or sf CLI).',
+    ),
+):
+    """
+    List open opportunities on accounts assigned to the configured SA (Account.Assigned_SA__c).
+
+    Identity resolution: ``SALESFORCE_USER_ID``, else email via BigQuery, else local ``sf`` CLI user.
+    """
+    src = (source or "bigquery").strip().lower()
+    if src not in ("bigquery", "salesforce"):
+        raise HTTPException(status_code=400, detail='source must be "bigquery" or "salesforce"')
+
+    sa_id, notes = _resolve_sa_user_id()
+    if not sa_id:
+        raise HTTPException(status_code=503, detail="; ".join(notes) if notes else "SA user identity not configured.")
+
+    if src == "bigquery":
+        if not bq_client:
+            raise HTTPException(status_code=503, detail="BigQuery client not available.")
+        rows = bq_client.get_pipeline_opportunities_for_sa(sa_id)
+        return MyOpportunitiesResponse(
+            sa_user_id=sa_id,
+            source="bigquery",
+            opportunities=_rows_to_pipeline_opps(rows),
+            notes=notes,
+        )
+
+    from salesforce_client import get_cached_salesforce_client
+
+    sf = get_cached_salesforce_client()
+    if not sf:
+        raise HTTPException(
+            status_code=503,
+            detail="Salesforce API not configured. Set SALESFORCE_USERNAME + SALESFORCE_PASSWORD + "
+            "SALESFORCE_SECURITY_TOKEN (SOAP login), or run `sf org login` locally with sf CLI.",
+        )
+    try:
+        rows = sf.opportunities_for_assigned_sa(sa_id)
+    except Exception as e:
+        logger.exception("Salesforce query failed")
+        raise HTTPException(status_code=502, detail=f"Salesforce query failed: {str(e)[:500]}") from e
+
+    return MyOpportunitiesResponse(
+        sa_user_id=sa_id,
+        source="salesforce",
+        opportunities=_rows_to_pipeline_opps(rows),
+        notes=notes,
+    )
 
 
 def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOverview:

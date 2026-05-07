@@ -835,6 +835,66 @@ class BigQueryClient:
             ))
         
         return opportunities
+
+    def get_salesforce_user_id_by_email(self, email: str) -> Optional[str]:
+        """Resolve a Salesforce User Id from email (warehouse mirror)."""
+        em = (email or "").strip().lower()
+        if not em:
+            return None
+        query = f"""
+        SELECT id
+        FROM `{self.PROJECT_ID}.salesforce.user`
+        WHERE LOWER(TRIM(email)) = @email
+        LIMIT 1
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("email", "STRING", em)]
+        )
+        rows = list(self.client.query(query, job_config=job_config).result())
+        if not rows:
+            return None
+        return getattr(rows[0], "id", None)
+
+    def get_pipeline_opportunities_for_sa(self, sa_user_id: str) -> List[Dict[str, Any]]:
+        """Open opportunities on accounts where Assigned SA matches ``sa_user_id`` (warehouse)."""
+        uid = (sa_user_id or "").strip()
+        if not uid:
+            return []
+        query = f"""
+        SELECT
+            op.id AS id,
+            op.name AS name,
+            op.stage_name AS stage_name,
+            CAST(op.amount AS FLOAT64) AS amount,
+            CAST(op.close_date AS STRING) AS close_date,
+            op.next_step AS next_step,
+            op.account_id AS account_id,
+            a.name AS account_name
+        FROM `{self.PROJECT_ID}.salesforce.opportunity` op
+        JOIN `{self.PROJECT_ID}.salesforce.account` a ON op.account_id = a.id
+        WHERE a.assigned_sa_c = @sa_user_id
+          AND COALESCE(op.is_closed, FALSE) = FALSE
+          AND COALESCE(op.is_deleted, FALSE) = FALSE
+        ORDER BY op.close_date ASC
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("sa_user_id", "STRING", uid)]
+        )
+        out: List[Dict[str, Any]] = []
+        for row in self.client.query(query, job_config=job_config).result():
+            out.append(
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "stage_name": row.stage_name,
+                    "amount": row.amount,
+                    "close_date": row.close_date,
+                    "next_step": row.next_step,
+                    "account_id": row.account_id,
+                    "account_name": row.account_name,
+                }
+            )
+        return out
     
     def _get_gong_summary(self, sfdc_account_ids: str | List[str]) -> Optional[GongSummaryData]:
         """Fetch comprehensive Gong call analytics with transcripts and participants.

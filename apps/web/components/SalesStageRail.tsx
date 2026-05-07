@@ -8,6 +8,7 @@ type StageRailProps = {
 };
 
 function stageClassForTab(tab: ShareableTab): string {
+  if (tab === "pipeline") return "stage0";
   if (tab === "hypothesis") return "stage1";
   if (tab === "demo" || tab === "gong") return "stage2";
   if (tab === "pocpot") return "stage3";
@@ -22,6 +23,32 @@ export default function SalesStageRail({ activeTab, onSelectTab }: StageRailProp
     <div className="stage-rail-wrapper">
       <div className="stage-rail-eyebrow">Sales Stage</div>
       <ol className="stage-rail" role="tablist" aria-label="Sales stage">
+        <li className="stage-rail-item">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "pipeline"}
+            className={`stage-card stage-card-single${activeStage === "stage0" ? " active" : ""}`}
+            data-stage="stage0"
+            onClick={() => onSelectTab("pipeline")}
+          >
+            <div className="stage-card-eyebrow">
+              <span className="stage-card-number">Overview</span>
+              <span className="stage-card-divider" aria-hidden="true">
+                &bull;
+              </span>
+              <span className="stage-card-name">My pipeline</span>
+            </div>
+            <div className="stage-card-tool-name">{"\u{1F4CB} My Pipeline"}</div>
+            <div className="stage-card-blurb">
+              Open CRM opportunities on accounts where you are the assigned SA.
+            </div>
+          </button>
+          <span className="stage-rail-arrow" aria-hidden="true">
+            &rarr;
+          </span>
+        </li>
+
         <li className="stage-rail-item">
           <button
             type="button"
@@ -170,6 +197,7 @@ export default function SalesStageRail({ activeTab, onSelectTab }: StageRailProp
 
 export function stageBodyCopy(tab: ShareableTab): { eyebrow: string; toolName: string } {
   const map: Record<ShareableTab, { eyebrow: string; toolName: string }> = {
+    pipeline: { eyebrow: "Overview • My pipeline", toolName: "\u{1F4CB} My Pipeline" },
     hypothesis: { eyebrow: "Stage 1 • Engaged", toolName: "\u{1F52C} Hypothesis Research" },
     prospect: { eyebrow: "Stage 4 • PoC", toolName: "\u{1F4CA} Prospect Overview" },
     demo: { eyebrow: "Stage 2 • Qualification", toolName: "\u{1F3AF} Custom Demo Builder" },

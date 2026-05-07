@@ -1,4 +1,5 @@
 export type ShareableTab =
+  | "pipeline"
   | "hypothesis"
   | "prospect"
   | "demo"
@@ -20,6 +21,7 @@ export type ShareQuery = {
 };
 
 const VALID_TABS = new Set<ShareableTab>([
+  "pipeline",
   "hypothesis",
   "prospect",
   "demo",

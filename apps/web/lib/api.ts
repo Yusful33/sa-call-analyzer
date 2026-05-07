@@ -93,6 +93,32 @@ export async function apiPost<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+export async function apiGet<T = unknown>(
+  path: string,
+  opts?: { signal?: AbortSignal; searchParams?: Record<string, string | undefined> },
+): Promise<T> {
+  const sp = new URLSearchParams();
+  if (opts?.searchParams) {
+    for (const [k, v] of Object.entries(opts.searchParams)) {
+      if (v !== undefined && v !== "") sp.set(k, v);
+    }
+  }
+  const q = sp.toString();
+  const url = `${baseUrlForPath(path)}${path}${q ? `?${q}` : ""}`;
+  const res = await fetch(url, { method: "GET", signal: opts?.signal });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
 export type DemoArizePushStatus = "success" | "failed" | "skipped" | "disabled";
 
 export async function apiPostBlob(
