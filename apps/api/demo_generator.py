@@ -120,37 +120,21 @@ def _generate_domain_content_prompt(
         tools_lines = [f"- {t.get('name', 'unnamed')}: {t.get('description', '')}" for t in tools]
         tools_section = f"\n\nUser-specified tools to include:\n" + "\n".join(tools_lines)
 
-    return f"""Generate domain-specific content for a synthetic Arize demo.
-
-Company: {company_name}
-Industry/Use Case: {industry_or_use_case}
-Framework: {framework}
-Architecture: {agent_architecture}
-{f"Additional Context: {additional_context}" if additional_context else ""}
+    return f"""Generate a JSON object for a synthetic demo. Company: {company_name}, Use case: {industry_or_use_case}, Framework: {framework}, Architecture: {agent_architecture}.
+{f"Context: {additional_context}" if additional_context else ""}
 {tools_section}
 
-Generate a JSON object with these fields (keep responses concise):
+Return ONLY this JSON structure (no markdown):
+{{
+  "agent_name": "snake_case_name",
+  "query_bank": [5 objects with: "question" (string), "answer" (1-2 sentences), "tool_calls": [{{"name":"x","input":{{}}, "output":{{}}}}], "complexity": "simple"|"aggregation"|"multi_hop"],
+  "ambiguous_queries": [2 objects with: "question", "clarification_question", "clarified_question", "ambiguity_reason", "answer"],
+  "no_llm_queries": [2 objects with: "question", "answer"],
+  "tools": [3 objects with: "name", "description", "parameters": {{"type":"object","properties":{{}}}}],
+  "prompt_templates": {{"main_prompt": {{"template":"...","system_message":"...","version":"v1.0"}}}}
+}}
 
-1. "query_bank": Array of 6-8 realistic user queries. Each entry:
-   - "question": User's question (1-2 sentences)
-   - "answer": Agent response (2-3 sentences max)
-   - "tool_calls": Array of 1-2 tool calls, each with "name" and brief "input"/"output" objects
-   - "complexity": "simple" | "aggregation" | "multi_hop"
-
-2. "ambiguous_queries": Array of 2 ambiguous queries:
-   - "question", "clarification_question", "clarified_question", "ambiguity_reason", "answer"
-
-3. "no_llm_queries": Array of 2 simple queries: "question" and "answer"
-
-4. "tools": Array of 4 tools with "name", "description" (one line), "parameters" (simple JSON schema)
-
-5. "prompt_templates": Object with 1 template: "main_prompt" with "template", "system_message", "version"
-
-6. "agent_name": Descriptive snake_case name (e.g., "fraud_triage_agent")
-
-Use domain-specific terminology for {industry_or_use_case}. Keep all text fields concise.
-
-Return ONLY valid JSON, no markdown or explanation."""
+Keep ALL text fields SHORT (under 100 chars). Use domain terminology for {industry_or_use_case}."""
 
 
 def _parse_llm_json_response(response_text: str) -> dict:
@@ -263,7 +247,7 @@ def generate_domain_content(
         additional_context=additional_context,
     )
 
-    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-sonnet-4-20250514")
+    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-haiku-4-5")
     last_error = None
     
     for attempt in range(max_retries + 1):
