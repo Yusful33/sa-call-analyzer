@@ -338,10 +338,10 @@ export default function DemoTab({
       onLoading("");
 
       if (demoArizePush?.status === "success") {
-        toast.success("Demo ZIP downloaded; synthetic traces were sent to Arize from the server.");
+        toast.success("Demo complete! Traces, evaluations, dataset, experiments, and prompts sent to Arize.");
       } else if (demoArizePush?.status === "failed") {
         toast.warning(
-          "ZIP downloaded, but server-side Arize upload failed. Run README steps locally or check API logs. " +
+          "ZIP downloaded, but full workflow failed. Check API logs or run generator.py locally with --full flag. " +
             (demoArizePush.detail ? demoArizePush.detail.slice(0, 280) : "")
         );
       } else if (demoArizePush?.status === "skipped") {
@@ -379,8 +379,8 @@ export default function DemoTab({
           </h4>
           <p style={{ color: "#555", fontSize: "0.9em", margin: "0 0 12px 0" }}>
             {demoGenerated
-              ? "Your demo ZIP was downloaded. If the API is configured with DEMO_AUTO_PUSH_TO_ARIZE and Arize keys, traces may already be in your space; otherwise extract the ZIP and follow the README to run generator.py locally."
-              : "Click below to generate a complete demo package including generator.py, requirements.txt, and documentation."}
+              ? "Your demo ZIP was downloaded. The full workflow was executed: traces + evaluations + dataset + experiments + prompts are now in your Arize space."
+              : "Click below to generate and execute the full demo workflow: traces, evaluations, dataset, 4-experiment grid, and prompt hub entry will be sent to Arize."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
