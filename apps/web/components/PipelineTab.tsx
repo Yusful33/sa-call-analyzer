@@ -141,8 +141,9 @@ export default function PipelineTab() {
   return (
     <div className="pipeline-tab">
       <p style={{ margin: "0 0 16px", color: "#5a5f6e", lineHeight: 1.5 }}>
-        Select your name, then load <strong>open</strong> opportunities where you are the account&apos;s{" "}
-        <strong>Assigned SA</strong> or the <strong>Opportunity owner</strong>.
+        Select your name, then load <strong>open</strong> opportunities where you&apos;re on the deal — for example as{" "}
+        <strong>Opportunity owner</strong> (typical for AEs) or as <strong>Assigned SA</strong> /{" "}
+        <strong>Assigned Solutions</strong> on the account or opportunity (typical for SAs).
       </p>
 
       <div
@@ -234,7 +235,9 @@ export default function PipelineTab() {
       ) : null}
 
       {selectedUserId && !oppsLoading && data && !data.opportunities.length ? (
-        <p style={{ color: "#5a5f6e" }}>No open opportunities match this person as Assigned SA or Opportunity owner.</p>
+        <p style={{ color: "#5a5f6e" }}>
+          No open opportunities match this person as owner or as Assigned SA / Solutions on the account or opportunity.
+        </p>
       ) : null}
 
       {data && data.opportunities.length > 0 ? (
