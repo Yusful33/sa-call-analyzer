@@ -306,6 +306,11 @@ async def get_pipeline_user_options():
     try:
         rows = sf.pipeline_user_options()
         users = [PipelineUserOption.model_validate(r) for r in rows]
+        if not users:
+            notes.append(
+                "Salesforce returned no pipeline users (unlikely if your org has data) — check API logs "
+                "for SOQL errors or field permissions."
+            )
         return PipelineUserOptionsResponse(users=users, notes=notes)
     except Exception as e:
         logger.exception("Salesforce pipeline user options failed")

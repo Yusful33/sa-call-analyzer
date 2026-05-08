@@ -214,8 +214,8 @@ class SalesforceClient:
                     uid = (r.get("Id") or "").strip()
                     if uid and uid not in seen:
                         seen[uid] = (r.get("Name") or "").strip() or uid
-            except Exception:
-                pass
+            except Exception as ex:
+                logger.warning("pipeline_user_options SOQL failed: %s", ex)
         out = [{"id": uid, "name": nm} for uid, nm in seen.items()]
         out.sort(key=lambda x: x["name"].lower())
         return out
@@ -276,26 +276,52 @@ class SalesforceClient:
 
 
 _sf_singleton: Optional[SalesforceClient] = None
-_sf_singleton_attempted = False
+_sf_login_attempts = 0
 _sf_last_error: Optional[str] = None
+_SF_MAX_LOGIN_ATTEMPTS = 8
 
 
 def get_cached_salesforce_client() -> Optional[SalesforceClient]:
-    """Lazy singleton; retries once if previous attempt failed (creds may have been updated)."""
-    global _sf_singleton, _sf_singleton_attempted, _sf_last_error
+    """Lazy singleton after first successful SOAP login.
+
+    Previously a failed attempt permanently blocked retries on a warm serverless instance
+    (``from_env()`` can return None without raising when env is incomplete). Allow several attempts
+    so new env vars or transient errors recover without waiting for cold start.
+    """
+    global _sf_singleton, _sf_login_attempts, _sf_last_error
     if _sf_singleton:
         return _sf_singleton
-    if _sf_singleton_attempted:
+    if _sf_login_attempts >= _SF_MAX_LOGIN_ATTEMPTS:
         return None
-    _sf_singleton_attempted = True
+    _sf_login_attempts += 1
     try:
-        _sf_singleton = SalesforceClient.from_env()
-        _sf_last_error = None
+        client = SalesforceClient.from_env()
     except Exception as e:
         logger.warning("Salesforce client init failed: %s", e)
         _sf_singleton = None
         _sf_last_error = str(e)
-    return _sf_singleton
+        return None
+
+    if client:
+        _sf_singleton = client
+        _sf_last_error = None
+        return client
+
+    _sf_singleton = None
+    if not _sf_last_error:
+        u = (os.getenv("SALESFORCE_USERNAME") or "").strip()
+        p = (os.getenv("SALESFORCE_PASSWORD") or "").strip()
+        if not u or not p:
+            _sf_last_error = (
+                "Salesforce env incomplete: set SALESFORCE_USERNAME and SALESFORCE_PASSWORD "
+                "(and usually SALESFORCE_SECURITY_TOKEN)."
+            )
+        else:
+            _sf_last_error = (
+                "Salesforce login returned no session (check password, security token, "
+                "and SALESFORCE_LOGIN_URL for sandbox vs production)."
+            )
+    return None
 
 
 def get_sf_last_error() -> Optional[str]:
@@ -305,7 +331,7 @@ def get_sf_last_error() -> Optional[str]:
 
 def reset_sf_singleton() -> None:
     """Allow retry of SF login (e.g. after credentials are updated)."""
-    global _sf_singleton, _sf_singleton_attempted, _sf_last_error
+    global _sf_singleton, _sf_login_attempts, _sf_last_error
     _sf_singleton = None
-    _sf_singleton_attempted = False
+    _sf_login_attempts = 0
     _sf_last_error = None

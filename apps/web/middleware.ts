@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 /** Must stay aligned with `next.config.ts` / ops default FastAPI host. */
-const DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api-six.vercel.app";
+const DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
 
 /**
  * FastAPI origin for `/api/*` rewrites.
@@ -63,6 +63,21 @@ export function middleware(request: NextRequest) {
       dest = new URL(`${pathname}${search}`, `${base}/`);
     } catch {
       dest = new URL(`${pathname}${search}`, `${DEFAULT_LEGACY_API}/`);
+    }
+    /**
+     * If the FastAPI Vercel project uses **Standard Deployment Protection**, unauthenticated
+     * server-side rewrites from this app return 401 HTML. Add the automation bypass header when
+     * configured (Project → Deployment Protection → “Protection Bypass for Automation”), and set
+     * the same secret on **this** (Next.js) project as `FASTAPI_VERCEL_PROTECTION_BYPASS` or
+     * rely on `VERCEL_AUTOMATION_BYPASS_SECRET` when Vercel injects it.
+     */
+    const bypass =
+      (process.env.FASTAPI_VERCEL_PROTECTION_BYPASS ?? "").trim() ||
+      (process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "").trim();
+    if (bypass) {
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set("x-vercel-protection-bypass", bypass);
+      return NextResponse.rewrite(dest, { request: { headers: requestHeaders } });
     }
     return NextResponse.rewrite(dest);
   }
