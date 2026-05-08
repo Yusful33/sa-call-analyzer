@@ -142,8 +142,8 @@ export default function PipelineTab() {
     <div className="pipeline-tab">
       <p style={{ margin: "0 0 16px", color: "#5a5f6e", lineHeight: 1.5 }}>
         Select your name, then load <strong>open</strong> opportunities where you&apos;re on the deal — for example as{" "}
-        <strong>Opportunity owner</strong> (typical for AEs) or as <strong>Assigned SA</strong> /{" "}
-        <strong>Assigned Solutions</strong> on the account or opportunity (typical for SAs).
+        <strong>Opportunity owner</strong> (typical for AEs) or as <strong>Assigned SA</strong> on the account or
+        opportunity (typical for SAs).
       </p>
 
       <div
