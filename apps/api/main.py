@@ -277,17 +277,39 @@ def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
 @app.get("/api/pipeline-user-options", response_model=PipelineUserOptionsResponse)
 async def get_pipeline_user_options():
     """
-    Distinct Salesforce User Ids from BigQuery: all non-null **``assigned_sa_c``** on accounts and **``owner_id``**
-    on opportunities (union, no ``salesforce.user`` join). Used for the My Pipeline picklist.
+    Distinct users (Assigned SA ∪ Opportunity owners). Tries BigQuery first; falls back to live Salesforce
+    so the picker is always populated as long as at least one data source is configured.
     """
-    if not bq_client:
-        return PipelineUserOptionsResponse(
-            users=[],
-            notes=["BigQuery client not available; cannot load user list."],
-        )
-    rows = bq_client.get_pipeline_user_options()
-    users = [PipelineUserOption.model_validate(r) for r in rows]
-    return PipelineUserOptionsResponse(users=users, notes=[])
+    notes: list[str] = []
+
+    if bq_client:
+        try:
+            rows = bq_client.get_pipeline_user_options()
+            if rows:
+                users = [PipelineUserOption.model_validate(r) for r in rows]
+                return PipelineUserOptionsResponse(users=users, notes=[])
+            notes.append("BigQuery returned no users; trying Salesforce.")
+        except Exception as e:
+            logger.warning("BigQuery pipeline user options failed: %s", e)
+            notes.append(f"BigQuery query failed ({type(e).__name__}); trying Salesforce.")
+    else:
+        notes.append("BigQuery client not available; trying Salesforce.")
+
+    from salesforce_client import get_cached_salesforce_client
+
+    sf = get_cached_salesforce_client()
+    if not sf:
+        notes.append("Salesforce client not available either. Check credentials.")
+        return PipelineUserOptionsResponse(users=[], notes=notes)
+
+    try:
+        rows = sf.pipeline_user_options()
+        users = [PipelineUserOption.model_validate(r) for r in rows]
+        return PipelineUserOptionsResponse(users=users, notes=notes)
+    except Exception as e:
+        logger.exception("Salesforce pipeline user options failed")
+        notes.append(f"Salesforce query failed: {str(e)[:300]}")
+        return PipelineUserOptionsResponse(users=[], notes=notes)
 
 
 @app.get("/api/my-opportunities", response_model=MyOpportunitiesResponse)

@@ -856,26 +856,32 @@ class BigQueryClient:
         return getattr(rows[0], "id", None)
 
     def get_pipeline_user_options(self) -> List[Dict[str, Any]]:
-        """Distinct Salesforce User Ids from ``assigned_sa_c`` and ``owner_id`` only (no user table join)."""
+        """Distinct users (with names) who are Assigned SA or Opportunity owner (warehouse)."""
         query = f"""
-        SELECT assigned_sa_c AS id
-        FROM `{self.PROJECT_ID}.salesforce.account`
-        WHERE COALESCE(is_deleted, FALSE) = FALSE
-          AND assigned_sa_c IS NOT NULL
-          AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
-        UNION DISTINCT
-        SELECT owner_id AS id
-        FROM `{self.PROJECT_ID}.salesforce.opportunity`
-        WHERE COALESCE(is_deleted, FALSE) = FALSE
-          AND owner_id IS NOT NULL
-          AND TRIM(CAST(owner_id AS STRING)) != ''
-        ORDER BY id
+        WITH user_ids AS (
+          SELECT assigned_sa_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.account`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_sa_c IS NOT NULL
+            AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
+          UNION DISTINCT
+          SELECT owner_id AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND owner_id IS NOT NULL
+            AND TRIM(CAST(owner_id AS STRING)) != ''
+        )
+        SELECT u.id, COALESCE(NULLIF(TRIM(usr.name), ''), u.id) AS name
+        FROM user_ids u
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` usr ON usr.id = u.id
+        ORDER BY name
         """
         out: List[Dict[str, Any]] = []
         for row in self.client.query(query).result():
             uid = (getattr(row, "id", None) or "").strip()
+            nm = (getattr(row, "name", None) or "").strip()
             if uid:
-                out.append({"id": uid})
+                out.append({"id": uid, "name": nm or uid})
         return out
 
     def get_pipeline_opportunities_for_user(self, user_id: str) -> List[Dict[str, Any]]:

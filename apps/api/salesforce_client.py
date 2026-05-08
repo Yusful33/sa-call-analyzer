@@ -194,6 +194,26 @@ class SalesforceClient:
 
         return out
 
+    def pipeline_user_options(self) -> list[dict[str, Any]]:
+        """Distinct users who are an Assigned SA on any account or own any open opportunity (live SOQL)."""
+        sa_soql = (
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT Assigned_SA__c FROM Account WHERE Assigned_SA__c != null AND IsDeleted = false)"
+        )
+        owner_soql = (
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT OwnerId FROM Opportunity WHERE IsClosed = false AND IsDeleted = false)"
+        )
+        seen: dict[str, str] = {}
+        for soql in (sa_soql, owner_soql):
+            for r in self.query(soql):
+                uid = (r.get("Id") or "").strip()
+                if uid and uid not in seen:
+                    seen[uid] = (r.get("Name") or "").strip() or uid
+        out = [{"id": uid, "name": nm} for uid, nm in seen.items()]
+        out.sort(key=lambda x: x["name"].lower())
+        return out
+
     def opportunities_for_pipeline_user(self, user_id: str) -> list[dict[str, Any]]:
         """Open opps where the user is the account Assigned SA or the Opportunity owner."""
         uid = user_id.replace("'", "\\'")

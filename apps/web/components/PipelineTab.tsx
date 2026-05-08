@@ -7,6 +7,7 @@ type PipelineSource = "bigquery" | "salesforce";
 
 type PipelineUserOption = {
   id: string;
+  name: string;
 };
 
 type MyPipelineOpportunity = {
@@ -112,10 +113,8 @@ export default function PipelineTab() {
   return (
     <div className="pipeline-tab">
       <p style={{ margin: "0 0 16px", color: "#5a5f6e", lineHeight: 1.5 }}>
-        Pick your <strong>Salesforce User Id</strong> from the warehouse list (every distinct{" "}
-        <strong>assigned_sa_c</strong> or <strong>owner_id</strong>), then load <strong>open</strong> opportunities
-        where that Id is the account&apos;s Assigned SA or the Opportunity owner. Salesforce credentials on the API are
-        only used when you choose the live source.
+        Select your name, then load <strong>open</strong> opportunities where you are the account&apos;s{" "}
+        <strong>Assigned SA</strong> or the <strong>Opportunity owner</strong>.
       </p>
 
       <div
@@ -128,7 +127,7 @@ export default function PipelineTab() {
         }}
       >
         <label htmlFor="pipeline-user-select" style={{ fontSize: 14, fontWeight: 600, color: "#1a1d29" }}>
-          User Id (assigned_sa_c or owner_id)
+          User
         </label>
         <select
           id="pipeline-user-select"
@@ -145,20 +144,20 @@ export default function PipelineTab() {
             color: "#1a1d29",
           }}
         >
-          <option value="">{usersLoading ? "Loading User Ids…" : "Select your User Id…"}</option>
+          <option value="">{usersLoading ? "Loading users…" : "Select your name…"}</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.id}
+              {u.name}
             </option>
           ))}
         </select>
         {usersError ? (
           <div role="alert" style={{ fontSize: 13, color: "#842029" }}>
-            Could not load User Id list: {usersError}
+            Could not load user list: {usersError}
           </div>
         ) : null}
         {users.length === 0 && !usersLoading && !usersError ? (
-          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No User Ids returned from the warehouse.</p>
+          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No users returned. Check BigQuery or Salesforce credentials on the API.</p>
         ) : null}
       </div>
 
