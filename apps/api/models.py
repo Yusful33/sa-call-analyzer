@@ -877,6 +877,7 @@ class MyPipelineOpportunity(BaseModel):
     account_id: Optional[str] = None
     account_name: Optional[str] = None
     owner_name: Optional[str] = None
+    days_in_stage: Optional[int] = None
 
 
 class MyOpportunitiesResponse(BaseModel):

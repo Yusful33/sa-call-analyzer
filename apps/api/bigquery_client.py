@@ -911,7 +911,8 @@ class BigQueryClient:
             op.next_step AS next_step,
             op.account_id AS account_id,
             a.name AS account_name,
-            owner_u.name AS owner_name
+            owner_u.name AS owner_name,
+            CAST(op.last_stage_change_in_days AS INT64) AS days_in_stage
         FROM `{self.PROJECT_ID}.salesforce.opportunity` op
         JOIN `{self.PROJECT_ID}.salesforce.account` a ON op.account_id = a.id
         LEFT JOIN `{self.PROJECT_ID}.salesforce.user` owner_u ON op.owner_id = owner_u.id
@@ -940,6 +941,7 @@ class BigQueryClient:
                     "next_step": row.next_step,
                     "account_id": row.account_id,
                     "account_name": row.account_name,
+                    "days_in_stage": getattr(row, "days_in_stage", None),
                     "owner_name": row.owner_name,
                 }
             )

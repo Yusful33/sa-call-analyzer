@@ -269,6 +269,7 @@ def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
                     r.get("owner_name")
                     or ((r.get("Owner") or {}).get("Name") if isinstance(r.get("Owner"), dict) else None)
                 ),
+                days_in_stage=r.get("days_in_stage") if r.get("days_in_stage") is not None else None,
             )
         )
     return out

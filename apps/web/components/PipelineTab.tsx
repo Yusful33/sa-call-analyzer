@@ -20,6 +20,7 @@ type MyPipelineOpportunity = {
   account_id?: string | null;
   account_name?: string | null;
   owner_name?: string | null;
+  days_in_stage?: number | null;
 };
 
 type MyOpportunitiesResponse = {
@@ -260,6 +261,12 @@ export default function PipelineTab() {
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opportunity</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opp owner</th>
                 <th style={{ textAlign: "right", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Amount</th>
+                <th
+                  title="Days since the opportunity last changed stage"
+                  style={{ textAlign: "right", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}
+                >
+                  Days in stage
+                </th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Close</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Next step</th>
               </tr>
@@ -312,6 +319,18 @@ export default function PipelineTab() {
                     </td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", textAlign: "right", verticalAlign: "top" }}>
                       {formatMoney(o.amount ?? undefined)}
+                    </td>
+                    <td
+                      style={{
+                        padding: "10px 8px",
+                        borderBottom: "1px solid #f0f0f5",
+                        textAlign: "right",
+                        verticalAlign: "top",
+                        color: (o.days_in_stage ?? 0) >= 60 ? "#b1241f" : "#1a1d29",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {o.days_in_stage == null ? "—" : o.days_in_stage}
                     </td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
                       {formatDate(o.close_date ?? undefined)}

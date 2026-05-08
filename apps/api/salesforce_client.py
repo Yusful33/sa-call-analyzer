@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote, urljoin
 
@@ -224,7 +225,7 @@ class SalesforceClient:
         uid = user_id.replace("'", "\\'")
         soql = (
             "SELECT Id, Name, StageName, Amount, CloseDate, NextStep, AccountId, "
-            "Account.Name, Owner.Name "
+            "Account.Name, Owner.Name, LastStageChangeDate "
             "FROM Opportunity "
             f"WHERE IsClosed = false AND ("
             f"Account.Assigned_SA__c = '{uid}' OR "
@@ -234,6 +235,7 @@ class SalesforceClient:
             "ORDER BY CloseDate ASC"
         )
         rows = self.query(soql)
+        now = datetime.now(timezone.utc)
         normalized: list[dict[str, Any]] = []
         for r in rows:
             acct = r.get("Account") if isinstance(r.get("Account"), dict) else {}
@@ -242,6 +244,20 @@ class SalesforceClient:
             owner = r.get("Owner") if isinstance(r.get("Owner"), dict) else {}
             if isinstance(owner, dict):
                 owner.pop("attributes", None)
+            days_in_stage: Optional[int] = None
+            lscd = r.get("LastStageChangeDate")
+            if isinstance(lscd, str) and lscd.strip():
+                # Salesforce returns ISO 8601, e.g. "2026-04-12T18:43:21.000+0000"
+                try:
+                    s = lscd.replace("Z", "+0000")
+                    dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f%z")
+                    days_in_stage = max((now - dt).days, 0)
+                except ValueError:
+                    try:
+                        dt = datetime.fromisoformat(lscd.replace("Z", "+00:00"))
+                        days_in_stage = max((now - dt).days, 0)
+                    except ValueError:
+                        days_in_stage = None
             normalized.append(
                 {
                     "id": r.get("Id"),
@@ -253,6 +269,7 @@ class SalesforceClient:
                     "account_id": r.get("AccountId"),
                     "account_name": (acct or {}).get("Name") if isinstance(acct, dict) else None,
                     "owner_name": (owner or {}).get("Name") if isinstance(owner, dict) else None,
+                    "days_in_stage": days_in_stage,
                 }
             )
         return normalized
