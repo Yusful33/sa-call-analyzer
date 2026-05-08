@@ -865,6 +865,18 @@ class BigQueryClient:
             AND assigned_sa_c IS NOT NULL
             AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
           UNION DISTINCT
+          SELECT assigned_sa_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_sa_c IS NOT NULL
+            AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
+          UNION DISTINCT
+          SELECT assigned_solutions_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_solutions_c IS NOT NULL
+            AND TRIM(CAST(assigned_solutions_c AS STRING)) != ''
+          UNION DISTINCT
           SELECT owner_id AS id
           FROM `{self.PROJECT_ID}.salesforce.opportunity`
           WHERE COALESCE(is_deleted, FALSE) = FALSE
@@ -885,7 +897,7 @@ class BigQueryClient:
         return out
 
     def get_pipeline_opportunities_for_user(self, user_id: str) -> List[Dict[str, Any]]:
-        """Open opportunities where ``user_id`` is the account Assigned SA or the Opportunity owner (warehouse)."""
+        """Open opportunities where ``user_id`` is the Assigned SA (account or opp level), Solutions, or Owner."""
         uid = (user_id or "").strip()
         if not uid:
             return []
@@ -905,7 +917,12 @@ class BigQueryClient:
         LEFT JOIN `{self.PROJECT_ID}.salesforce.user` owner_u ON op.owner_id = owner_u.id
         WHERE COALESCE(op.is_closed, FALSE) = FALSE
           AND COALESCE(op.is_deleted, FALSE) = FALSE
-          AND (a.assigned_sa_c = @user_id OR op.owner_id = @user_id)
+          AND (
+            a.assigned_sa_c = @user_id
+            OR op.assigned_sa_c = @user_id
+            OR op.assigned_solutions_c = @user_id
+            OR op.owner_id = @user_id
+          )
         ORDER BY op.close_date ASC
         """
         job_config = bigquery.QueryJobConfig(

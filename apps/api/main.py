@@ -348,14 +348,18 @@ async def get_my_opportunities(
             notes=[],
         )
 
-    from salesforce_client import get_cached_salesforce_client
+    from salesforce_client import get_cached_salesforce_client, get_sf_last_error
 
     sf = get_cached_salesforce_client()
     if not sf:
+        err = get_sf_last_error() or ""
+        hint = (
+            f" Last error: {err[:200]}" if err else ""
+        )
         raise HTTPException(
             status_code=503,
-            detail="Salesforce API not configured. Set SALESFORCE_USERNAME + SALESFORCE_PASSWORD + "
-            "SALESFORCE_SECURITY_TOKEN (SOAP login), or authenticate with the Salesforce CLI on the API host.",
+            detail="Salesforce login failed. Check SALESFORCE_USERNAME, SALESFORCE_PASSWORD, and "
+            f"SALESFORCE_SECURITY_TOKEN in your .env (password+token are concatenated for SOAP login).{hint}",
         )
     try:
         rows = sf.opportunities_for_pipeline_user(uid)
