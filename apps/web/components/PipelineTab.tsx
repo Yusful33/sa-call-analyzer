@@ -236,7 +236,7 @@ export default function PipelineTab() {
 
       {selectedUserId && !oppsLoading && data && !data.opportunities.length ? (
         <p style={{ color: "#5a5f6e" }}>
-          No open opportunities match this person as owner or as Assigned SA / Solutions on the account or opportunity.
+          No open opportunities match this person as Opportunity owner or as Assigned SA on the account or opportunity.
         </p>
       ) : null}
 
