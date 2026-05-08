@@ -461,6 +461,17 @@ async def health_check():
             "brave_api_key_configured": bool(brave_key),
             "brave_api_key_length": len(brave_key),
         },
+        # My Pipeline: browser calls Next → proxy → this API; CRM env vars must live on this deployment.
+        "my_pipeline": {
+            "bigquery_client_initialized": bq_client is not None,
+            "gcp_credentials_base64_env_set": bool((os.getenv("GCP_CREDENTIALS_BASE64") or "").strip()),
+            "google_application_credentials_env_set": bool((os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()),
+            "salesforce_username_password_env_set": bool(
+                (os.getenv("SALESFORCE_USERNAME") or "").strip()
+                and (os.getenv("SALESFORCE_PASSWORD") or "").strip()
+            ),
+            "hint": "Set GCP_CREDENTIALS_BASE64 and/or SALESFORCE_USERNAME + SALESFORCE_PASSWORD (+ token) on the FastAPI Vercel project proxying /api/* (often arize-gtm-stillness-api), not only the Next.js site.",
+        },
     }
 
 

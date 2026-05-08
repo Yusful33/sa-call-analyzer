@@ -76,6 +76,7 @@ function groupOppsByStage(opps: MyPipelineOpportunity[]): Map<string, MyPipeline
 export default function PipelineTab() {
   const [source, setSource] = useState<PipelineSource>("bigquery");
   const [users, setUsers] = useState<PipelineUserOption[]>([]);
+  const [pipelineUserNotes, setPipelineUserNotes] = useState<string[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
@@ -93,10 +94,12 @@ export default function PipelineTab() {
         const r = await apiGet<{ users: PipelineUserOption[]; notes?: string[] }>("/api/pipeline-user-options");
         if (!cancelled) {
           setUsers(r.users || []);
+          setPipelineUserNotes(Array.isArray(r.notes) ? r.notes : []);
         }
       } catch (e) {
         if (!cancelled) {
           setUsers([]);
+          setPipelineUserNotes([]);
           setUsersError(e instanceof Error ? e.message : String(e));
         }
       } finally {
@@ -187,7 +190,24 @@ export default function PipelineTab() {
           </div>
         ) : null}
         {users.length === 0 && !usersLoading && !usersError ? (
-          <p style={{ fontSize: 13, color: "#5a5f6e" }}>No users returned. Check BigQuery or Salesforce credentials on the API.</p>
+          <div style={{ fontSize: 13, color: "#5a5f6e" }}>
+            <p style={{ margin: "0 0 8px" }}>
+              No users returned. This app proxies <code>/api/*</code> to the FastAPI deployment (e.g.{" "}
+              <code>arize-gtm-stillness-api.vercel.app</code>). Configure BigQuery or Salesforce env vars{" "}
+              <strong>on that API project</strong>, not only on the frontend.
+            </p>
+            <p style={{ margin: "0 0 8px" }}>
+              BigQuery on Vercel: set <code>GCP_CREDENTIALS_BASE64</code> (and usually <code>GOOGLE_CLOUD_PROJECT</code>). Salesforce:{" "}
+              <code>SALESFORCE_USERNAME</code>, <code>SALESFORCE_PASSWORD</code>, <code>SALESFORCE_SECURITY_TOKEN</code>.
+            </p>
+            {pipelineUserNotes.length > 0 ? (
+              <ul style={{ margin: "8px 0 0", paddingLeft: "1.25rem", lineHeight: 1.5 }}>
+                {pipelineUserNotes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
