@@ -9,11 +9,20 @@ This module implements the skill's workflow:
 
 import io
 import json
+import logging
 import os
 import re
+import subprocess
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("demo_generator")
+
+# Default trace count for Custom Demo Builder (UI + API + packaged README).
+DEFAULT_DEMO_TRACE_COUNT = 50
 
 # Path to the skill templates - check local bundled templates first, then user's home directory
 _API_DIR = Path(__file__).parent
@@ -32,10 +41,184 @@ else:
     SNIPPETS_PATH = _USER_TEMPLATES / "snippets"
 
 
-def slugify(text: str) -> str:
-    """Convert text to a URL-safe slug."""
+def slugify(text: str, max_len: int = 0) -> str:
+    """Convert text to a URL-safe slug, optionally truncating to max_len."""
     s = re.sub(r"[^a-zA-Z0-9]+", "_", (text or "").strip().lower()).strip("_")
+    if max_len > 0 and len(s) > max_len:
+        s = s[:max_len].rstrip("_")
     return s or "demo"
+
+
+def short_project_name(company_name: str, industry_or_use_case: str) -> str:
+    """Generate a short, concise project name from company and use case.
+    
+    Instead of verbose names like 'bumble_dating_social_platform_with_llm_powered_...',
+    produces concise names like 'bumble_safety' or 'acme_fraud_agent'.
+    """
+    company_slug = slugify(company_name, max_len=20)
+    
+    use_case_lower = (industry_or_use_case or "").lower()
+    
+    short_suffixes = [
+        ("safety", "safety"),
+        ("fraud", "fraud"),
+        ("support", "support"),
+        ("chat", "chat"),
+        ("search", "search"),
+        ("rag", "rag"),
+        ("sql", "sql"),
+        ("analytics", "analytics"),
+        ("moderation", "moderation"),
+        ("agent", "agent"),
+        ("assistant", "assistant"),
+        ("retrieval", "retrieval"),
+        ("recommendation", "recommendations"),
+        ("classification", "classifier"),
+        ("routing", "router"),
+        ("orchestration", "orchestrator"),
+        ("evaluation", "evals"),
+        ("guardrail", "guardrails"),
+        ("compliance", "compliance"),
+        ("claims", "claims"),
+        ("triage", "triage"),
+        ("research", "research"),
+    ]
+    
+    suffix = "demo"
+    for keyword, short in short_suffixes:
+        if keyword in use_case_lower:
+            suffix = short
+            break
+    
+    return f"{company_slug}_{suffix}"
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def push_synthetic_demo_traces(
+    generator_py: str,
+    *,
+    count: int,
+    project_name: str,
+    run_full_workflow: bool = True,
+) -> tuple[bool, str]:
+    """
+    Run the generated ``generator.py`` in a temp directory so spans are sent to Arize.
+
+    Uses the current process's environment for ``ARIZE_SPACE_ID`` and ``ARIZE_API_KEY``.
+    
+    When ``run_full_workflow=True`` (default), runs with ``--full`` flag which includes:
+    - Traces with evaluations
+    - Dataset upload to Arize
+    - 4-experiment grid upload (2 models × 2 prompts)
+    - Prompt hub upload (v1.0 + v2.0)
+    
+    This requires installing the full requirements.txt in a temporary venv.
+
+    Returns:
+        (success, message) where message is short human-readable detail or tail of logs.
+    """
+    space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
+    api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
+    if not space_id or not api_key:
+        return False, "ARIZE_SPACE_ID and ARIZE_API_KEY must be set in the API environment."
+
+    env = os.environ.copy()
+    env["ARIZE_SPACE_ID"] = space_id
+    env["ARIZE_API_KEY"] = api_key
+    env["ARIZE_PROJECT_NAME"] = project_name
+
+    timeout_sec = min(max(300, count * 3), 900)
+
+    with tempfile.TemporaryDirectory(prefix="id_pain_demo_push_") as tmp:
+        tmp_path = Path(tmp)
+        gpath = tmp_path / "generator.py"
+        gpath.write_text(generator_py, encoding="utf-8")
+        
+        req_path = tmp_path / "requirements.txt"
+        req_content = """arize>=7,<8
+arize-otel
+opentelemetry-api
+opentelemetry-sdk
+openinference-semantic-conventions
+python-dotenv
+pandas
+packaging
+"""
+        req_path.write_text(req_content, encoding="utf-8")
+        
+        venv_path = tmp_path / ".venv"
+        
+        logger.info("Creating temp venv for demo push at %s", venv_path)
+        try:
+            venv_result = subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_path)],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if venv_result.returncode != 0:
+                return False, f"Failed to create venv: {venv_result.stderr[:500]}"
+        except subprocess.TimeoutExpired:
+            return False, "Venv creation timed out."
+        
+        pip_path = venv_path / "bin" / "pip"
+        python_path = venv_path / "bin" / "python"
+        
+        logger.info("Installing requirements for demo push...")
+        try:
+            pip_result = subprocess.run(
+                [str(pip_path), "install", "-q", "-r", str(req_path)],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if pip_result.returncode != 0:
+                return False, f"pip install failed: {pip_result.stderr[:500]}"
+        except subprocess.TimeoutExpired:
+            return False, "pip install timed out."
+        
+        if run_full_workflow:
+            cmd = [str(python_path), str(gpath), "--full", "--count", str(max(1, count)),
+                   "--project-name", project_name]
+        else:
+            cmd = [str(python_path), str(gpath), "--count", str(max(1, count)),
+                   "--with-evals", "--project-name", project_name]
+        
+        logger.info("Running demo generator: %s", " ".join(cmd))
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"generator.py exceeded timeout ({timeout_sec}s)."
+
+        combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        tail = combined[-1500:] if len(combined) > 1500 else combined
+        if proc.returncode != 0:
+            logger.warning("demo push failed rc=%s: %s", proc.returncode, tail[:2000])
+            return False, tail or f"exit code {proc.returncode}"
+        
+        success_indicators = ["Done", "Flush successful", "traces", "Dataset"]
+        has_success = any(ind in combined for ind in success_indicators)
+        
+        return True, tail if has_success else "Traces and data sent to Arize."
+
+
+def should_auto_push_demo_traces_to_arize() -> bool:
+    """When True, ``/api/generate-demo`` runs ``generator.py`` after building the ZIP (if creds exist)."""
+    return _env_truthy("DEMO_AUTO_PUSH_TO_ARIZE")
 
 
 # Framework to LLM metadata mapping (from references/frameworks.md)
@@ -233,10 +416,7 @@ def generate_domain_content(
     
     Includes retry logic for JSON parsing failures.
     """
-    import logging
     from openai_compat_completion import completion as llm_completion
-    
-    logger = logging.getLogger("demo_generator")
 
     prompt = _generate_domain_content_prompt(
         company_name=company_name,
@@ -247,7 +427,7 @@ def generate_domain_content(
         additional_context=additional_context,
     )
 
-    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-haiku-4-5")
+    model = os.environ.get("DEMO_GENERATOR_MODEL", "claude-opus-4-5-20251101")
     last_error = None
     
     for attempt in range(max_retries + 1):
@@ -401,18 +581,19 @@ def generate_demo_files(
     industry_or_use_case: str,
     framework: str,
     agent_architecture: str,
-    num_traces: int = 500,
+    num_traces: int = DEFAULT_DEMO_TRACE_COUNT,
     tools: Optional[list[dict[str, str]]] = None,
     additional_context: Optional[str] = None,
     with_evals: bool = True,
     with_dataset_and_experiments: bool = True,
     scenarios: Optional[list[str]] = None,
-) -> tuple[bytes, dict[str, Any]]:
+) -> tuple[bytes, dict[str, Any], str]:
     """
     Generate all demo files and return as a ZIP archive.
-    
+
     Returns:
-        Tuple of (zip_bytes, metadata) where metadata includes file list and generation info.
+        Tuple of (zip_bytes, metadata, generator_py) where ``generator_py`` is the same script
+        packaged in the ZIP (used for optional server-side ingest).
     """
     # Generate domain content using LLM
     domain_content = generate_domain_content(
@@ -427,10 +608,9 @@ def generate_demo_files(
     # Get framework metadata
     fw_meta = FRAMEWORK_METADATA.get(framework, FRAMEWORK_METADATA["generic"])
     
-    # Generate slugs and names
-    company_slug = slugify(company_name)
-    use_case_slug = slugify(industry_or_use_case)[:30]
-    project_name = f"{company_slug}_{use_case_slug}_synthetic"
+    # Generate slugs and names - use SHORT project names
+    company_slug = slugify(company_name, max_len=20)
+    project_name = short_project_name(company_name, industry_or_use_case)
     dataset_name = f"{company_slug}_eval_set"
     agent_name = domain_content.get("agent_name", f"{company_slug}_agent")
     
@@ -580,7 +760,7 @@ python generator.py --full --count {num_traces}
 python generator.py --count 1000 --seed 42
 
 # Different project name
-python generator.py --count 500 --project-name {company_slug}_v2
+python generator.py --count {num_traces} --project-name {company_slug}_v2
 ```
 
 ## Files
@@ -606,7 +786,7 @@ python generator.py --count 500 --project-name {company_slug}_v2
     # Create ZIP archive
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        folder_name = f"{company_slug}_{use_case_slug}_demo"
+        folder_name = f"{project_name}_demo"
         
         zf.writestr(f"{folder_name}/generator.py", generator_py)
         zf.writestr(f"{folder_name}/README.md", readme)
@@ -639,4 +819,4 @@ python generator.py --count 500 --project-name {company_slug}_v2
         },
     }
     
-    return zip_bytes, metadata
+    return zip_bytes, metadata, generator_py

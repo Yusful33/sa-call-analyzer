@@ -32,7 +32,7 @@ const AGENT_ARCHITECTURE_OPTIONS: { value: string; label: string }[] = [
   { value: "guarded_rag", label: "guarded_rag" },
 ];
 
-const NUM_TRACE_OPTIONS = [100, 250, 500, 1000, 2000] as const;
+const NUM_TRACE_OPTIONS = [50, 100, 250, 500, 1000, 2000] as const;
 
 /** SKILL.md optional `scenarios` subset. */
 const SCENARIO_OPTIONS: { value: string; label: string }[] = [
@@ -90,7 +90,7 @@ const defaultSkillForm = (): SkillFormState => ({
   outputDir: "",
   skillFramework: "langgraph",
   agentArchitecture: "single_agent",
-  numTraces: 500,
+  numTraces: 50,
   withEvals: true,
   withDatasetAndExperiments: true,
   scenarios: [],
@@ -318,7 +318,11 @@ export default function DemoTab({
         additional_context: additionalContext.trim() || undefined,
       };
 
-      const { blob, filename } = await apiPostBlob("/api/generate-demo", body, `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`);
+      const { blob, filename, demoArizePush } = await apiPostBlob(
+        "/api/generate-demo",
+        body,
+        `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`
+      );
 
       // Download the file
       const url = URL.createObjectURL(blob);
@@ -332,6 +336,20 @@ export default function DemoTab({
 
       setDemoGenerated(true);
       onLoading("");
+
+      if (demoArizePush?.status === "success") {
+        toast.success("Demo complete! Traces, evaluations, dataset, experiments, and prompts sent to Arize.");
+      } else if (demoArizePush?.status === "failed") {
+        toast.warning(
+          "ZIP downloaded, but full workflow failed. Check API logs or run generator.py locally with --full flag. " +
+            (demoArizePush.detail ? demoArizePush.detail.slice(0, 280) : "")
+        );
+      } else if (demoArizePush?.status === "skipped") {
+        toast.warning(
+          "ZIP downloaded. Server push is enabled but Arize credentials are missing on the API. " +
+            (demoArizePush.detail || "")
+        );
+      }
     } catch (err: any) {
       toast.error("Error generating demo: " + (err.message ?? String(err)));
       onLoading("");
@@ -361,8 +379,8 @@ export default function DemoTab({
           </h4>
           <p style={{ color: "#555", fontSize: "0.9em", margin: "0 0 12px 0" }}>
             {demoGenerated
-              ? "Your demo has been downloaded. Extract the ZIP and follow the README to run the generator."
-              : "Click below to generate a complete demo package including generator.py, requirements.txt, and documentation."}
+              ? "Your demo ZIP was downloaded. The full workflow was executed: traces + evaluations + dataset + experiments + prompts are now in your Arize space."
+              : "Click below to generate and execute the full demo workflow: traces, evaluations, dataset, 4-experiment grid, and prompt hub entry will be sent to Arize."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
@@ -710,7 +728,7 @@ export default function DemoTab({
       </div>
 
       <div className="input-section" style={{ marginTop: 15 }}>
-        <label htmlFor="demoNumTraces">num_traces (SKILL.md — default 500)</label>
+        <label htmlFor="demoNumTraces">num_traces (SKILL.md — default 50 in this app)</label>
         <select
           id="demoNumTraces"
           style={{ width: "100%", marginTop: 6 }}

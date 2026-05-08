@@ -865,6 +865,28 @@ class AccountSuggestionsResponse(BaseModel):
     matches: List[AccountSuggestionMatch] = Field(default_factory=list)
 
 
+class MyPipelineOpportunity(BaseModel):
+    """One row for the My Pipeline tab (open opps on accounts assigned to an SA)."""
+
+    id: str
+    name: str
+    stage_name: Optional[str] = None
+    amount: Optional[float] = None
+    close_date: Optional[str] = None
+    next_step: Optional[str] = None
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
+
+
+class MyOpportunitiesResponse(BaseModel):
+    """Response for GET /api/my-opportunities."""
+
+    sa_user_id: str
+    source: str  # "bigquery" | "salesforce"
+    opportunities: List[MyPipelineOpportunity] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
 class ProspectOverviewRequest(BaseModel):
     """Request to get prospect overview from BigQuery"""
     # Support multiple lookup methods

@@ -10,8 +10,8 @@ Emits OpenInference traces to Arize AX via arize-otel. Use for demos and worksho
 
 Usage:
   python generator.py --test                      # one trace per scenario type
-  python generator.py --count 500                 # full batch
-  python generator.py --count 500 --with-evals    # plus trace/span/session evals
+  python generator.py --count 50                  # full batch (default count)
+  python generator.py --count 50 --with-evals     # plus trace/span/session evals
   python generator.py --count 100 --seed 42       # reproducible subset
   python generator.py --project-name custom_proj  # override project
 
@@ -347,7 +347,7 @@ def generate_evaluations(span_data_list):
 
 # ─── Batch runner ────────────────────────────────────────────────────────────
 
-def run_batch(tracer, count=500, *, with_evals=False, project_name=None, session_size=(3, 6)):
+def run_batch(tracer, count=50, *, with_evals=False, project_name=None, session_size=(3, 6)):
     scenarios = build_scenarios(count)
     span_data_list = []
 
@@ -440,7 +440,7 @@ def _need_creds():
 
 def main():
     parser = argparse.ArgumentParser(description="{{COMPANY_NAME}} synthetic trace generator")
-    parser.add_argument("--count", type=int, default=500)
+    parser.add_argument("--count", type=int, default=50)
     parser.add_argument("--test", action="store_true", help="Emit one trace per scenario type")
     parser.add_argument("--with-evals", action="store_true")
     parser.add_argument("--project-name",

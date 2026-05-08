@@ -29,7 +29,7 @@ export const demoFormSchema = z.object({
     "rag_rerank",
     "guarded_rag",
   ]),
-  numTraces: z.number().min(100).max(5000),
+  numTraces: z.number().min(50).max(5000),
   withEvals: z.boolean(),
   withDatasetAndExperiments: z.boolean(),
   scenarios: z.array(z.string()),
@@ -50,7 +50,7 @@ export const defaultDemoFormValues: DemoFormValues = {
   outputDir: "",
   skillFramework: "langgraph",
   agentArchitecture: "single_agent",
-  numTraces: 500,
+  numTraces: 50,
   withEvals: true,
   withDatasetAndExperiments: true,
   scenarios: [],
@@ -160,4 +160,4 @@ export const SCENARIO_OPTIONS = [
 /**
  * Number of traces options.
  */
-export const NUM_TRACE_OPTIONS = [100, 250, 500, 1000, 2000] as const;
+export const NUM_TRACE_OPTIONS = [50, 100, 250, 500, 1000, 2000] as const;

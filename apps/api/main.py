@@ -5,6 +5,8 @@ import base64
 import asyncio
 import logging
 import contextvars
+import shutil
+import subprocess
 from pathlib import Path
 
 # Configure logging
@@ -97,7 +99,7 @@ from observability import (
 tracer_provider = setup_observability(project_name="sa-call-analyzer")
 
 # Now import everything else
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from models import (
@@ -108,6 +110,8 @@ from models import (
     TransitionToCSResponse,
     AccountSuggestionsRequest,
     AccountSuggestionsResponse,
+    MyOpportunitiesResponse,
+    MyPipelineOpportunity,
 )
 from poc_document_generator import AppendixGenerationError, build_poc_document
 from transition_document_generator import build_transition_document
@@ -183,7 +187,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # So browsers can read Content-Disposition on cross-origin blob downloads (e.g. Next :3000 → API :8080)
-    expose_headers=["Content-Disposition"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Demo-Arize-Push",
+        "X-Demo-Arize-Push-Detail",
+    ],
 )
 
 
@@ -232,6 +240,148 @@ if _API_SERVICE_MODE in ("full", "light"):
         logger.warning("BigQuery client not available: %s", e)
 else:
     logger.info("Skipping BigQuery init (API_SERVICE_MODE=crew)")
+
+
+def _is_likely_serverless_host() -> bool:
+    """True when this process is almost certainly not a developer laptop with sf CLI."""
+    if (os.getenv("VERCEL") or "").strip() == "1":
+        return True
+    if (os.getenv("AWS_LAMBDA_FUNCTION_NAME") or "").strip():
+        return True
+    if (os.getenv("K_SERVICE") or "").strip():  # Cloud Run
+        return True
+    return False
+
+
+def _resolve_sa_user_id() -> tuple[Optional[str], list[str]]:
+    """Return (Salesforce User Id, notes) for the current SA context."""
+    notes: list[str] = []
+    uid = (os.getenv("SALESFORCE_USER_ID") or "").strip()
+    if uid:
+        return uid, notes
+
+    email = (os.getenv("SALESFORCE_USER_EMAIL") or "").strip()
+    if email:
+        if bq_client:
+            found = bq_client.get_salesforce_user_id_by_email(email)
+            if found:
+                return found, notes
+            notes.append(f"No Salesforce user row in BigQuery for email {email!r} (check sync or spelling).")
+        else:
+            notes.append("BigQuery unavailable; cannot resolve SALESFORCE_USER_EMAIL to a User Id.")
+
+    if shutil.which("sf") and os.getenv("SALESFORCE_USE_SF_CLI", "").strip().lower() not in ("0", "false", "no"):
+        alias = (os.getenv("SALESFORCE_SF_CLI_TARGET_ORG") or "arize-sfdc").strip()
+        try:
+            proc = subprocess.run(
+                ["sf", "org", "display", "user", "--target-org", alias, "--json"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                data = json.loads(proc.stdout)
+                cli_id = ((data.get("result") or {}).get("id") or "").strip()
+                if cli_id:
+                    return cli_id, notes + ["Resolved SA User Id from Salesforce CLI."]
+        except (json.JSONDecodeError, subprocess.SubprocessError, KeyError, TypeError, OSError) as e:
+            logger.debug("SF CLI user resolution skipped: %s", e)
+
+    if not notes:
+        if _is_likely_serverless_host():
+            notes.append(
+                "On Vercel/serverless, set SALESFORCE_USER_ID (18-char Id) or SALESFORCE_USER_EMAIL "
+                "(requires BigQuery). The sf CLI is not used in production."
+            )
+        else:
+            notes.append(
+                "Set SALESFORCE_USER_ID or SALESFORCE_USER_EMAIL (+ BigQuery), install the Salesforce CLI "
+                "locally, or add SALESFORCE_USE_SF_CLI=0 to silence CLI hints."
+            )
+    return None, notes
+
+
+def _rows_to_pipeline_opps(rows: list[dict]) -> list[MyPipelineOpportunity]:
+    out: list[MyPipelineOpportunity] = []
+    for r in rows:
+        oid = (r.get("id") or r.get("Id") or "").strip()
+        name = (r.get("name") or r.get("Name") or "").strip()
+        if not oid or not name:
+            continue
+        acct = r.get("Account") if isinstance(r.get("Account"), dict) else None
+        if isinstance(acct, dict):
+            acct.pop("attributes", None)
+        account_name = r.get("account_name")
+        if not account_name and isinstance(acct, dict):
+            account_name = acct.get("Name")
+        out.append(
+            MyPipelineOpportunity(
+                id=oid,
+                name=name,
+                stage_name=r.get("stage_name") or r.get("StageName"),
+                amount=r.get("amount") if r.get("amount") is not None else None,
+                close_date=r.get("close_date") or r.get("CloseDate"),
+                next_step=r.get("next_step") or r.get("NextStep"),
+                account_id=r.get("account_id") or r.get("AccountId"),
+                account_name=account_name,
+            )
+        )
+    return out
+
+
+@app.get("/api/my-opportunities", response_model=MyOpportunitiesResponse)
+async def get_my_opportunities(
+    source: str = Query(
+        "bigquery",
+        description='Use "bigquery" (warehouse) or "salesforce" (live API; needs credentials or sf CLI).',
+    ),
+):
+    """
+    List open opportunities on accounts assigned to the configured SA (Account.Assigned_SA__c).
+
+    Identity resolution: ``SALESFORCE_USER_ID``, else email via BigQuery, else local ``sf`` CLI user.
+    """
+    src = (source or "bigquery").strip().lower()
+    if src not in ("bigquery", "salesforce"):
+        raise HTTPException(status_code=400, detail='source must be "bigquery" or "salesforce"')
+
+    sa_id, notes = _resolve_sa_user_id()
+    if not sa_id:
+        raise HTTPException(status_code=503, detail="; ".join(notes) if notes else "SA user identity not configured.")
+
+    if src == "bigquery":
+        if not bq_client:
+            raise HTTPException(status_code=503, detail="BigQuery client not available.")
+        rows = bq_client.get_pipeline_opportunities_for_sa(sa_id)
+        return MyOpportunitiesResponse(
+            sa_user_id=sa_id,
+            source="bigquery",
+            opportunities=_rows_to_pipeline_opps(rows),
+            notes=notes,
+        )
+
+    from salesforce_client import get_cached_salesforce_client
+
+    sf = get_cached_salesforce_client()
+    if not sf:
+        raise HTTPException(
+            status_code=503,
+            detail="Salesforce API not configured. Set SALESFORCE_USERNAME + SALESFORCE_PASSWORD + "
+            "SALESFORCE_SECURITY_TOKEN (SOAP login), or run `sf org login` locally with sf CLI.",
+        )
+    try:
+        rows = sf.opportunities_for_assigned_sa(sa_id)
+    except Exception as e:
+        logger.exception("Salesforce query failed")
+        raise HTTPException(status_code=502, detail=f"Salesforce query failed: {str(e)[:500]}") from e
+
+    return MyOpportunitiesResponse(
+        sa_user_id=sa_id,
+        source="salesforce",
+        opportunities=_rows_to_pipeline_opps(rows),
+        notes=notes,
+    )
 
 
 def _with_optional_gong_mcp_enrichment(overview: ProspectOverview) -> ProspectOverview:
@@ -1349,7 +1499,7 @@ class GenerateDemoRequest(BaseModel):
     industry_or_use_case: str
     skill_framework: str
     agent_architecture: str
-    num_traces: Optional[int] = 500
+    num_traces: Optional[int] = 50
     with_evals: Optional[bool] = True
     with_dataset_and_experiments: Optional[bool] = True
     scenarios: Optional[list[str]] = None
@@ -1375,12 +1525,19 @@ class GenerateDemoResponse(BaseModel):
 @app.post("/api/generate-demo")
 async def generate_demo(request: GenerateDemoRequest):
     """
-    Generate a synthetic demo by executing the arize-synthetic-demo skill logic.
-    
-    Uses an LLM to generate domain-specific content (queries, tools, prompts),
-    fills in the generator skeleton template, and returns a downloadable ZIP file.
+    Generate a synthetic demo package (arize-synthetic-demo style).
+
+    Uses an LLM to generate domain-specific content, fills ``generator_skeleton.py``,
+    and returns a ZIP. When ``DEMO_AUTO_PUSH_TO_ARIZE=1`` and Arize credentials exist
+    on the server, also runs ``generator.py --count N`` so traces are sent (see response headers).
     """
-    from demo_generator import generate_demo_files, SKILL_PATH
+    from demo_generator import (
+        DEFAULT_DEMO_TRACE_COUNT,
+        SKILL_PATH,
+        generate_demo_files,
+        push_synthetic_demo_traces,
+        should_auto_push_demo_traces_to_arize,
+    )
     from synthetic_demo_skill import (
         SKILL_AGENT_ARCHITECTURE_VALUES,
         SKILL_FRAMEWORK_VALUES,
@@ -1421,12 +1578,12 @@ async def generate_demo(request: GenerateDemoRequest):
         tools_parsed = _parse_demo_tools_text(request.tools_text)
 
         try:
-            zip_bytes, metadata = generate_demo_files(
+            zip_bytes, metadata, generator_py = generate_demo_files(
                 company_name=request.account_name.strip(),
                 industry_or_use_case=request.industry_or_use_case.strip(),
                 framework=sf,
                 agent_architecture=aa,
-                num_traces=request.num_traces or 500,
+                num_traces=request.num_traces or DEFAULT_DEMO_TRACE_COUNT,
                 tools=tools_parsed or None,
                 additional_context=request.additional_context,
                 with_evals=request.with_evals if request.with_evals is not None else True,
@@ -1451,10 +1608,40 @@ async def generate_demo(request: GenerateDemoRequest):
 
         filename = f"{metadata['folder_name']}.zip"
 
+        push_headers: dict[str, str] = {}
+        if should_auto_push_demo_traces_to_arize():
+            space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
+            api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
+            if not space_id or not api_key:
+                push_headers["X-Demo-Arize-Push"] = "skipped"
+                push_headers["X-Demo-Arize-Push-Detail"] = (
+                    "DEMO_AUTO_PUSH_TO_ARIZE is enabled but ARIZE_SPACE_ID or ARIZE_API_KEY is missing on the server."
+                )
+            else:
+                n_push = int(request.num_traces or DEFAULT_DEMO_TRACE_COUNT)
+                ok, detail = push_synthetic_demo_traces(
+                    generator_py,
+                    count=n_push,
+                    project_name=str(metadata["project_name"]),
+                )
+                push_headers["X-Demo-Arize-Push"] = "success" if ok else "failed"
+                safe = (detail or "").replace("\r", " ").replace("\n", " ")
+                safe = safe.encode("ascii", "replace").decode("ascii")[:500]
+                push_headers["X-Demo-Arize-Push-Detail"] = safe
+        else:
+            push_headers["X-Demo-Arize-Push"] = "disabled"
+            push_headers["X-Demo-Arize-Push-Detail"] = (
+                "Set DEMO_AUTO_PUSH_TO_ARIZE=1 and ARIZE_SPACE_ID + ARIZE_API_KEY on the API "
+                "to send traces when generating; otherwise run generator.py from the ZIP locally."
+            )
+
         return Response(
             content=zip_bytes,
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                **push_headers,
+            },
         )
 
 

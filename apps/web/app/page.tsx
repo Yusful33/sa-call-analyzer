@@ -8,6 +8,7 @@ import GongTab from "@/components/GongTab";
 import DemoTab from "@/components/DemoTab";
 import PocTab from "@/components/PocTab";
 import TransitionTab from "@/components/TransitionTab";
+import PipelineTab from "@/components/PipelineTab";
 import SalesStageRail, { stageBodyCopy } from "@/components/SalesStageRail";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
@@ -28,7 +29,7 @@ import type {
   AccountSuggestionMatch,
 } from "@/lib/accountResolve";
 
-type ResultTab = Exclude<ShareableTab, "pocpot" | "transition">;
+type ResultTab = Exclude<ShareableTab, "pipeline" | "pocpot" | "transition">;
 
 type SuggestUi = {
   reason: string;
@@ -86,7 +87,14 @@ function HomeContent() {
       setResultOwner(null);
     } else {
       setLoading(false);
+      setLoadingMessage("");
     }
+  }, []);
+
+  /** Stops the global overlay without clearing results (e.g. while account pick modal is open). */
+  const clearGlobalLoading = useCallback(() => {
+    setLoading(false);
+    setLoadingMessage("");
   }, []);
 
   const makeOnResult = useCallback(
@@ -149,6 +157,9 @@ function HomeContent() {
         };
       }
       return await new Promise((resolve) => {
+        // Account-suggestions request is done; tabs already set "Resolving…". Hide spinner
+        // so the user is not stuck on a loading state behind the pick-account dialog.
+        clearGlobalLoading();
         setSuggestUi({
           reason: r.reason || "Pick an account.",
           typedQuery: an,
@@ -180,9 +191,10 @@ function HomeContent() {
         accountDomain: dom || undefined,
       };
     }
-  }, []);
+  }, [clearGlobalLoading]);
 
-  const hideSharedResults = activeTab === "pocpot" || activeTab === "transition";
+  const hideSharedResults =
+    activeTab === "pipeline" || activeTab === "pocpot" || activeTab === "transition";
   const showResults = !hideSharedResults && resultOwner === activeTab && !!resultHtml;
 
   return (
@@ -228,6 +240,9 @@ function HomeContent() {
           </div>
 
           <div className="tab-content-wrapper">
+            <div className={`tab-content${activeTab === "pipeline" ? " active" : ""}`}>
+              <PipelineTab />
+            </div>
             <div className={`tab-content${activeTab === "hypothesis" ? " active" : ""}`}>
               <HypothesisTab
                 onLoading={onLoading}

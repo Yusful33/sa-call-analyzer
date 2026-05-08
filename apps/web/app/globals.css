@@ -206,6 +206,32 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   text-transform: uppercase; color: var(--arize-text-muted);
   margin-bottom: 10px; padding-left: 4px;
 }
+/* Full-width My Pipeline entry (above the five sales-stage cards) */
+.pipeline-shelf {
+  margin: 0 0 16px;
+  padding: 0;
+}
+.pipeline-shelf-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--arize-text-muted);
+  margin-bottom: 8px; padding-left: 4px;
+}
+.pipeline-shelf-card {
+  width: 100%;
+  display: flex; flex-direction: row; flex-wrap: wrap;
+  align-items: flex-start; justify-content: space-between; gap: 14px 20px;
+  padding: 16px 18px;
+  text-align: left;
+}
+.pipeline-shelf-card .stage-card-eyebrow { margin-bottom: 4px; }
+.pipeline-shelf-card .stage-card-tool-name { font-size: 20px; }
+.pipeline-shelf-card .stage-card-blurb {
+  flex: 1 1 220px; min-width: 0; max-width: 42rem; margin-top: 0; padding-top: 0;
+}
+@media (max-width: 700px) {
+  .pipeline-shelf-card { flex-direction: column; }
+}
+
 .stage-rail {
   list-style: none; margin: 0; padding: 0;
   display: grid; grid-template-columns: repeat(5, 1fr);
