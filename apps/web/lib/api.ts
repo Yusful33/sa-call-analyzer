@@ -8,16 +8,12 @@ function normalizeApiOrigin(raw: string | undefined): string | undefined {
   return u.replace(/\/$/, "");
 }
 
-const isDev = process.env.NODE_ENV === "development";
-
 /**
- * In production on Vercel, use same-origin `/api/...` so `next.config.ts` **fallback rewrites**
- * proxy to FastAPI (avoids CORS and survives a blank `NEXT_PUBLIC_LEGACY_API_URL` in the client).
- * In development, call the local FastAPI origin directly.
+ * Always use same-origin `/api/...` so requests go through Next.js, which proxies to FastAPI
+ * via rewrites (next.config.ts) or middleware. Works uniformly in Docker, local dev, and Vercel
+ * without CORS or port-mapping concerns.
  */
-const BASE = isDev
-  ? normalizeApiOrigin(process.env.NEXT_PUBLIC_LEGACY_API_URL) ?? "http://localhost:8080"
-  : "";
+const BASE = "";
 
 /** CrewAI-heavy routes (second Vercel project when `NEXT_PUBLIC_CREW_API_URL` is set). */
 const CREW_API_PREFIXES = [
