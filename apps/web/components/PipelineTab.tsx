@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet } from "@/lib/api";
 
 type PipelineSource = "bigquery" | "salesforce";
@@ -47,6 +47,29 @@ function formatDate(s: string | null | undefined): string {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString();
+}
+
+/** Stable label for grouping; empty → "— (no stage)" */
+function stageGroupLabel(stage: string | null | undefined): string {
+  const t = (stage ?? "").trim();
+  return t || "— (no stage)";
+}
+
+/**
+ * Opportunities grouped by stage, stages sorted alphabetically with numeric-aware ordering
+ * (e.g. "1. Foo" before "10. Bar").
+ */
+function groupOppsByStage(opps: MyPipelineOpportunity[]): Map<string, MyPipelineOpportunity[]> {
+  const map = new Map<string, MyPipelineOpportunity[]>();
+  for (const o of opps) {
+    const key = stageGroupLabel(o.stage_name);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(o);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => (a.account_name ?? "").localeCompare(b.account_name ?? "", undefined, { sensitivity: "base" }));
+  }
+  return new Map([...map.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })));
 }
 
 export default function PipelineTab() {
@@ -109,6 +132,11 @@ export default function PipelineTab() {
   useEffect(() => {
     void loadOpportunities();
   }, [loadOpportunities]);
+
+  const oppsByStage = useMemo(
+    () => (data?.opportunities?.length ? groupOppsByStage(data.opportunities) : new Map<string, MyPipelineOpportunity[]>()),
+    [data],
+  );
 
   return (
     <div className="pipeline-tab">
@@ -214,44 +242,84 @@ export default function PipelineTab() {
           <table className="opps-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 8px",
+                    borderBottom: "2px solid #e8e8ef",
+                    width: "11rem",
+                    minWidth: "9rem",
+                  }}
+                >
+                  Stage
+                </th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Account</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opportunity</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Opp owner</th>
-                <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Stage</th>
                 <th style={{ textAlign: "right", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Amount</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Close</th>
                 <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "2px solid #e8e8ef" }}>Next step</th>
               </tr>
             </thead>
-            <tbody>
-              {data.opportunities.map((o) => (
-                <tr key={o.id}>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
-                    {o.account_name || "—"}
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
-                    <a href={oppUrl(o.id)} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600 }}>
-                      {o.name}
-                    </a>
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
-                    {o.owner_name || "—"}
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
-                    {o.stage_name || "—"}
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", textAlign: "right", verticalAlign: "top" }}>
-                    {formatMoney(o.amount ?? undefined)}
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
-                    {formatDate(o.close_date ?? undefined)}
-                  </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", color: "#444", verticalAlign: "top" }}>
-                    {o.next_step || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+            {[...oppsByStage.entries()].map(([stageLabel, rows]) => (
+              <tbody key={stageLabel}>
+                {rows.map((o, idx) => (
+                  <tr key={o.id}>
+                    {idx === 0 ? (
+                      <th
+                        rowSpan={rows.length}
+                        scope="rowgroup"
+                        style={{
+                          textAlign: "left",
+                          padding: "10px 8px",
+                          borderBottom: "1px solid #e8e8ef",
+                          borderRight: "1px solid #e8e8ef",
+                          verticalAlign: "top",
+                          background: "var(--arize-surface-alt, #faf8fb)",
+                          fontWeight: 600,
+                          color: "#1a1d29",
+                          whiteSpace: "normal",
+                          maxWidth: "14rem",
+                        }}
+                      >
+                        {stageLabel}
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "#888",
+                            marginTop: 4,
+                          }}
+                        >
+                          {rows.length} opp{rows.length === 1 ? "" : "s"}
+                        </span>
+                      </th>
+                    ) : null}
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
+                      {o.account_name || "—"}
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
+                      <a href={oppUrl(o.id)} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600 }}>
+                        {o.name}
+                      </a>
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
+                      {o.owner_name || "—"}
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", textAlign: "right", verticalAlign: "top" }}>
+                      {formatMoney(o.amount ?? undefined)}
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", verticalAlign: "top" }}>
+                      {formatDate(o.close_date ?? undefined)}
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #f0f0f5", color: "#444", verticalAlign: "top" }}>
+                      {o.next_step || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            ))}
           </table>
           <p style={{ fontSize: 12, color: "#888", marginTop: 10 }}>
             Showing {data.opportunities.length} row{data.opportunities.length === 1 ? "" : "s"} via{" "}
