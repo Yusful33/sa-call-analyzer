@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote, urljoin
 
@@ -194,23 +195,69 @@ class SalesforceClient:
 
         return out
 
-    def opportunities_for_assigned_sa(self, sa_user_id: str) -> list[dict[str, Any]]:
-        """Open opps whose Account.Assigned_SA__c matches the given User Id."""
-        # Escape single quotes in Id (defensive)
-        uid = sa_user_id.replace("'", "\\'")
+    def pipeline_user_options(self) -> list[dict[str, Any]]:
+        """Distinct users who are Assigned SA (account or opp), Assigned Solutions, or Opp owner (live SOQL)."""
+        queries = [
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT Assigned_SA__c FROM Account WHERE Assigned_SA__c != null AND IsDeleted = false)",
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT Assigned_SA__c FROM Opportunity WHERE Assigned_SA__c != null AND IsDeleted = false)",
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT Assigned_Solutions__c FROM Opportunity WHERE Assigned_Solutions__c != null AND IsDeleted = false)",
+            "SELECT Id, Name FROM User WHERE Id IN "
+            "(SELECT OwnerId FROM Opportunity WHERE IsClosed = false AND IsDeleted = false)",
+        ]
+        seen: dict[str, str] = {}
+        for soql in queries:
+            try:
+                for r in self.query(soql):
+                    uid = (r.get("Id") or "").strip()
+                    if uid and uid not in seen:
+                        seen[uid] = (r.get("Name") or "").strip() or uid
+            except Exception:
+                pass
+        out = [{"id": uid, "name": nm} for uid, nm in seen.items()]
+        out.sort(key=lambda x: x["name"].lower())
+        return out
+
+    def opportunities_for_pipeline_user(self, user_id: str) -> list[dict[str, Any]]:
+        """Open opps where the user is Assigned SA (account or opp level), Assigned Solutions, or Owner."""
+        uid = user_id.replace("'", "\\'")
         soql = (
             "SELECT Id, Name, StageName, Amount, CloseDate, NextStep, AccountId, "
-            "Account.Name "
+            "Account.Name, Owner.Name, LastStageChangeDate "
             "FROM Opportunity "
-            f"WHERE IsClosed = false AND Account.Assigned_SA__c = '{uid}' "
+            f"WHERE IsClosed = false AND ("
+            f"Account.Assigned_SA__c = '{uid}' OR "
+            f"Assigned_SA__c = '{uid}' OR "
+            f"Assigned_Solutions__c = '{uid}' OR "
+            f"OwnerId = '{uid}') "
             "ORDER BY CloseDate ASC"
         )
         rows = self.query(soql)
+        now = datetime.now(timezone.utc)
         normalized: list[dict[str, Any]] = []
         for r in rows:
             acct = r.get("Account") if isinstance(r.get("Account"), dict) else {}
             if isinstance(acct, dict):
                 acct.pop("attributes", None)
+            owner = r.get("Owner") if isinstance(r.get("Owner"), dict) else {}
+            if isinstance(owner, dict):
+                owner.pop("attributes", None)
+            days_in_stage: Optional[int] = None
+            lscd = r.get("LastStageChangeDate")
+            if isinstance(lscd, str) and lscd.strip():
+                # Salesforce returns ISO 8601, e.g. "2026-04-12T18:43:21.000+0000"
+                try:
+                    s = lscd.replace("Z", "+0000")
+                    dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f%z")
+                    days_in_stage = max((now - dt).days, 0)
+                except ValueError:
+                    try:
+                        dt = datetime.fromisoformat(lscd.replace("Z", "+00:00"))
+                        days_in_stage = max((now - dt).days, 0)
+                    except ValueError:
+                        days_in_stage = None
             normalized.append(
                 {
                     "id": r.get("Id"),
@@ -221,6 +268,8 @@ class SalesforceClient:
                     "next_step": r.get("NextStep"),
                     "account_id": r.get("AccountId"),
                     "account_name": (acct or {}).get("Name") if isinstance(acct, dict) else None,
+                    "owner_name": (owner or {}).get("Name") if isinstance(owner, dict) else None,
+                    "days_in_stage": days_in_stage,
                 }
             )
         return normalized
@@ -228,17 +277,35 @@ class SalesforceClient:
 
 _sf_singleton: Optional[SalesforceClient] = None
 _sf_singleton_attempted = False
+_sf_last_error: Optional[str] = None
 
 
 def get_cached_salesforce_client() -> Optional[SalesforceClient]:
-    """Lazy singleton so we do not repeat SOAP login on every request."""
-    global _sf_singleton, _sf_singleton_attempted
-    if _sf_singleton_attempted:
+    """Lazy singleton; retries once if previous attempt failed (creds may have been updated)."""
+    global _sf_singleton, _sf_singleton_attempted, _sf_last_error
+    if _sf_singleton:
         return _sf_singleton
+    if _sf_singleton_attempted:
+        return None
     _sf_singleton_attempted = True
     try:
         _sf_singleton = SalesforceClient.from_env()
+        _sf_last_error = None
     except Exception as e:
         logger.warning("Salesforce client init failed: %s", e)
         _sf_singleton = None
+        _sf_last_error = str(e)
     return _sf_singleton
+
+
+def get_sf_last_error() -> Optional[str]:
+    """Return the last Salesforce login error message (for user-facing diagnostics)."""
+    return _sf_last_error
+
+
+def reset_sf_singleton() -> None:
+    """Allow retry of SF login (e.g. after credentials are updated)."""
+    global _sf_singleton, _sf_singleton_attempted, _sf_last_error
+    _sf_singleton = None
+    _sf_singleton_attempted = False
+    _sf_last_error = None

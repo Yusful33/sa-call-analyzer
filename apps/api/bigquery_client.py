@@ -855,9 +855,50 @@ class BigQueryClient:
             return None
         return getattr(rows[0], "id", None)
 
-    def get_pipeline_opportunities_for_sa(self, sa_user_id: str) -> List[Dict[str, Any]]:
-        """Open opportunities on accounts where Assigned SA matches ``sa_user_id`` (warehouse)."""
-        uid = (sa_user_id or "").strip()
+    def get_pipeline_user_options(self) -> List[Dict[str, Any]]:
+        """Distinct users (with names) who are Assigned SA or Opportunity owner (warehouse)."""
+        query = f"""
+        WITH user_ids AS (
+          SELECT assigned_sa_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.account`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_sa_c IS NOT NULL
+            AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
+          UNION DISTINCT
+          SELECT assigned_sa_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_sa_c IS NOT NULL
+            AND TRIM(CAST(assigned_sa_c AS STRING)) != ''
+          UNION DISTINCT
+          SELECT assigned_solutions_c AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND assigned_solutions_c IS NOT NULL
+            AND TRIM(CAST(assigned_solutions_c AS STRING)) != ''
+          UNION DISTINCT
+          SELECT owner_id AS id
+          FROM `{self.PROJECT_ID}.salesforce.opportunity`
+          WHERE COALESCE(is_deleted, FALSE) = FALSE
+            AND owner_id IS NOT NULL
+            AND TRIM(CAST(owner_id AS STRING)) != ''
+        )
+        SELECT u.id, COALESCE(NULLIF(TRIM(usr.name), ''), u.id) AS name
+        FROM user_ids u
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` usr ON usr.id = u.id
+        ORDER BY name
+        """
+        out: List[Dict[str, Any]] = []
+        for row in self.client.query(query).result():
+            uid = (getattr(row, "id", None) or "").strip()
+            nm = (getattr(row, "name", None) or "").strip()
+            if uid:
+                out.append({"id": uid, "name": nm or uid})
+        return out
+
+    def get_pipeline_opportunities_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Open opportunities where ``user_id`` is the Assigned SA (account or opp level), Solutions, or Owner."""
+        uid = (user_id or "").strip()
         if not uid:
             return []
         query = f"""
@@ -869,16 +910,24 @@ class BigQueryClient:
             CAST(op.close_date AS STRING) AS close_date,
             op.next_step AS next_step,
             op.account_id AS account_id,
-            a.name AS account_name
+            a.name AS account_name,
+            owner_u.name AS owner_name,
+            CAST(op.last_stage_change_in_days AS INT64) AS days_in_stage
         FROM `{self.PROJECT_ID}.salesforce.opportunity` op
         JOIN `{self.PROJECT_ID}.salesforce.account` a ON op.account_id = a.id
-        WHERE a.assigned_sa_c = @sa_user_id
-          AND COALESCE(op.is_closed, FALSE) = FALSE
+        LEFT JOIN `{self.PROJECT_ID}.salesforce.user` owner_u ON op.owner_id = owner_u.id
+        WHERE COALESCE(op.is_closed, FALSE) = FALSE
           AND COALESCE(op.is_deleted, FALSE) = FALSE
+          AND (
+            a.assigned_sa_c = @user_id
+            OR op.assigned_sa_c = @user_id
+            OR op.assigned_solutions_c = @user_id
+            OR op.owner_id = @user_id
+          )
         ORDER BY op.close_date ASC
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("sa_user_id", "STRING", uid)]
+            query_parameters=[bigquery.ScalarQueryParameter("user_id", "STRING", uid)]
         )
         out: List[Dict[str, Any]] = []
         for row in self.client.query(query, job_config=job_config).result():
@@ -892,6 +941,8 @@ class BigQueryClient:
                     "next_step": row.next_step,
                     "account_id": row.account_id,
                     "account_name": row.account_name,
+                    "days_in_stage": getattr(row, "days_in_stage", None),
+                    "owner_name": row.owner_name,
                 }
             )
         return out

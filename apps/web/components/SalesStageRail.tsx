@@ -41,8 +41,8 @@ export default function SalesStageRail({ activeTab, onSelectTab }: StageRailProp
             <div className="stage-card-tool-name">{"\u{1F4CB} My Pipeline"}</div>
           </div>
           <div className="stage-card-blurb">
-            Open opportunities on accounts where you are the assigned Solution Architect. Uses BigQuery or live
-            Salesforce.
+            Open opportunities where you&apos;re on the deal — Opportunity owner or Assigned SA on account or opportunity —
+            via BigQuery or live Salesforce.
           </div>
         </button>
       </div>

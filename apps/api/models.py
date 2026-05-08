@@ -866,7 +866,7 @@ class AccountSuggestionsResponse(BaseModel):
 
 
 class MyPipelineOpportunity(BaseModel):
-    """One row for the My Pipeline tab (open opps on accounts assigned to an SA)."""
+    """One row for the My Pipeline tab (open opps for the selected CRM user)."""
 
     id: str
     name: str
@@ -876,14 +876,30 @@ class MyPipelineOpportunity(BaseModel):
     next_step: Optional[str] = None
     account_id: Optional[str] = None
     account_name: Optional[str] = None
+    owner_name: Optional[str] = None
+    days_in_stage: Optional[int] = None
 
 
 class MyOpportunitiesResponse(BaseModel):
     """Response for GET /api/my-opportunities."""
 
-    sa_user_id: str
+    user_id: str
     source: str  # "bigquery" | "salesforce"
     opportunities: List[MyPipelineOpportunity] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+class PipelineUserOption(BaseModel):
+    """A Salesforce user who is an Assigned SA or Opportunity owner."""
+
+    id: str
+    name: str
+
+
+class PipelineUserOptionsResponse(BaseModel):
+    """Distinct users for the My Pipeline picker (Assigned SA ∪ Opportunity owners)."""
+
+    users: List[PipelineUserOption] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
 
 
