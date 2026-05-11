@@ -99,6 +99,16 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
     }
   }
 
+  // Debug route: /api/_echo-test returns a simple test response
+  if (pathSegments?.[0] === "_echo-test") {
+    return new Response('{"test":"hello","working":true}', {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  }
+
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
