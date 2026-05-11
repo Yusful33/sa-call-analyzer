@@ -81,10 +81,20 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
 
   const upstream = await fetch(target, init);
 
-  // Read the body as an ArrayBuffer to avoid streaming issues with chunked responses
-  const bodyBuffer = await upstream.arrayBuffer();
+  // Read the body as text first to debug
+  const bodyText = await upstream.text();
+  
+  // If we got an HTML response (likely auth page), include debug info
+  const ct = upstream.headers.get("content-type") || "";
+  if (ct.includes("text/html") && upstream.status !== 200) {
+    console.error("[Proxy Debug] Got HTML response:", {
+      target,
+      status: upstream.status,
+      bypassSent: headers.has("x-vercel-protection-bypass"),
+    });
+  }
 
-  return new NextResponse(bodyBuffer, {
+  return new NextResponse(bodyText, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: sanitizeResponseHeaders(upstream.headers),
