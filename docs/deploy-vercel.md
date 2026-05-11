@@ -173,7 +173,7 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 2. **Root Directory:** `apps/web`.
 3. **Framework Preset:** Next.js (auto-detected).
 4. **Environment variables:**
-   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production origin of the FastAPI worker (no trailing slash), e.g. **`https://arize-gtm-stillness-api.vercel.app`**. It is read at **build time** by **`apps/web/middleware.ts`** (primary) and **`next.config.ts` fallback rewrites** (backup): same-origin **`/api/:path*`** is proxied to that host so the browser avoids CORS. **`app/api/`** routes (e.g. **`/api/health`**) stay on Next and are not proxied.
+   - **`NEXT_PUBLIC_LEGACY_API_URL`** — production origin of the FastAPI worker (no trailing slash), e.g. **`https://arize-gtm-stillness-api.vercel.app`**. It is inlined at **build time** for the client; the server proxy prefers **`FASTAPI_ORIGIN`** / **`LEGACY_API_ORIGIN`** at **request time** (see **`apps/web/lib/backendOrigin.ts`**). Same-origin **`/api/*`** is proxied by **`app/api/[[...path]]/route.ts`** (Node) so **`x-vercel-protection-bypass`** can be applied reliably. **`app/api/health`** stays on Next.
    - **`NEXT_PUBLIC_CREW_API_URL`** — optional second origin for analyze / recap / prospect routes (no trailing slash). When unset, those routes use the same rewrite target as the main API (same-origin `/api/...` → FastAPI unless you set a distinct crew URL).
 
 ### CLI alternative
@@ -181,7 +181,8 @@ The proxy forwards method, path, query, headers (minus hop-by-hop), and request 
 ```bash
 cd apps/web
 vercel link
-vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # e.g. https://arize-gtm-stillness-api.vercel.app (used at build for rewrites)
+vercel env add NEXT_PUBLIC_LEGACY_API_URL production    # e.g. https://arize-gtm-stillness-api.vercel.app (client + build; optional if FASTAPI_ORIGIN set)
+vercel env add FASTAPI_ORIGIN production                # optional: same URL — avoids rebuild when repointing the API host
 vercel env add NEXT_PUBLIC_CREW_API_URL production      # optional second worker; omit if analyze runs on LEGACY host
 vercel deploy --prod
 ```

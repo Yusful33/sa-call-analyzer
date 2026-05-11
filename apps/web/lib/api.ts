@@ -65,7 +65,7 @@ const PROXY_HELP =
   "When the FastAPI Vercel project has Deployment Protection, the Next.js server must send " +
   "x-vercel-protection-bypass on proxied /api requests (your browser SSO does not apply to that hop). " +
   "On this (web) project set FASTAPI_VERCEL_PROTECTION_BYPASS to the Automation bypass secret from the API " +
-  "project, or set VERCEL_AUTOMATION_BYPASS_SECRET if Vercel injects it. See .env.example and apps/web/middleware.ts.";
+  "project, or set VERCEL_AUTOMATION_BYPASS_SECRET if Vercel injects it. See .env.example and apps/web/lib/backendOrigin.ts.";
 
 async function formatApiFailure(res: Response): Promise<string> {
   const ct = res.headers.get("content-type") || "";

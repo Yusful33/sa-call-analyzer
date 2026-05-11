@@ -1,19 +1,5 @@
 import type { NextConfig } from "next";
 
-/** Duplicated in `middleware.ts` (Edge) for API proxy default. */
-const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
-
-function legacyApiOriginForRewrites(): string {
-  const raw = process.env.NEXT_PUBLIC_LEGACY_API_URL?.trim();
-  if (!raw) {
-    return process.env.NODE_ENV === "development" ? "" : PROD_DEFAULT_LEGACY_API;
-  }
-  if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
-    return `https://${raw}`.replace(/\/$/, "");
-  }
-  return raw.replace(/\/$/, "");
-}
-
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   serverExternalPackages: [
@@ -24,31 +10,11 @@ const nextConfig: NextConfig = {
     "@opentelemetry/semantic-conventions",
     "@opentelemetry/api",
   ],
-  // Increase proxy timeout for long-running API calls (demo-insights, prospect-overview)
-  experimental: {
-    proxyTimeout: 300000, // 5 minutes
-  },
   /**
-   * Rewrites for API proxy. In development, uses FASTAPI_ORIGIN env var.
-   * In production, middleware.ts handles the proxy for Vercel Edge.
+   * `/api/*` (except `app/api/health`) is proxied to FastAPI by `app/api/[[...path]]/route.ts`
+   * so we can attach `x-vercel-protection-bypass` in Node.js (Edge middleware external rewrites
+   * were unreliable and could surface as 404 on Vercel).
    */
-  async rewrites() {
-    const devOrigin = process.env.FASTAPI_ORIGIN || process.env.NEXT_PUBLIC_LEGACY_API_URL;
-    const origin = process.env.NODE_ENV === "development" 
-      ? (devOrigin || "http://localhost:8080")
-      : legacyApiOriginForRewrites();
-    
-    if (!origin) {
-      return [];
-    }
-    // After-files rewrites: `app/api/health` wins over this; other `/api/*` hits FastAPI.
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${origin}/api/:path*`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;
