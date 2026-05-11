@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
 import { backendOrigin, vercelProtectionBypass } from "@/lib/backendOrigin";
 
 /**
@@ -8,17 +7,6 @@ import { backendOrigin, vercelProtectionBypass } from "@/lib/backendOrigin";
  */
 export const runtime = "nodejs";
 export const maxDuration = 800;
-
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailers",
-  "transfer-encoding",
-  "upgrade",
-]);
 
 function buildTargetUrl(request: NextRequest, pathSegments: string[] | undefined): string {
   const u = new URL(request.url);
@@ -51,78 +39,10 @@ function forwardRequestHeaders(request: NextRequest): Headers {
   return out;
 }
 
-function sanitizeResponseHeaders(src: Headers): Headers {
-  const out = new Headers();
-  src.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      out.set(key, value);
-    }
-  });
-  return out;
-}
-
 async function proxy(request: NextRequest, pathSegments: string[] | undefined): Promise<Response> {
   const target = buildTargetUrl(request, pathSegments);
   const headers = forwardRequestHeaders(request);
   const method = request.method.toUpperCase();
-
-  // Debug route: /api/_debug returns proxy config info
-  if (pathSegments?.[0] === "_debug") {
-    return NextResponse.json({
-      target: backendOrigin(),
-      bypassConfigured: vercelProtectionBypass().length > 0,
-      bypassLength: vercelProtectionBypass().length,
-      fullTarget: target,
-      pathSegments,
-      requestUrl: request.url,
-      headersToSend: Object.fromEntries(headers.entries()),
-    });
-  }
-
-  // Debug route: /api/_test-fetch does a test fetch and returns debug info
-  if (pathSegments?.[0] === "_test-fetch") {
-    try {
-      const testTarget = `${backendOrigin()}/api/pipeline-user-options`;
-      const testResp = await fetch(testTarget, { headers, method: "GET" });
-      const testBody = await testResp.text();
-      return NextResponse.json({
-        target: testTarget,
-        status: testResp.status,
-        statusText: testResp.statusText,
-        contentType: testResp.headers.get("content-type"),
-        contentLength: testResp.headers.get("content-length"),
-        bodyLength: testBody.length,
-        bodyPreview: testBody.slice(0, 200),
-      });
-    } catch (error) {
-      return NextResponse.json({
-        error: String(error),
-      }, { status: 500 });
-    }
-  }
-
-  // Debug route: /api/_echo-test returns a simple test response
-  if (pathSegments?.[0] === "_echo-test") {
-    return new Response('{"test":"hello","working":true}', {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-      },
-    });
-  }
-
-  // Debug route: /api/_proxy-test fetches API and returns with same pattern as echo-test
-  if (pathSegments?.[0] === "_proxy-test") {
-    const testTarget = `${backendOrigin()}/api/pipeline-user-options`;
-    const testResp = await fetch(testTarget, { headers, method: "GET" });
-    const testBody = await testResp.text();
-    return new Response(testBody, {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-      },
-    });
-  }
 
   const init: RequestInit & { duplex?: "half" } = {
     method,
@@ -138,11 +58,8 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   }
 
   const upstream = await fetch(target, init);
-
-  // Read the body as text first
   const bodyText = await upstream.text();
 
-  // Use the same pattern as _proxy-test which works
   return new Response(bodyText, {
     status: upstream.status,
     headers: {
