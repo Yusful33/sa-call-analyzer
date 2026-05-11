@@ -193,11 +193,13 @@ export default function PipelineTab() {
           <div style={{ fontSize: 13, color: "#5a5f6e" }}>
             <p style={{ margin: "0 0 8px" }}>
               No users returned. This app proxies <code>/api/*</code> to the FastAPI deployment (e.g.{" "}
-              <code>arize-gtm-stillness-api.vercel.app</code>). Configure BigQuery or Salesforce env vars{" "}
-              <strong>on that API project</strong>, not only on the frontend.
+              <code>arize-gtm-stillness-api.vercel.app</code>). If that API project uses Vercel Deployment Protection,
+              set <code>FASTAPI_VERCEL_PROTECTION_BYPASS</code> on <strong>this</strong> (Next.js) project to the same
+              Automation bypass secret configured on the API project (see <code>.env.example</code>).
             </p>
             <p style={{ margin: "0 0 8px" }}>
-              BigQuery on Vercel: set <code>GCP_CREDENTIALS_BASE64</code> (and usually <code>GOOGLE_CLOUD_PROJECT</code>). Salesforce:{" "}
+              Otherwise configure BigQuery or Salesforce env vars <strong>on the API project</strong>, not only on the
+              frontend: <code>GCP_CREDENTIALS_BASE64</code> (and usually <code>GOOGLE_CLOUD_PROJECT</code>), or{" "}
               <code>SALESFORCE_USERNAME</code>, <code>SALESFORCE_PASSWORD</code>, <code>SALESFORCE_SECURITY_TOKEN</code>.
             </p>
             {pipelineUserNotes.length > 0 ? (

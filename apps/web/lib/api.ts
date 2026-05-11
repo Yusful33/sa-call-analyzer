@@ -8,12 +8,16 @@ function normalizeApiOrigin(raw: string | undefined): string | undefined {
   return u.replace(/\/$/, "");
 }
 
+const isDev = process.env.NODE_ENV === "development";
+
 /**
- * Always use same-origin `/api/...` so requests go through Next.js, which proxies to FastAPI
- * via rewrites (next.config.ts) or middleware. Works uniformly in Docker, local dev, and Vercel
- * without CORS or port-mapping concerns.
+ * In production on Vercel, use same-origin `/api/...` so `next.config.ts` **fallback rewrites**
+ * proxy to FastAPI (avoids CORS and survives a blank `NEXT_PUBLIC_LEGACY_API_URL` in the client).
+ * In development, call the local FastAPI origin directly.
  */
-const BASE = "";
+const BASE = isDev
+  ? normalizeApiOrigin(process.env.NEXT_PUBLIC_LEGACY_API_URL) ?? "http://localhost:8080"
+  : "";
 
 /** CrewAI-heavy routes (second Vercel project when `NEXT_PUBLIC_CREW_API_URL` is set). */
 const CREW_API_PREFIXES = [
@@ -57,6 +61,27 @@ function parseFilenameFromContentDisposition(cd: string | null): string | null {
   return null;
 }
 
+const PROXY_HELP =
+  "When the FastAPI Vercel project has Deployment Protection, the Next.js server must send " +
+  "x-vercel-protection-bypass on proxied /api requests (your browser SSO does not apply to that hop). " +
+  "On this (web) project set FASTAPI_VERCEL_PROTECTION_BYPASS to the Automation bypass secret from the API " +
+  "project, or set VERCEL_AUTOMATION_BYPASS_SECRET if Vercel injects it. See .env.example and apps/web/middleware.ts.";
+
+async function formatApiFailure(res: Response): Promise<string> {
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("text/html") && (res.status === 401 || res.status === 403 || res.status === 404)) {
+    return `HTTP ${res.status}: received HTML instead of JSON from /api. ${PROXY_HELP}`;
+  }
+  let detail = res.statusText?.trim() || `HTTP ${res.status}`;
+  try {
+    const j = await res.json();
+    if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+  } catch {
+    /* ignore */
+  }
+  return detail;
+}
+
 export async function apiPost<T = unknown>(
   path: string,
   body: Record<string, unknown>,
@@ -77,14 +102,7 @@ export async function apiPost<T = unknown>(
   });
   if (tid) clearTimeout(tid);
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = await res.json();
-      if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw new Error(await formatApiFailure(res));
   }
   return res.json() as Promise<T>;
 }
@@ -103,14 +121,7 @@ export async function apiGet<T = unknown>(
   const url = `${baseUrlForPath(path)}${path}${q ? `?${q}` : ""}`;
   const res = await fetch(url, { method: "GET", signal: opts?.signal });
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = await res.json();
-      if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw new Error(await formatApiFailure(res));
   }
   return res.json() as Promise<T>;
 }
@@ -133,14 +144,7 @@ export async function apiPostBlob(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = await res.json();
-      if (j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw new Error(await formatApiFailure(res));
   }
   const blob = await res.blob();
   let filename =

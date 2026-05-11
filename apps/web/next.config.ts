@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 /** Duplicated in `middleware.ts` (Edge) for API proxy default. */
-const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api-six.vercel.app";
+const PROD_DEFAULT_LEGACY_API = "https://arize-gtm-stillness-api.vercel.app";
 
 function legacyApiOriginForRewrites(): string {
   const raw = process.env.NEXT_PUBLIC_LEGACY_API_URL?.trim();
@@ -41,31 +41,14 @@ const nextConfig: NextConfig = {
     if (!origin) {
       return [];
     }
-    return {
-      beforeFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${origin}/api/:path*`,
-          // Skip the health endpoint (handled by Next.js)
-          has: [
-            {
-              type: "header",
-              key: "x-skip-middleware",
-              value: undefined,
-            },
-          ],
-        },
-      ],
-      fallback: [
-        {
-          source: "/api/:path*",
-          destination: `${origin}/api/:path*`,
-        },
-      ],
-    };
+    // After-files rewrites: `app/api/health` wins over this; other `/api/*` hits FastAPI.
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${origin}/api/:path*`,
+      },
+    ];
   },
 };
 
 export default nextConfig;
-// Force rebuild 1778197772
-
