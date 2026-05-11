@@ -80,7 +80,11 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   }
 
   const upstream = await fetch(target, init);
-  return new NextResponse(upstream.body, {
+
+  // Read the body as an ArrayBuffer to avoid streaming issues with chunked responses
+  const bodyBuffer = await upstream.arrayBuffer();
+
+  return new NextResponse(bodyBuffer, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: sanitizeResponseHeaders(upstream.headers),
