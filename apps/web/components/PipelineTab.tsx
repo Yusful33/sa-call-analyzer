@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet } from "@/lib/api";
+import { getCached, setCache } from "@/lib/clientCache";
 
 type PipelineSource = "bigquery" | "salesforce";
 
@@ -78,6 +79,7 @@ export default function PipelineTab() {
   const [users, setUsers] = useState<PipelineUserOption[]>([]);
   const [pipelineUserNotes, setPipelineUserNotes] = useState<string[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
+  const [usersRefreshing, setUsersRefreshing] = useState(false); // Shows when refreshing cached data
   const [usersError, setUsersError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
 
@@ -87,23 +89,50 @@ export default function PipelineTab() {
 
   useEffect(() => {
     let cancelled = false;
+    const CACHE_KEY = "pipeline_users";
+    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+
     (async () => {
-      setUsersLoading(true);
+      // Check for cached data first
+      const cached = getCached<{ users: PipelineUserOption[]; notes?: string[] }>(CACHE_KEY);
+      
+      if (cached) {
+        // Show cached data immediately
+        setUsers(cached.data.users || []);
+        setPipelineUserNotes(Array.isArray(cached.data.notes) ? cached.data.notes : []);
+        setUsersLoading(false);
+        
+        if (!cached.isStale) {
+          // Data is fresh, no need to fetch
+          return;
+        }
+        // Data is stale, show refreshing indicator while fetching in background
+        setUsersRefreshing(true);
+      } else {
+        setUsersLoading(true);
+      }
+
       setUsersError(null);
       try {
         const r = await apiGet<{ users: PipelineUserOption[]; notes?: string[] }>("/api/pipeline-user-options");
         if (!cancelled) {
           setUsers(r.users || []);
           setPipelineUserNotes(Array.isArray(r.notes) ? r.notes : []);
+          // Cache the fresh data
+          setCache(CACHE_KEY, r, CACHE_MAX_AGE);
         }
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && !cached) {
+          // Only show error if we don't have cached data to show
           setUsers([]);
           setPipelineUserNotes([]);
           setUsersError(e instanceof Error ? e.message : String(e));
         }
       } finally {
-        if (!cancelled) setUsersLoading(false);
+        if (!cancelled) {
+          setUsersLoading(false);
+          setUsersRefreshing(false);
+        }
       }
     })();
     return () => {
@@ -162,28 +191,48 @@ export default function PipelineTab() {
         <label htmlFor="pipeline-user-select" style={{ fontSize: 14, fontWeight: 600, color: "#1a1d29" }}>
           User
         </label>
-        <select
-          id="pipeline-user-select"
-          className="pipeline-user-select"
-          value={selectedUserId}
-          onChange={(e) => setSelectedUserId(e.target.value)}
-          disabled={usersLoading}
-          style={{
-            fontSize: 15,
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid var(--arize-border, #e0e0e8)",
-            background: "var(--arize-surface, #fff)",
-            color: "#1a1d29",
-          }}
-        >
-          <option value="">{usersLoading ? "Loading users…" : "Select your name…"}</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
+        <div style={{ position: "relative" }}>
+          <select
+            id="pipeline-user-select"
+            className="pipeline-user-select"
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+            disabled={usersLoading}
+            style={{
+              fontSize: 15,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid var(--arize-border, #e0e0e8)",
+              background: "var(--arize-surface, #fff)",
+              color: "#1a1d29",
+              width: "100%",
+            }}
+          >
+            <option value="">{usersLoading ? "Loading users…" : "Select your name…"}</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+          {usersRefreshing && (
+            <span
+              style={{
+                position: "absolute",
+                right: 36,
+                top: "50%",
+                transform: "translateY(-50%)",
+                fontSize: 11,
+                color: "#888",
+                background: "var(--arize-surface, #fff)",
+                padding: "2px 6px",
+                borderRadius: 4,
+              }}
+            >
+              Refreshing…
+            </span>
+          )}
+        </div>
         {usersError ? (
           <div role="alert" style={{ fontSize: 13, color: "#842029" }}>
             Could not load user list: {usersError}

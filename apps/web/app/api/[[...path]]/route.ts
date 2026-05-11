@@ -8,6 +8,14 @@ import { backendOrigin, vercelProtectionBypass } from "@/lib/backendOrigin";
 export const runtime = "nodejs";
 export const maxDuration = 800;
 
+/**
+ * Endpoints that return stable data and can be cached.
+ * Map of path suffix -> cache duration in seconds.
+ */
+const CACHEABLE_GET_ENDPOINTS: Record<string, number> = {
+  "pipeline-user-options": 300, // 5 minutes - user list rarely changes
+};
+
 function buildTargetUrl(request: NextRequest, pathSegments: string[] | undefined): string {
   const u = new URL(request.url);
   const suffix =
@@ -39,6 +47,16 @@ function forwardRequestHeaders(request: NextRequest): Headers {
   return out;
 }
 
+/**
+ * Check if a path is cacheable and return the cache duration.
+ */
+function getCacheDuration(method: string, pathSegments: string[] | undefined): number {
+  if (method !== "GET") return 0;
+  const lastSegment = pathSegments?.[pathSegments.length - 1];
+  if (!lastSegment) return 0;
+  return CACHEABLE_GET_ENDPOINTS[lastSegment] ?? 0;
+}
+
 async function proxy(request: NextRequest, pathSegments: string[] | undefined): Promise<Response> {
   const target = buildTargetUrl(request, pathSegments);
   const headers = forwardRequestHeaders(request);
@@ -60,11 +78,24 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   const upstream = await fetch(target, init);
   const bodyText = await upstream.text();
 
+  // Build response headers
+  const responseHeaders: Record<string, string> = {
+    "content-type": upstream.headers.get("content-type") || "application/json",
+  };
+
+  // Add caching headers for cacheable GET endpoints
+  const cacheDuration = getCacheDuration(method, pathSegments);
+  if (cacheDuration > 0 && upstream.status === 200) {
+    // Use stale-while-revalidate: serve stale content while fetching fresh in background
+    responseHeaders["cache-control"] = `public, s-maxage=${cacheDuration}, stale-while-revalidate=${cacheDuration * 2}`;
+  } else {
+    // Don't cache errors or non-cacheable endpoints
+    responseHeaders["cache-control"] = "no-store";
+  }
+
   return new Response(bodyText, {
     status: upstream.status,
-    headers: {
-      "content-type": upstream.headers.get("content-type") || "application/json",
-    },
+    headers: responseHeaders,
   });
 }
 

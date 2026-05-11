@@ -5,5 +5,11 @@
     "app/api/[[...path]]/route.ts": {
       "maxDuration": 800
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/warmup",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
