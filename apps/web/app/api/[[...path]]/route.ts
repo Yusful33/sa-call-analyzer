@@ -73,6 +73,8 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
       bypassConfigured: vercelProtectionBypass().length > 0,
       bypassLength: vercelProtectionBypass().length,
       fullTarget: target,
+      pathSegments,
+      requestUrl: request.url,
       headersToSend: Object.fromEntries(headers.entries()),
     });
   }
@@ -140,23 +142,12 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   // Read the body as text first
   const bodyText = await upstream.text();
 
-  // Build response headers as plain object
-  const respHeaders: Record<string, string> = {};
-  upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      respHeaders[key] = value;
-    }
-  });
-  // Ensure content-type is set
-  if (!respHeaders["content-type"]) {
-    respHeaders["content-type"] = "application/json";
-  }
-
-  // Use native Response instead of NextResponse
+  // Use the same pattern as _proxy-test which works
   return new Response(bodyText, {
     status: upstream.status,
-    statusText: upstream.statusText,
-    headers: respHeaders,
+    headers: {
+      "content-type": upstream.headers.get("content-type") || "application/json",
+    },
   });
 }
 
