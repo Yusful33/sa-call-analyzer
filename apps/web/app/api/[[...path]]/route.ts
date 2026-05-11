@@ -66,6 +66,17 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   const headers = forwardRequestHeaders(request);
   const method = request.method.toUpperCase();
 
+  // Debug route: /api/_debug returns proxy config info
+  if (pathSegments?.[0] === "_debug") {
+    return NextResponse.json({
+      target: backendOrigin(),
+      bypassConfigured: vercelProtectionBypass().length > 0,
+      bypassLength: vercelProtectionBypass().length,
+      fullTarget: target,
+      headersToSend: Object.fromEntries(headers.entries()),
+    });
+  }
+
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
@@ -81,18 +92,8 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
 
   const upstream = await fetch(target, init);
 
-  // Read the body as text first to debug
+  // Read the body as text first
   const bodyText = await upstream.text();
-  
-  // If we got an HTML response (likely auth page), include debug info
-  const ct = upstream.headers.get("content-type") || "";
-  if (ct.includes("text/html") && upstream.status !== 200) {
-    console.error("[Proxy Debug] Got HTML response:", {
-      target,
-      status: upstream.status,
-      bypassSent: headers.has("x-vercel-protection-bypass"),
-    });
-  }
 
   return new NextResponse(bodyText, {
     status: upstream.status,
