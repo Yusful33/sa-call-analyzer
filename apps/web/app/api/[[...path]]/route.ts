@@ -117,10 +117,17 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   // Read the body as text first
   const bodyText = await upstream.text();
 
+  // Build response headers
+  const respHeaders = sanitizeResponseHeaders(upstream.headers);
+  // Ensure content-length is set for proper response handling
+  if (bodyText.length > 0) {
+    respHeaders.set("content-length", String(Buffer.byteLength(bodyText, "utf8")));
+  }
+
   return new NextResponse(bodyText, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: sanitizeResponseHeaders(upstream.headers),
+    headers: respHeaders,
   });
 }
 
