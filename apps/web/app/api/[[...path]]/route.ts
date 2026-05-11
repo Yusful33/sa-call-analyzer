@@ -109,6 +109,19 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
     });
   }
 
+  // Debug route: /api/_proxy-test fetches API and returns with same pattern as echo-test
+  if (pathSegments?.[0] === "_proxy-test") {
+    const testTarget = `${backendOrigin()}/api/pipeline-user-options`;
+    const testResp = await fetch(testTarget, { headers, method: "GET" });
+    const testBody = await testResp.text();
+    return new Response(testBody, {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  }
+
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
