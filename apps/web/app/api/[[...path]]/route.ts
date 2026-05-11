@@ -77,6 +77,28 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
     });
   }
 
+  // Debug route: /api/_test-fetch does a test fetch and returns debug info
+  if (pathSegments?.[0] === "_test-fetch") {
+    try {
+      const testTarget = `${backendOrigin()}/api/pipeline-user-options`;
+      const testResp = await fetch(testTarget, { headers, method: "GET" });
+      const testBody = await testResp.text();
+      return NextResponse.json({
+        target: testTarget,
+        status: testResp.status,
+        statusText: testResp.statusText,
+        contentType: testResp.headers.get("content-type"),
+        contentLength: testResp.headers.get("content-length"),
+        bodyLength: testBody.length,
+        bodyPreview: testBody.slice(0, 200),
+      });
+    } catch (error) {
+      return NextResponse.json({
+        error: String(error),
+      }, { status: 500 });
+    }
+  }
+
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
