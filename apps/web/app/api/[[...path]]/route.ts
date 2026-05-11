@@ -127,14 +127,20 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   // Read the body as text first
   const bodyText = await upstream.text();
 
-  // Build response headers
-  const respHeaders = sanitizeResponseHeaders(upstream.headers);
-  // Ensure content-length is set for proper response handling
-  if (bodyText.length > 0) {
-    respHeaders.set("content-length", String(Buffer.byteLength(bodyText, "utf8")));
+  // Build response headers as plain object
+  const respHeaders: Record<string, string> = {};
+  upstream.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP.has(key.toLowerCase())) {
+      respHeaders[key] = value;
+    }
+  });
+  // Ensure content-type is set
+  if (!respHeaders["content-type"]) {
+    respHeaders["content-type"] = "application/json";
   }
 
-  return new NextResponse(bodyText, {
+  // Use native Response instead of NextResponse
+  return new Response(bodyText, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: respHeaders,
