@@ -1,14 +1,9 @@
 "use client";
 
-import { Suspense, useState, useCallback, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
+import { Suspense, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import ProspectTab, { type ProspectShareHints } from "@/components/ProspectTab";
-import HypothesisTab from "@/components/HypothesisTab";
-import GongTab from "@/components/GongTab";
-import DemoTab from "@/components/DemoTab";
-import PocTab from "@/components/PocTab";
-import TransitionTab from "@/components/TransitionTab";
-import PipelineTab from "@/components/PipelineTab";
+import type { ProspectShareHints } from "@/components/ProspectTab";
 import SalesStageRail, { stageBodyCopy } from "@/components/SalesStageRail";
 import LoadingCard from "@/components/LoadingCard";
 import ResultsCard from "@/components/ResultsCard";
@@ -29,6 +24,67 @@ import type {
   AccountSuggestionMatch,
 } from "@/lib/accountResolve";
 
+const PipelineTab = dynamic(() => import("@/components/PipelineTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const HypothesisTab = dynamic(() => import("@/components/HypothesisTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const ProspectTab = dynamic(() => import("@/components/ProspectTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const DemoTab = dynamic(() => import("@/components/DemoTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const GongTab = dynamic(() => import("@/components/GongTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const PocTab = dynamic(() => import("@/components/PocTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+const TransitionTab = dynamic(() => import("@/components/TransitionTab"), {
+  loading: () => <TabPanelLoading />,
+});
+
+function TabPanelLoading() {
+  return (
+    <div className="tab-panel-loading" style={{ padding: 24, color: "var(--arize-text-muted, #5a5f6e)" }}>
+      Loading…
+    </div>
+  );
+}
+
+function TabPanel({
+  tab,
+  activeTab,
+  seenTabs,
+  children,
+}: {
+  tab: ShareableTab;
+  activeTab: ShareableTab;
+  seenTabs: ReadonlySet<ShareableTab>;
+  children: ReactNode;
+}) {
+  if (!seenTabs.has(tab)) return null;
+  return (
+    <div
+      role="tabpanel"
+      id={`stillness-panel-${tab}`}
+      aria-hidden={activeTab !== tab}
+      aria-label={tab}
+      className={`tab-content${activeTab === tab ? " active" : ""}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 type ResultTab = Exclude<ShareableTab, "pipeline" | "pocpot" | "transition">;
 
 type SuggestUi = {
@@ -43,6 +99,8 @@ function HomeContent() {
   /** Deferred from URL so server and client first paint match (useSearchParams differs on SSR). */
   const [shareQuery, setShareQuery] = useState<ShareQuery>({});
   const [activeTab, setActiveTab] = useState<ShareableTab>("prospect");
+  /** Tabs stay mounted after first visit so in-tab form state is preserved. */
+  const [seenTabs, setSeenTabs] = useState(() => new Set<ShareableTab>(["prospect"]));
   const [shareHints, setShareHints] = useState<Partial<ShareQuery>>({});
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
@@ -56,8 +114,21 @@ function HomeContent() {
   useEffect(() => {
     const q = parseShareQuery(new URLSearchParams(queryString));
     setShareQuery(q);
-    if (q.tab) setActiveTab(q.tab);
+    if (q.tab) {
+      const tab = q.tab;
+      setActiveTab(tab);
+      setSeenTabs((prev) => new Set(prev).add(tab));
+    }
   }, [queryString]);
+
+  useEffect(() => {
+    setSeenTabs((prev) => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
 
   const mergeShareHints = useCallback((patch: Partial<ShareQuery>) => {
     setShareHints((prev) => ({ ...prev, ...patch }));
@@ -240,10 +311,10 @@ function HomeContent() {
           </div>
 
           <div className="tab-content-wrapper">
-            <div className={`tab-content${activeTab === "pipeline" ? " active" : ""}`}>
+            <TabPanel tab="pipeline" activeTab={activeTab} seenTabs={seenTabs}>
               <PipelineTab />
-            </div>
-            <div className={`tab-content${activeTab === "hypothesis" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="hypothesis" activeTab={activeTab} seenTabs={seenTabs}>
               <HypothesisTab
                 onLoading={onLoading}
                 onResult={makeOnResult("hypothesis")}
@@ -251,8 +322,8 @@ function HomeContent() {
                 urlQuery={shareQuery}
                 onShareHintsChange={(h) => mergeShareHints(h)}
               />
-            </div>
-            <div className={`tab-content${activeTab === "prospect" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="prospect" activeTab={activeTab} seenTabs={seenTabs}>
               <ProspectTab
                 onLoading={onLoading}
                 onResult={makeOnResult("prospect")}
@@ -260,8 +331,8 @@ function HomeContent() {
                 urlQuery={shareQuery}
                 onShareHintsChange={onProspectShareHints}
               />
-            </div>
-            <div className={`tab-content${activeTab === "demo" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="demo" activeTab={activeTab} seenTabs={seenTabs}>
               <DemoTab
                 onLoading={onLoading}
                 onResult={makeOnResult("demo")}
@@ -269,16 +340,16 @@ function HomeContent() {
                 urlQuery={shareQuery}
                 onShareHintsChange={(h) => mergeShareHints(h)}
               />
-            </div>
-            <div className={`tab-content${activeTab === "gong" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="gong" activeTab={activeTab} seenTabs={seenTabs}>
               <GongTab onLoading={onLoading} onResult={makeOnResult("gong")} />
-            </div>
-            <div className={`tab-content${activeTab === "pocpot" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="pocpot" activeTab={activeTab} seenTabs={seenTabs}>
               <PocTab onLoading={onLoading} resolveAccount={resolveAccount} />
-            </div>
-            <div className={`tab-content${activeTab === "transition" ? " active" : ""}`}>
+            </TabPanel>
+            <TabPanel tab="transition" activeTab={activeTab} seenTabs={seenTabs}>
               <TransitionTab onLoading={onLoading} resolveAccount={resolveAccount} />
-            </div>
+            </TabPanel>
           </div>
         </div>
       </div>

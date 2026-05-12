@@ -234,6 +234,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .stage-card.pipeline-shelf-card { align-items: flex-start; }
 }
 
+@media (max-width: 480px) {
+  .pipeline-shelf-card .stage-card-blurb {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+    -webkit-box-orient: unset;
+  }
+}
+
 .stage-rail {
   list-style: none; margin: 0; padding: 0;
   display: grid; grid-template-columns: repeat(5, 1fr);
