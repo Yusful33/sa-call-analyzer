@@ -94,6 +94,7 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
     "content-disposition",
     "x-demo-arize-push",
     "x-demo-arize-push-detail",
+    "x-demo-project-name",
   ];
   for (const name of forwardHeaders) {
     const value = upstream.headers.get(name);

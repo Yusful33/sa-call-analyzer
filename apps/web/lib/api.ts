@@ -137,6 +137,8 @@ export async function apiPostBlob(
   blob: Blob;
   filename: string;
   demoArizePush?: { status: DemoArizePushStatus; detail?: string };
+  /** Arize **model** project slug used by generator.py / server push (from `X-Demo-Project-Name`). */
+  demoProjectName?: string;
 }> {
   const res = await fetch(`${baseUrlForPath(path)}${path}`, {
     method: "POST",
@@ -169,6 +171,7 @@ export async function apiPostBlob(
   }
 
   let demoArizePush: { status: DemoArizePushStatus; detail?: string } | undefined;
+  let demoProjectName: string | undefined;
   if (path.includes("generate-demo")) {
     const raw = (res.headers.get("X-Demo-Arize-Push") || "disabled").toLowerCase();
     const status: DemoArizePushStatus =
@@ -177,9 +180,16 @@ export async function apiPostBlob(
       status,
       detail: res.headers.get("X-Demo-Arize-Push-Detail") || undefined,
     };
+    const pn = (res.headers.get("X-Demo-Project-Name") || "").trim();
+    if (pn) demoProjectName = pn;
   }
 
-  return { blob, filename, ...(demoArizePush ? { demoArizePush } : {}) };
+  return {
+    blob,
+    filename,
+    ...(demoArizePush ? { demoArizePush } : {}),
+    ...(demoProjectName ? { demoProjectName } : {}),
+  };
 }
 
 export function apiStreamPost(

@@ -191,6 +191,7 @@ app.add_middleware(
         "Content-Disposition",
         "X-Demo-Arize-Push",
         "X-Demo-Arize-Push-Detail",
+        "X-Demo-Project-Name",
     ],
 )
 
@@ -1616,7 +1617,9 @@ async def generate_demo(request: GenerateDemoRequest):
 
         filename = f"{metadata['folder_name']}.zip"
 
-        push_headers: dict[str, str] = {}
+        push_headers: dict[str, str] = {
+            "X-Demo-Project-Name": str(metadata["project_name"]),
+        }
         if should_auto_push_demo_traces_to_arize():
             space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
             api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
@@ -1641,6 +1644,11 @@ async def generate_demo(request: GenerateDemoRequest):
             push_headers["X-Demo-Arize-Push-Detail"] = (
                 "Set DEMO_AUTO_PUSH_TO_ARIZE=1 and ARIZE_SPACE_ID + ARIZE_API_KEY on the API "
                 "to send traces when generating; otherwise run generator.py from the ZIP locally."
+            )
+            logger.info(
+                "generate_demo: Arize push skipped (DEMO_AUTO_PUSH_TO_ARIZE not truthy); "
+                "project_name=%s",
+                metadata.get("project_name"),
             )
 
         return Response(

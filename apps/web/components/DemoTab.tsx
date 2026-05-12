@@ -162,6 +162,7 @@ export default function DemoTab({
   const [generatingDemo, setGeneratingDemo] = useState(false);
   const [demoGenerated, setDemoGenerated] = useState(false);
   const [demoPushStatus, setDemoPushStatus] = useState<"success" | "failed" | "skipped" | "disabled" | null>(null);
+  const [lastDemoProjectName, setLastDemoProjectName] = useState<string | null>(null);
   const urlHydrated = useRef(false);
 
   useEffect(() => {
@@ -319,11 +320,13 @@ export default function DemoTab({
         additional_context: additionalContext.trim() || undefined,
       };
 
-      const { blob, filename, demoArizePush } = await apiPostBlob(
+      const { blob, filename, demoArizePush, demoProjectName } = await apiPostBlob(
         "/api/generate-demo",
         body,
         `${accountName.trim().toLowerCase().replace(/\s+/g, "_")}_demo.zip`
       );
+
+      setLastDemoProjectName(demoProjectName?.trim() || null);
 
       // Download the file
       const url = URL.createObjectURL(blob);
@@ -340,20 +343,26 @@ export default function DemoTab({
       onLoading("");
 
       if (demoArizePush?.status === "success") {
-        toast.success("Demo complete! Traces, evaluations, dataset, experiments, and prompts sent to Arize.");
+        toast.success(
+          "Demo complete! Traces, evaluations, dataset, experiments, and prompts sent to Arize." +
+            (demoProjectName ? ` Project: ${demoProjectName}` : "")
+        );
       } else if (demoArizePush?.status === "failed") {
         toast.warning(
           "ZIP downloaded, but full workflow failed. Check API logs or run generator.py locally with --full flag. " +
-            (demoArizePush.detail ? demoArizePush.detail.slice(0, 280) : "")
+            (demoArizePush.detail ? demoArizePush.detail.slice(0, 280) : "") +
+            (demoProjectName ? ` Project name: ${demoProjectName}` : "")
         );
       } else if (demoArizePush?.status === "skipped") {
         toast.warning(
           "ZIP downloaded. Server push is enabled but Arize credentials are missing on the API. " +
-            (demoArizePush.detail || "")
+            (demoArizePush.detail || "") +
+            (demoProjectName ? ` Project name: ${demoProjectName}` : "")
         );
       } else {
         toast.info(
-          "ZIP downloaded. Run generator.py from the ZIP locally with your Arize credentials to push data."
+          "ZIP downloaded. Server did not push to Arize (see banner). If you expected a push, set DEMO_AUTO_PUSH_TO_ARIZE=1 on the API project, save the value, redeploy, then try again." +
+            (demoProjectName ? ` When data exists, open Arize model project: ${demoProjectName}` : "")
         );
       }
     } catch (err: any) {
@@ -399,9 +408,22 @@ export default function DemoTab({
                   ? "Your demo ZIP was downloaded. The full workflow was executed: traces + evaluations + dataset + experiments + prompts are now in your Arize space."
                   : demoPushStatus === "failed"
                     ? "Your demo ZIP was downloaded, but the push to Arize failed. Check the ZIP for generator.py and run it locally with your Arize credentials."
-                    : "Your demo ZIP was downloaded. To push data to Arize, run generator.py from the ZIP with your ARIZE_SPACE_ID and ARIZE_API_KEY.")
+                    : "Your demo ZIP was downloaded. The server did not run the Arize ingest step (push is disabled or credentials missing). Set DEMO_AUTO_PUSH_TO_ARIZE=1 on the **arize-gtm-stillness-api** Vercel project, confirm the value is saved (not an empty sensitive field), redeploy the API, then generate again—or run generator.py from the ZIP with ARIZE_SPACE_ID and ARIZE_API_KEY.")
               : "Click below to generate and execute the full demo workflow: traces, evaluations, dataset, 4-experiment grid, and prompt hub entry will be sent to Arize."}
           </p>
+          {demoGenerated && lastDemoProjectName && (
+            <p
+              style={{
+                margin: "0 0 12px 0",
+                fontSize: "0.88em",
+                color: "#333",
+                fontFamily: "ui-monospace, monospace",
+                wordBreak: "break-all",
+              }}
+            >
+              <strong>Arize model project name:</strong> {escapeHtml(lastDemoProjectName)}
+            </p>
+          )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
               type="button"
@@ -498,6 +520,7 @@ export default function DemoTab({
               setGongCallsAnalyzed(0);
               setDemoGenerated(false);
               setDemoPushStatus(null);
+              setLastDemoProjectName(null);
             }}
           >
             Start over
