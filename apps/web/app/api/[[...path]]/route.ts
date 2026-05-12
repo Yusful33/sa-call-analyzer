@@ -76,12 +76,31 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
   }
 
   const upstream = await fetch(target, init);
-  const bodyText = await upstream.text();
+  const contentType = upstream.headers.get("content-type") || "application/json";
+  
+  // Use arrayBuffer for binary content (ZIP files, images, etc.)
+  const isBinary = contentType.includes("application/zip") || 
+                   contentType.includes("application/octet-stream") ||
+                   contentType.includes("image/");
+  const body = isBinary ? await upstream.arrayBuffer() : await upstream.text();
 
-  // Build response headers
+  // Build response headers - forward important headers from upstream
   const responseHeaders: Record<string, string> = {
-    "content-type": upstream.headers.get("content-type") || "application/json",
+    "content-type": contentType,
   };
+
+  // Forward headers needed for file downloads and custom API responses
+  const forwardHeaders = [
+    "content-disposition",
+    "x-demo-arize-push",
+    "x-demo-arize-push-detail",
+  ];
+  for (const name of forwardHeaders) {
+    const value = upstream.headers.get(name);
+    if (value) {
+      responseHeaders[name] = value;
+    }
+  }
 
   // Add caching headers for cacheable GET endpoints
   const cacheDuration = getCacheDuration(method, pathSegments);
@@ -93,7 +112,7 @@ async function proxy(request: NextRequest, pathSegments: string[] | undefined): 
     responseHeaders["cache-control"] = "no-store";
   }
 
-  return new Response(bodyText, {
+  return new Response(body, {
     status: upstream.status,
     headers: responseHeaders,
   });

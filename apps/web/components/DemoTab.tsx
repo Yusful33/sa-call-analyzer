@@ -161,6 +161,7 @@ export default function DemoTab({
   const [gongCallsAnalyzed, setGongCallsAnalyzed] = useState<number>(0);
   const [generatingDemo, setGeneratingDemo] = useState(false);
   const [demoGenerated, setDemoGenerated] = useState(false);
+  const [demoPushStatus, setDemoPushStatus] = useState<"success" | "failed" | "skipped" | "disabled" | null>(null);
   const urlHydrated = useRef(false);
 
   useEffect(() => {
@@ -335,6 +336,7 @@ export default function DemoTab({
       URL.revokeObjectURL(url);
 
       setDemoGenerated(true);
+      setDemoPushStatus(demoArizePush?.status ?? "disabled");
       onLoading("");
 
       if (demoArizePush?.status === "success") {
@@ -348,6 +350,10 @@ export default function DemoTab({
         toast.warning(
           "ZIP downloaded. Server push is enabled but Arize credentials are missing on the API. " +
             (demoArizePush.detail || "")
+        );
+      } else {
+        toast.info(
+          "ZIP downloaded. Run generator.py from the ZIP locally with your Arize credentials to push data."
         );
       }
     } catch (err: any) {
@@ -368,18 +374,32 @@ export default function DemoTab({
         <div
           style={{
             padding: 16,
-            background: demoGenerated ? "#e8f5e9" : "#e3f2fd",
+            background: demoGenerated 
+              ? (demoPushStatus === "success" ? "#e8f5e9" : demoPushStatus === "failed" ? "#fff3e0" : "#e3f2fd")
+              : "#e3f2fd",
             borderRadius: 8,
             marginBottom: 16,
-            border: demoGenerated ? "1px solid #a5d6a7" : "1px solid #90caf9",
+            border: demoGenerated 
+              ? (demoPushStatus === "success" ? "1px solid #a5d6a7" : demoPushStatus === "failed" ? "1px solid #ffcc80" : "1px solid #90caf9")
+              : "1px solid #90caf9",
           }}
         >
           <h4 style={{ margin: "0 0 8px 0", fontSize: "1em" }}>
-            {demoGenerated ? "✓ Demo Generated Successfully" : "Generate Demo Files"}
+            {demoGenerated 
+              ? (demoPushStatus === "success" 
+                  ? "✓ Demo Generated & Pushed to Arize" 
+                  : demoPushStatus === "failed" 
+                    ? "⚠ Demo Generated (Push Failed)"
+                    : "✓ Demo ZIP Downloaded")
+              : "Generate Demo Files"}
           </h4>
           <p style={{ color: "#555", fontSize: "0.9em", margin: "0 0 12px 0" }}>
             {demoGenerated
-              ? "Your demo ZIP was downloaded. The full workflow was executed: traces + evaluations + dataset + experiments + prompts are now in your Arize space."
+              ? (demoPushStatus === "success"
+                  ? "Your demo ZIP was downloaded. The full workflow was executed: traces + evaluations + dataset + experiments + prompts are now in your Arize space."
+                  : demoPushStatus === "failed"
+                    ? "Your demo ZIP was downloaded, but the push to Arize failed. Check the ZIP for generator.py and run it locally with your Arize credentials."
+                    : "Your demo ZIP was downloaded. To push data to Arize, run generator.py from the ZIP with your ARIZE_SPACE_ID and ARIZE_API_KEY.")
               : "Click below to generate and execute the full demo workflow: traces, evaluations, dataset, 4-experiment grid, and prompt hub entry will be sent to Arize."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -477,6 +497,7 @@ export default function DemoTab({
               setDataSourcesNote(null);
               setGongCallsAnalyzed(0);
               setDemoGenerated(false);
+              setDemoPushStatus(null);
             }}
           >
             Start over
