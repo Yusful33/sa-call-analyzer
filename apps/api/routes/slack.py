@@ -16,6 +16,7 @@ import logging
 import os
 import time
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
@@ -83,6 +84,12 @@ def _is_duplicate_event(event_id: str) -> bool:
 
     _processed_events[event_id] = now
     return False
+
+
+def _parse_urlencoded_form(body: bytes) -> dict[str, str]:
+    """Parse Slack's application/x-www-form-urlencoded payload without python-multipart."""
+    parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    return {key: values[0] if values else "" for key, values in parsed.items()}
 
 
 def configure_slack_routes(slack_bot: "SlackBot") -> APIRouter:
@@ -262,7 +269,7 @@ async def slack_commands(
     if not _verify_slack_signature(body, x_slack_request_timestamp or "", x_slack_signature or ""):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    form_data = await request.form()
+    form_data = _parse_urlencoded_form(body)
     command = form_data.get("command", "")
     text = form_data.get("text", "")
     channel_id = form_data.get("channel_id", "")
@@ -304,7 +311,7 @@ async def slack_interactions(
     if not _verify_slack_signature(body, x_slack_request_timestamp or "", x_slack_signature or ""):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    form_data = await request.form()
+    form_data = _parse_urlencoded_form(body)
     payload_str = form_data.get("payload", "{}")
 
     try:
