@@ -1,7 +1,11 @@
 """Application configuration using pydantic-settings."""
 
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
+
+from model_routing import resolve_model_id
 
 
 class Settings(BaseSettings):
@@ -13,7 +17,7 @@ class Settings(BaseSettings):
 
     # LLM
     anthropic_api_key: str = ""
-    llm_model: str = "claude-sonnet-4-20250514"
+    llm_model: str = "claude-sonnet-4-5"
 
     # Web search
     brave_api_key: str = ""
@@ -30,6 +34,12 @@ class Settings(BaseSettings):
 
     # App settings
     debug: bool = False
+
+    @field_validator("llm_model", mode="before")
+    @classmethod
+    def _normalize_llm_model(cls, value: object) -> str:
+        raw = str(value or "claude-sonnet-4-5").strip()
+        return resolve_model_id(raw) or raw
 
     class Config:
         env_file = ".env"

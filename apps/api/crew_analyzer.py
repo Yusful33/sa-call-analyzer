@@ -28,6 +28,7 @@ from models import (
     RecapSlideData
 )
 from dotenv import load_dotenv
+from model_routing import resolve_model_id
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from observability import force_flush_spans
@@ -49,7 +50,7 @@ class SACallAnalysisCrew:
     def __init__(self):
         # Determine which LLM to use based on environment
         self.use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
-        self.default_model = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
+        self.default_model = resolve_model_id(os.getenv("MODEL_NAME", "claude-sonnet-4-5")) or "claude-sonnet-4-5"
 
         # Initialize with default model (LangChain chat model)
         self._chat = None

@@ -6,9 +6,12 @@ import os
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from model_routing import resolve_model_id
+
 
 def build_chat_model(model_name: str, *, temperature: float = 0.7) -> BaseChatModel:
     """Return a LangChain chat model for the given model id (Anthropic or OpenAI, or LiteLLM proxy)."""
+    model_name = resolve_model_id(model_name) or model_name
     use_litellm = os.getenv("USE_LITELLM", "false").lower() == "true"
     if use_litellm:
         from langchain_openai import ChatOpenAI

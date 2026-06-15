@@ -6,7 +6,9 @@ from typing import Optional
 
 MODEL_ID_ALIASES = {
     "claude-3-5-haiku-20241022": "claude-haiku-4-5",
-    "claude-3-5-sonnet-20241022": "claude-sonnet-4-20250514",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-5",
+    # Retired Sonnet 4 snapshot — Anthropic returns 404 for this ID as of mid-2026.
+    "claude-sonnet-4-20250514": "claude-sonnet-4-5",
 }
 
 

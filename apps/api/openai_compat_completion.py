@@ -33,7 +33,8 @@ class _Completion:
 
 _MODEL_ALIASES = {
     "claude-3-5-haiku-20241022": "claude-haiku-4-5",
-    "claude-3-5-sonnet-20241022": "claude-sonnet-4-20250514",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-5",
+    "claude-sonnet-4-20250514": "claude-sonnet-4-5",
 }
 
 
