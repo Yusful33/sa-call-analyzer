@@ -78,21 +78,20 @@ jobs:
             --scope=${{ env.VERCEL_ORG_ID }} \
             --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Smoke-test public URL
+      - name: Smoke-test deployment
         run: |
           set -euo pipefail
-          # Give the alias rebind a moment to propagate, then verify the public URL
-          # is healthy. If /health is unhealthy or the alias still points at an
-          # older deployment, fail the workflow loudly.
           sleep 5
-          response=$(curl -sS --max-time 30 "https://${PUBLIC_ALIAS}/health")
+          health_url="${{ steps.deploy.outputs.deployment_url }}/health"
+          echo "Checking $health_url"
+          response=$(vercel curl "$health_url" --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
           echo "$response" | python3 -m json.tool
           status=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))')
           if [ "$status" != "healthy" ]; then
-            echo "::error::Public alias /health returned status=$status"
+            echo "::error::Deployment /health returned status=$status"
             exit 1
           fi
-          echo "OK: ${PUBLIC_ALIAS} reports status=healthy"
+          echo "OK: deployment reports status=healthy"
 
       - name: Summary
         if: always()

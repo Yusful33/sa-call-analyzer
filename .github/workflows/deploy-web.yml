@@ -54,14 +54,11 @@ jobs:
       - name: Pull Vercel project settings
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }}
 
-      - name: Build for Vercel
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy prebuilt artifact
+      - name: Deploy to production
         id: deploy
         run: |
           set -euo pipefail
-          deployment_url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
+          deployment_url=$(vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
           echo "Deployed: $deployment_url"
 
@@ -73,21 +70,20 @@ jobs:
             --scope=${{ env.VERCEL_ORG_ID }} \
             --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Smoke-test public URL
+      - name: Smoke-test deployment
         run: |
           set -euo pipefail
-          # The Next.js project exposes a tiny Edge-middleware health endpoint at
-          # /api/health (separate from the FastAPI /health that lives behind the
-          # /api/* proxy). Verifying it confirms the alias rebind landed.
           sleep 5
-          response=$(curl -sS --max-time 30 "https://${PUBLIC_ALIAS}/api/health")
+          health_url="https://${PUBLIC_ALIAS}/api/health"
+          echo "Checking $health_url"
+          response=$(vercel curl "$health_url" --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
           echo "$response" | python3 -m json.tool
           ok=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok",""))')
           if [ "$ok" != "True" ]; then
-            echo "::error::Public alias /api/health returned ok=$ok"
+            echo "::error::Deployment /api/health returned ok=$ok"
             exit 1
           fi
-          echo "OK: ${PUBLIC_ALIAS} reports ok=true"
+          echo "OK: deployment reports ok=true"
 
       - name: Summary
         if: always()
