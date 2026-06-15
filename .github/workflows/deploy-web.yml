@@ -71,12 +71,14 @@ jobs:
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Smoke-test deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           sleep 5
           health_url="https://${PUBLIC_ALIAS}/api/health"
           echo "Checking $health_url"
-          response=$(vercel curl "$health_url" --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ env.VERCEL_ORG_ID }})
+          response=$(vercel curl "$health_url" --scope=${{ env.VERCEL_ORG_ID }})
           echo "$response" | python3 -m json.tool
           ok=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok",""))')
           if [ "$ok" != "True" ]; then
